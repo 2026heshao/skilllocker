@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# 运行时数据
+kit/desktop_profile/
+kit/skillkit.db
+kit/launch.log
+kit/ui-drag.log
+
+# 技能商店缓存（从 skillhub 下载的数据）
+store/
+
+# 本地工作目录
+%TEMP%/
+.ai-memory/
+.scratch/
+.screenshots/
+.trae-html-share-packages/
+
+# Windows
+*.lnk
+Thumbs.db
+Desktop.ini
+
+# macOS
+.DS_Store
