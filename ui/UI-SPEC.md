@@ -1,7 +1,11 @@
 # skillkit · Skill Library — 桌面端 UI 实现规格
 
+> ⚠️ **分类系统已升级（v0.2.0）**：「分类（多选 cats）」相关章节已被「分类文件夹 + 卡片网格视图」取代，
+> 实施以 [`SPEC-category-folders.md`](SPEC-category-folders.md) 为准（交互基准：`design-category-folders.html`），
+> 被取代处均带「⚠️ 已取代」标注；未提及部分本规格继续有效。
+>
 > 交付目录：`D:\skillkit\ui\`　设计稿尺寸：1440 × 900（桌面默认窗口 1200 × 760）　最小可用尺寸：1180 × 720
-> 版本：v0.1.0　快照时间：2026-10-29 22:16　数据源：`D:\skillkit\store` + `D:\skillkit\kit\skillkit.db`
+> 版本：v0.2.0（v0.1.0 基础上落地分类文件夹）　快照时间：2026-10-29 22:16　数据源：`D:\skillkit\store` + `D:\skillkit\kit\skillkit.db`
 
 ---
 
@@ -14,6 +18,7 @@
 | `data.js` | 真实数据快照 | `window.SKILLKIT_DATA`，51 共有 + 2 独有（仅 `file://` 原型模式使用） |
 | `app.js` | 全部交互逻辑 | 双模式：桌面端写 `skillkit.db`，原型写 localStorage |
 | `bridge.js` | pywebview 桥封装 | 只在 `?desktop=1` 下等待 `window.pywebview.api`，否则立即回退 |
+| [`SPEC-boot-animation.md`](SPEC-boot-animation.md) | 启动加载动画实施规格（v0.2.1） | 方案 A · 徽章汇入；交互基准 [`design-boot-animation.html`](design-boot-animation.html)，纯展示层，`bridge.js` / `data.js` 零改动 |
 | `UI-SPEC.md` | 本文档 | 尺寸、状态、数据契约、后端对接 |
 
 三种打开方式：
@@ -35,13 +40,13 @@
 │ Logo skillkit  SKILL LIBRARY │ 全局搜索 Ctrl+K │ LOCAL 主题 窗口键 │
 ├──────────┬───────────────────────────────────────┬───────────────┤
 │ 侧栏 216 │ 工作区（flex）                        │ 检查器 344    │
-│ 仓库卡片 │ 顶栏 66：标题 / 副标题 / 排序 / 密度  │ Skill Detail  │
+│ 仓库卡片 │ 顶栏 66：视图分段/标题/排序/密度    │ Skill Detail  │
 │ 看板 ×3  │ 看板切换卡片 ×3（80 高）              │ 显示名称      │
-│ 库统计   │ 列表（表头 36 + 行 60 + footer 36）   │ 分类（多选）  │
-│ 分类导航 │                                       │ 备注          │
+│ 库统计   │ 网格 / 列表（表头 36 + 行 60 + 脚 36）│ 归属分类(单选)│
+│ 分类文件夹│                                      │ 备注          │
 │ 设置入口 │                                       │ 分发覆盖 / 差异│
 ├──────────┴───────────────────────────────────────┴───────────────┤
-│ 状态栏 30：共有/独有 · 仓库路径 · 已编辑 · 快照时间              │
+│ 状态栏 30：共有/分类 · 仓库路径 · 已编辑 · 快照时间              │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -53,9 +58,9 @@
 | 独有技能 `unique` | 只存在于某一个 agent：中央仓库无同名（`unique`）或同名但内容不同（`overridden`） | 2 条（`codex/.system`、`workbuddy/pdf`） | `tool + '/' + name`（如 `workbuddy/pdf`） |
 | 智能体 `agents` | 本机已知 agent 的三态 + 分发开关（含 `external[]`：agent 自己读取的外部技能目录统计） | 10 个（6 已连接、4 已关闭、0 未安装） | `tool.key`（如 `claude_code`） |
 
-智能体行不是 skill：列表列义改为「AGENT / 状态 / 目录 / 分发开关」，状态筛为 全部 / 已连接 / 已关闭 / 未安装；开关打开=`do_sync(only_tools=[key])` 补 junction，关闭=二次确认后 `unlink_tool()` 只撤链接，中央实体不动；未安装的 agent 开关禁用。右侧详情栏展示目录、已链接数、冲突数与「打开目录 / 重新探测」。
+智能体行不是 skill：最左与共有 / 独有看板同为 26×26 序号列（按当前列表顺序 1..N，状态筛选后重新从 1 编，纯展示），列表列义为「序号 / AGENT / 状态 / 目录 / 分发开关」，状态筛为 全部 / 已连接 / 已关闭 / 未安装；开关打开=`do_sync(only_tools=[key])` 补 junction，关闭=二次确认后 `unlink_tool()` 只撤链接，中央实体不动；未安装的 agent 开关禁用。右侧详情栏展示目录、已链接数、冲突数与「打开目录 / 重新探测」。
 
-**外部来源徽标**：agent 若有第二条读取路径（由 `adapters.json` 的 `extra_dirs` 声明，本机当前只有 Trae CN → `~/.agents/skills`），且那里存在与中央仓库同名的实体，行标题右侧出现 `.ext-badge`「外部 N」（warning-soft 底、9.5px mono、16 高），hover 提示完整路径与「本工具不分发、不删除这里」；详情栏多出「外部来源」行与一段黄色说明（N 个内容一致 / 不同）。它只做检测展示，不改变开关行为——关掉开关后这些实体仍会被该 agent 加载。
+**外部来源徽标**：agent 若有第二条读取路径（由 `adapters.json` 的 `extra_dirs` 声明，本机当前只有 Trae CN → `~/.agents/skills`），且那里存在与中央仓库同名的实体，行标题右侧出现 `.ext-badge`「外部 N」（warning-soft 底、9.5px mono、16 高），hover 提示完整路径与「本工具不分发这些目录，开关不影响它们；移除单个 skill 可在独有看板里卸载」；详情栏多出「外部来源」行与一段黄色说明（N 个内容一致 / 不同）。它只做检测展示，不改变开关行为——关掉开关后这些实体仍会被该 agent 加载。
 
 > key 的差异是刻意的：`workbuddy/pdf` 在独有看板改名，不会污染共有看板里的 `pdf`。
 
@@ -63,7 +68,8 @@
 
 1. **更改显示名称** — 只改界面标题，磁盘目录名不变。
 2. **备注** — 400 字，用于记用途 / 坑 / 来源。
-3. **分类** — 7 个预置分类多选 + 自定义分类。
+3. **归属分类** — ⚠️ 已取代：单归属文件夹（一个 skill 最多属于一个文件夹，
+   不归档 = 未归档），见 `SPEC-category-folders.md`；旧多选 cats 已废弃。
 
 其余能力全部收敛为「只读信息」：分发覆盖、冲突差异查看、复制路径、导出 JSON。
 
@@ -145,6 +151,9 @@
 | 缓动 `--spring` | `cubic-bezier(.34,1.56,.64,1)` |
 | 时长 | 120ms（微交互）/ 180ms（标准）/ 300ms（状态切换） |
 | 行进入 | `rowIn 220ms`，`opacity 0→1` + `translateY(3px→0)`，每行 +12ms，最多 14 行错峰 |
+| boot 入场 | logo `bootPop 480ms --spring`；外环 `bootRing 2.2s` 循环；扫光 `bootShine 2.6s`；word/chips/agents/foot `bootFadeUp 360ms` 依次 +80/120/160/200ms；chip `bootChipIn 280ms --spring` / `bootChipOut 200ms` |
+| boot 时间轴 | 七相位 0→4940ms（详见 SPEC-boot-animation.md §4）；真实 R 到达则剩余提速 `clamp(剩余/1.2s, 1, 4)`，总时长 ≈ `max(R + 1.2s, 1.8s)`；`?noboot=1` 关闭 |
+| 界面级联 | reveal 时 `[data-boot-rv]` 六大块 `220ms --ease`，每块 +12ms（--rv 0…6） |
 
 ---
 
@@ -178,7 +187,7 @@ window: 设计稿 1440 × 900（桌面默认 1200 × 760，min 1180 × 720），
 | 仓库卡片 | padding 11，圆角 12；路径 mono 10.5；`49 skills` 数字 13；健康条 4 高（绿→`#12b981`） |
 | 看板导航 ×3 | 40 高，圆角 9，图标 15，右侧计数徽标 20 × 18（mono/display 10.5px）；激活态 = `accent-soft` 底 + 左侧 3px 实色条；智能体用 teal |
 | 库统计 2 × 2 | 数字 13，标签 10.5；无边框，仅间距 |
-| 分类导航 | 32 高，圆点 `catdot` 7 × 7，计数徽标 17 高；**计数为 0 的分类不渲染** |
+| 分类文件夹导航 | ⚠️ 已取代：32 高，圆点 `catdot` 7 × 7，计数徽标 17 高；**计数为 0 的分类不渲染** |
 | 底部 | 设置按钮 32 高 + 版本/快照 10.5px |
 
 ### 3.4 工作区
@@ -190,13 +199,14 @@ window: 设计稿 1440 × 900（桌面默认 1200 × 760，min 1180 × 720），
 | 看板卡 | 80 高（紧凑 70，≤1200 → 76），三列等宽 gap 10，圆角 14，padding 0 14 |
 |  └ 图标 | 40 × 40，圆角 11；激活时实色（共有=accent，独有=violet）+ 顶部 2px 渐变条 |
 |  └ 数字 | 26px，激活时用对应主色 |
-| 列表上方 | 不设分类/状态 chips；筛选统一在左栏分类导航完成，看板卡与列表之间仅留 12px |
+| 列表上方 | ⚠️ 已取代：共有看板顶部新增视图分段（网格 / 列表）；进入文件夹时在列表卡上方渲染面包屑（含重命名 / 删除与「移出分类」投放区） |
 | 列表卡 | 圆角 14，overflow hidden；表头 36，行 60 |
 | 表头 | 10px 大写、字距 0.12em、`surface-2` 底 |
 | 行网格 | `34px minmax(196px,1.3fr) 168px minmax(150px,1fr) 132px 18px`，gap 10，padding 0 14 |
 | 行内元素 | 首列序号 26 × 26 圆角 8（`--surface-3` 底、11.5px 等宽数字 `tabular-nums`，按当前列表顺序 1..N，纯展示；选中行数字转 accent）；名称 13；徽标 19 高；分类 chip 20 高；覆盖条 7 段 × 9 × 7，gap 2；尾部箭头 12 |
 | 行状态 | hover `surface-2`；选中 `accent 6%` + 左侧 2px accent；冲突选中 `danger 7%` + 左侧 2px danger |
-| 独有看板分组 | 每 agent 一条 sticky 分割线（32 高，紧凑 26）：18 × 18 mark 块 + agent 名 + `N 个 skill · n 同名覆盖` + 通栏细线；组顺序按 unique 扫描顺序，组内保持当前排序，序号跨组连续 1..N；滚动时当前组名钉在列表顶部 |
+| 独有看板分组 | 仅根层级 + 列表视图：每 agent 一条 sticky 分割线（32 高，紧凑 26）：18 × 18 mark 块 + agent 名 + `N 个 skill · n 同名覆盖` + 通栏细线；组顺序按 unique 扫描顺序，组内保持当前排序，序号跨组连续 1..N；滚动时当前组名钉在列表顶部。agent 夹内与网格视图不走分组（平铺行 / 卡片流） |
+| 独有看板网格 | 与共有看板同款 folder-card 视觉：每个 agent 一张 agent 文件夹卡（bot 图标、颜色按 agent key 稳定散列取调色板、`N 个 skill` + 前 3 个 skill 预览 chip），点击进入该 agent 的独有技能（5 列列表 + 面包屑）；搜索态输出文件卡流（副标题 = 来源 agent）。独有 skill 不能跨 agent 移动：卡片不可拖拽、无 ⋯ 菜单、面包屑根节点不是投放区 |
 | footer | 36 高，左提示 + 右计数，11px |
 
 ### 3.5 检查器（344px）
@@ -212,7 +222,7 @@ window: 设计稿 1440 × 900（桌面默认 1200 × 760，min 1180 × 720），
 | 差异块 | `danger-soft` 底 + 22% 红边，圆角 9，含 28 高「查看文件差异」按钮 |
 | 元信息 | 行高 ≥32，左列 58 宽灰标签，右列 mono 10.5 可省略 |
 | 路径盒 | padding 7 / 8，圆角 7，mono，右 22 × 22 复制按钮 |
-| 删除区 | `danger-soft` 底 + 22% 红边，圆角 10；整宽按钮「彻底删除 skill / 删除本地副本」+ 10.5 说明 |
+| 删除区 | `danger-soft` 底 + 22% 红边，圆角 10；整宽按钮「彻底删除 skill / 删除本地副本 / 卸载」+ 10.5 说明。独有行三选一：deletable（main 实体）→「删除本地副本」（`delete_skill`）；外部行（extra 目录 / 容器子目录）→「卸载（删除外部目录）」、foreign-link →「摘除链接（卸载）」（均为 `uninstall_unique`，二次确认、危险按钮，卸载文案给出完整路径 / 文件数与「agent 可能重新安装」提示） |
 | 空态 | 居中，图标 40，文案 11 |
 
 ### 3.6 弹窗 / 提示
@@ -244,10 +254,11 @@ window: 设计稿 1440 × 900（桌面默认 1200 × 760，min 1180 × 720），
 | 双击标题栏（桌面端） | 双击标题栏空白 = 最大化 / 还原；同上排除交互控件 |
 | 改名 | 输入即写 `meta[key].display`，**即时落盘不去抖**；行内名称、副标题（原目录名）、已编辑计数即时更新，**不整表重渲染**（避免失焦） |
 | 备注 | 同上；列表备注列同步，空值显示「添加备注…」占位 |
-| 分类 | 点 chip 切换多选；选中写 `cats` 数组；行内最多展示 2 个 + “+N”；新增分类回车或点「+ 添加」写入 `prefs.customCats` 并自动勾选 |
+| 归属分类 | ⚠️ 已取代：检查器「归属分类」单选 chip（未归档 + 各夹 + ＋新建分类），点 chip 即移动并落库；行内第三列输出文件夹 chip（可点击进夹）；列表/网格支持拖拽归档与 ⋯ 菜单移动，详见 `SPEC-category-folders.md` |
 | 搜索 | `Ctrl+K` 聚焦；空格分词按 AND；名称优先（显示名 / 原名 / label，支持连续子串与同段跳字模糊）；只有当前筛选下名称无命中时，才回退到 备注 / 分类名 / 描述（连续子串）；实时过滤 + 计数 `命中 / 总数`；过滤后选中项失效则自动选中首条结果 |
-| 筛选 | 分类 chip 单选；「未分类」筛选无分类项；有筛选时出现「清除」 |
+| 筛选 | ⚠️ 已取代：侧栏为导航（共有 = 全部技能 / 各夹 / 未归档，带计数、可投放；独有 = 全部独有 / 各 agent 文件夹，带计数、可点击；智能体仍为状态筛） |
 | 排序 | 「名称 A→Z」（`localeCompare zh-Hans-CN`）/「最近编辑」 |
+| 视图 | 顶栏分段「网格 / 列表」（共有与独有看板的根层级出现，按看板各记一份偏好 `prefs.views = { shared, unique }`，旧单一 `prefs.view` 首次启动自动迁移，刷新保持）：共有网格 = 分类夹卡片 + 未归档文件卡 + 搜索结果卡流；独有网格 = agent 文件夹卡 + 搜索结果卡流；列表 = 6 列（共有根）/ 5 列（夹内与独有） |
 | 刷新 | 顶栏刷新按钮：桌面端 `rescan()`（同步 adapters.json + 重扫中央仓库）后整套重渲染，toast 报告扫描数与已连接 agent 数；原型只重渲染内置快照。看板 / 筛选 / 选中保留，列表滚动位置恢复；忙碌时按钮转圈并忽略重复点击 |
 | 密度 | 按钮切换 `body.compact`（行 60 → 48） |
 | 主题 | 按钮切换 `body.dark`，图标 moon ↔ sun |
@@ -255,20 +266,23 @@ window: 设计稿 1440 × 900（桌面默认 1200 × 760，min 1180 × 720），
 | 复制路径 | 路径盒按钮 → `navigator.clipboard` + Toast「路径已复制」 |
 | 设置 | `Ctrl+,` 或侧栏入口；主题、密度、动效、显示停用 agent、导出 JSON、清空我的编辑、复制仓库路径、重新探测 |
 | 空态 | 无匹配时隐藏列表体，显示图标 + 「没有匹配的 skill」 + 「清除筛选」 |
-| Esc | 依次关闭弹窗 → 清空搜索 |
+| Esc | 依次关闭弹窗 → ⋯ 菜单 → 清空搜索 → 退出文件夹 |
 | 保存态胶囊 | 隐藏 → 输入中显示「已保存」（`success-soft`），`dirty` 态为 accent |
 
-**分类预置规则（首次运行 seeded 一次）：**
+**归属预置规则（⚠️ 已取代原分类预置）：**
 
 ```
 remotion|video → 视频     mnemosyne|memory → 记忆     aihot → 检索
 pdf|docx|xlsx|pptx → 文档  ^web-|webapp → 前端
 design|taste|stitch|minimalist|brutalist|brandkit|imagegen|image-to-code|redesign|ui-* → 设计
 其余 → 工程
-独有：同名覆盖 → 文档，独占 → 工程
+独有：不参与归档（folder 恒为未归档语义）
 ```
 
-> 预置分类**不计入「已编辑」**：`meta.seed` 记录初始值，只有显示名 / 备注 / 分类偏离初始值才算一次编辑。
+> 规则与旧 `seedCat()` 完全一致（函数更名 `seedFolder`，后端 `seed_category()` 同口径）。
+> 升级迁移把旧 `categories` JSON 首元素回填为 `folder_id`（仅首次加列那一刻跑一次，
+> 之后用户「移出到未归档」不会被反复撤销）；预置归属**不计入「已编辑」**——
+> 已编辑只统计显示名 / 备注（前端 `editedCount()` 与后端 `_edited_count()` 同口径）。
 
 ---
 
@@ -313,8 +327,10 @@ design|taste|stitch|minimalist|brutalist|brandkit|imagegen|image-to-code|redesig
 {
   theme:"light"|"dark", density:"comfortable"|"compact", motion:true,
   showDisabled:true, sort:"name"|"edited", board:"shared"|"unique",
-  customCats:[{id:"mycat-1",label:"我的"}], seeded:true
+  view:"grid"|"list"
 }
+// v0.2.0：customCats / seeded 已废弃，改由 foldersMigrated 标记 + prefs.folders（含自建夹）承载；
+// skill_meta v1 里每条 meta 增加 folder 字段（''=未归档），cats 字段仅作回滚兼容保留不再读写。
 ```
 
 **为什么原型期不写数据库**：UI 只依赖只读快照，避免误改 51 个 junction 的分发状态；确认视觉后一次性接后端（见 §6）。
@@ -346,7 +362,7 @@ create table if not exists skill_meta(
 |---|---|---|
 | `list_boards(con, cfg)` | 返回 `{shared:[...], unique:[...]}`，含每个 skill 的 agent 覆盖、junction/真实目录判定 | 首屏 / 切看板 |
 | `get_meta(con)` | 返回全部 `skill_meta` 行（供改名 / 备注 / 分类回填） | 首屏 |
-| `set_meta(con, scope, key, field, value)` | 写 `display_name` / `note` / `categories`，刷新 `updated_at` | 三个编辑框、分类 chip |
+| `set_meta(con, scope, key, payload)` | ⚠️ 已取代：一次性提交 `{display, note, folder}`，`folder` 仅 shared 生效（''=未归档，缺省=保留原归属）；`categories` 列读旧值原样写回（回滚兼容） | 三个编辑框、归属 chip、拖拽 / 菜单移动 |
 | `conflict_detail(con, cfg, tool, name)` | 返回中央/本地文件树 + `commonDiffs` | 「查看文件差异」 |
 | `clear_meta(con)` | 清空所有人工编辑 | 设置 → 清空我的编辑 |
 | `export_meta(con)` | 导出 JSON（含 board 快照） | 设置 → 导出 JSON |
@@ -390,6 +406,23 @@ class Api:
 | 尺寸 | 默认 1200 × 760，**建窗时即按工作区居中**；本机 125% 缩放 → 1500 × 950 物理 / (210, 35) 物理 = (168, 28) CSS，首帧不跳位 | `build_window()` 直接把居中 `x/y` 传给 `create_window`；frameless 会被 WinForms 裁掉标题栏/边框，用 `_nc_css()` 把 `SM_CXSIZEFRAME/SM_CYSIZEFRAME/SM_CXPADDEDBORDER/SM_CYCAPTION` 差额加回请求尺寸（125% 下 +15 / +38 CSS）；`on_start` 只兜底 `IsIconic → SW_RESTORE`，不再有 `place_window()` |
 | 智能体页 | 新增第三个看板，`list_boards()` 输出 `agents[]`（三态 + 实际链接数）；开关调 `set_agent` | 关闭只删 junction/一致拷贝（`unlink_tool`），不删中央实体；冲突副本保留并回报数量 |
 | 缓存 | URL 带 `?v=<五个资源 mtime>`，`index.html` 把同一版本号带到 css/js | 否则 WebView2 会继续执行缓存里的旧 `app.js` |
+
+### 6.5 实际实现（v0.2.0 分类文件夹，已完成）
+
+实施细节见 [`SPEC-category-folders.md`](SPEC-category-folders.md) 与 `kit/DESKTOP.md` §7.1，要点：
+
+| 项 | 实际做法 |
+|---|---|
+| 表结构 | 新增 `folders(id, name, color, position, created_at)` 表；`skill_meta` 加 `folder_id` 列（pragma 判存在再 alter，不重建表），`categories` 列保留不写（回滚兼容） |
+| 迁移 | `migrate_folders(con, cfg)` 在 `bootstrap()` 里 `seed_meta()` 之前跑：folders 为空播种 7 预置夹；旧 `categories` 首元素命中夹 id 才回填，且**只在加列那一刻跑一次**——若每次启动都回填，用户「移出到未归档」会被旧 cats 在下次启动静默撤销 |
+| 归属 | 单归属：`set_meta(payload.folder)`，''=未归档、缺省=保留原归属、未知夹 id 抛错；unique 行 folder 恒 NULL |
+| 桥 | `bridge.js` 增 `folderCreate / folderRename / folderDelete` 三个包装 |
+| reseed | 「清空我的编辑」新语义：只清显示名 / 备注、shared 行归属拉回预置夹，**不再清表**——自建文件夹保留 |
+| 已编辑 | 只有显示名 / 备注算编辑（归属不算），前后端同一口径 |
+| 视图 | 共有看板顶栏新增「网格 / 列表」分段（默认网格）；夹内恒为 5 列列表 + 面包屑；智能体看板不出现任何文件夹元素。v0.2.1 起网格视图扩展到独有看板：agent 即分类文件夹（agent 文件夹卡 + 夹内列表 + 面包屑），偏好按看板分存 |
+| 快照 | `list_boards()` 输出增 `"folders": [...]`；`data.js` 补同构字段，本地模式另有 `prefs.folders`（自建夹持久化）+ 一次性 `migrateLocalFolders()` |
+
+验收结果：桌面端 `desktop.py --selftest` **79/79 通过**（新增分类夹数 / 未归档数、网格卡片数、进夹行数、面包屑返回、建夹 / 删夹回落、归属落库、迁移幂等等 11 项文件夹断言）；原型（file://）Playwright 回归 **32 项 + 迁移 7 项 + 三路拖拽与检查器 chip 若干全过，0 条 JS 错误**；单元测试 **20/20**。`ui/data.js` 已补 `folders` 字段。
 
 验收结果：桌面端 `desktop.py --selftest` **52/52 通过**（数据、差异、写库、计数、搜索、设置、智能体三态与开关、整条标题栏拖动、最大化态拖动先还原、8 个缩放手柄、外框 API 读写与最小尺寸兜底、启动尺寸与布局）；自检的期望行数一律从真实 `list_boards()` 取（当前 49 + 2），不写死数字，项数随库内数据浮动。`file://` 原型用 Playwright（系统 Edge）回归通过；开关的建/删链接另用临时库验证（见 `kit/DESKTOP.md` §7.1）；截图见 `D:\skillkit\.screenshots\desktop-*.png`。
 
@@ -443,7 +476,7 @@ class Api:
 | 33–36 | 1180 无溢出、侧栏 192、检查器 292、搜索保留 | ✅ |
 | — | 控制台异常 / 错误日志 | 0 条 |
 
-智能体看板与窗口另由桌面端自检覆盖（`kit/DESKTOP.md` §7.1，当前 64 项）：三态计数、状态筛、开关、未安装禁用、开关方向回归（点开着的开关只弹一个关闭确认框、取消后回到开）、**外部来源徽标与详情行（数量与后端 `external[0].count` 一致）**、序号列（含两位数不溢出）、整条标题栏拖动、最大化态拖动先还原、8 个 grip、外框 API 读写与最小尺寸兜底、启动尺寸与详情栏边界；开关的建/删链接用临时库做集成验证，未触碰真实 agent 目录。
+智能体看板与窗口另由桌面端自检覆盖（`kit/DESKTOP.md` §7.1，当前 91 项）：三态计数、状态筛、开关、未安装禁用、开关方向回归（点开着的开关只弹一个关闭确认框、取消后回到开）、**外部来源徽标与详情行（数量与后端 `external[0].count` 一致）**、序号列（含两位数不溢出）、整条标题栏拖动、最大化态拖动先还原、8 个 grip、外框 API 读写与最小尺寸兜底、启动尺寸与详情栏边界；开关的建/删链接用临时库做集成验证，未触碰真实 agent 目录。
 
 ---
 

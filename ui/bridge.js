@@ -46,15 +46,40 @@
     setTimeout(function () { if (!fromInjection()) settle(null); }, 6000);
   });
 
+  // 桥调用超时：pywebview 的 promise 在后端线程死锁 / 窗口已销毁时可能永不
+  // settle（如 rescan 卡住 → refreshBusy 永久 true，刷新按钮永久禁用）。
+  // 重量级接口（全盘扫描 / 建删 junction）给宽时限，轻量接口 30s 兜底。
+  var DEFAULT_TIMEOUT = 30000;
+  var CALL_TIMEOUT = {
+    bootstrap: 180000,
+    rescan: 180000,
+    delete_skill: 180000,
+    uninstall_unique: 180000,
+    set_agent: 180000,
+    reseed_meta: 120000,
+    diff: 60000,
+    export_json: 60000
+  };
+
   function call(name) {
     var args = Array.prototype.slice.call(arguments, 1);
     return ready.then(function (a) {
       if (!a) throw new Error('桌面端未连接');
       var fn = a[name];
       if (typeof fn !== 'function') throw new Error('缺少接口 ' + name);
-      return fn.apply(a, args).then(function (res) {
-        if (res && res.ok === false) throw new Error(res.error || '后端返回失败');
-        return res;
+      var ms = CALL_TIMEOUT[name] || DEFAULT_TIMEOUT;
+      return new Promise(function (resolve, reject) {
+        var timer = setTimeout(function () {
+          reject(new Error('接口 ' + name + ' ' + Math.round(ms / 1000) + ' 秒无响应'));
+        }, ms);
+        fn.apply(a, args).then(function (res) {
+          clearTimeout(timer);
+          if (res && res.ok === false) reject(new Error(res.error || '后端返回失败'));
+          else resolve(res);
+        }, function (err) {
+          clearTimeout(timer);
+          reject(err);
+        });
       });
     });
   }
@@ -66,7 +91,11 @@
     saveMeta: function (scope, key, fields) { return call('save_meta', scope, key, fields); },
     clearMeta: function (scope, key) { return call('clear_meta', scope, key); },
     deleteSkill: function (scope, key) { return call('delete_skill', scope, key); },
+    uninstallUnique: function (key) { return call('uninstall_unique', key); },
     reseedMeta: function () { return call('reseed_meta'); },
+    folderCreate: function (name, color) { return call('folder_create', name, color); },
+    folderRename: function (id, name, color) { return call('folder_rename', id, name, color); },
+    folderDelete: function (id) { return call('folder_delete', id); },
     diff: function (scope, key) { return call('diff', scope, key); },
     rescan: function () { return call('rescan'); },
     exportJson: function (name, payload) { return call('export_json', name, payload); },

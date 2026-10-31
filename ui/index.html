@@ -18,7 +18,7 @@
 <body data-view="shared">
 
 <div class="stage">
-  <div class="window" id="app-window">
+  <div class="window booting" id="app-window">
     <div class="grips" aria-hidden="true">
       <span class="grip g-n" data-resize="n"></span>
       <span class="grip g-s" data-resize="s"></span>
@@ -31,7 +31,7 @@
     </div>
 
     <!-- ==================================================== titlebar -->
-    <header class="titlebar">
+    <header class="titlebar" data-boot-rv style="--rv:0">
       <div class="brand">
         <div class="logo" aria-hidden="true">
           <svg viewBox="0 0 24 24">
@@ -73,11 +73,34 @@
 
     <div class="progress" id="progress"><i></i></div>
 
+    <!-- 启动加载动画（SPEC-boot-animation.md · 方案 A）：纯展示层，静态写入覆盖
+         首帧（禁 JS 也显示静态层）；pointer-events:none，不阻塞拖窗与窗口三键。
+         noboot=1 / 降低动效时由 app.js 的 BootFX 直接回收，行为与 v0.2.0 一致 -->
+    <div class="boot" id="boot" role="status" aria-label="正在加载技能库">
+      <div class="boot-logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="30" height="30">
+          <rect x="4" y="4" width="6.5" height="6.5" rx="2" fill="#fff" fill-opacity=".92"></rect>
+          <rect x="13.5" y="4" width="6.5" height="6.5" rx="2" fill="#fff" fill-opacity=".54"></rect>
+          <rect x="8.75" y="13.5" width="6.5" height="6.5" rx="2" fill="#fff" fill-opacity=".76"></rect>
+          <path d="M10.4 8.6 12 12.1" stroke="#fff" stroke-width="1.4" stroke-opacity=".8"></path>
+        </svg>
+      </div>
+      <div class="boot-word">skillkit</div>
+      <div class="boot-eyebrow">SKILL LIBRARY · V0.2.1</div>
+      <div class="boot-chips" aria-hidden="true"></div>
+      <div class="boot-agents" aria-hidden="true"></div>
+      <div class="boot-foot">
+        <div class="boot-phrow"><span class="boot-ph">正在启动</span><span class="boot-cnt">0 / 51</span></div>
+        <div class="boot-line">kernel ready</div>
+        <div class="boot-track"><i></i></div>
+      </div>
+    </div>
+
     <!-- ==================================================== body -->
     <div class="app-body">
 
       <!-- ------------------------------------------------ sidebar -->
-      <aside class="sidebar">
+      <aside class="sidebar" data-boot-rv style="--rv:1">
         <div class="store-card">
           <div class="store-top">
             <span class="eyebrow">Central Store</span>
@@ -115,12 +138,17 @@
         <div class="side-stat" aria-label="库概览">
           <div><b id="stat-agents">7</b><span>agents</span></div>
           <div><b id="stat-edited">0</b><span>已编辑</span></div>
-          <div><b id="stat-cats">7</b><span>分类</span></div>
-          <div><b id="stat-unique">2</b><span>独有</span></div>
+          <div><b id="stat-folders">7</b><span>分类文件夹</span></div>
+          <div><b id="stat-unfiled">0</b><span>未归档</span></div>
         </div>
 
-        <div class="nav-label" style="margin-top:2px" id="side-cat-label">分类</div>
-        <nav class="nav" id="side-cats" aria-label="分类筛选"></nav>
+        <div class="nav-label-row" id="side-folders-head">
+          <span class="nav-label" id="side-cat-label">分类文件夹</span>
+          <button class="mini-add" id="side-add-folder" title="新建分类文件夹">
+            <svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg>新建
+          </button>
+        </div>
+        <nav class="nav" id="side-folders" aria-label="分类文件夹"></nav>
 
         <div class="sidebar-foot">
           <button class="settings-btn" id="open-settings">
@@ -128,19 +156,23 @@
             <span>设置与数据</span>
             <kbd>⌘,</kbd>
           </button>
-          <div class="version">v0.1.0 · 快照 <span id="ver-scan">22:16</span></div>
+          <div class="version">v0.2.1 · 快照 <span id="ver-scan">22:16</span></div>
         </div>
       </aside>
 
       <!-- ------------------------------------------------ workspace -->
       <main class="workspace">
-        <header class="topbar">
+        <header class="topbar" data-boot-rv style="--rv:2">
           <div class="topbar-title">
             <h1 id="page-title">共有技能</h1>
             <p id="page-sub">51 个 skill 同时存在于 7 个 agent · 全部指向中央仓库</p>
           </div>
           <div class="topbar-actions">
-            <button class="icon-btn" id="refresh-btn" title="刷新：重新扫描中央仓库与 agent" aria-label="刷新数据">
+            <div class="segmented" id="view-seg" role="group" aria-label="视图切换">
+              <button data-view-mode="grid" title="卡片网格视图"><svg class="icon"><use href="#i-grid"/></svg>网格</button>
+              <button data-view-mode="list" title="列表视图"><svg class="icon"><use href="#i-rows"/></svg>列表</button>
+            </div>
+            <button class="icon-btn" id="refresh-btn" title="刷新：重新扫描中央仓库、agent 与独有技能" aria-label="刷新数据">
               <svg class="icon" aria-hidden="true"><use href="#i-refresh"></use></svg>
             </button>
             <button class="sort-btn" id="sort-btn" title="切换排序">
@@ -153,14 +185,14 @@
           </div>
         </header>
 
-        <div class="content">
+        <div class="content" data-boot-rv style="--rv:4">
 
-          <div class="boards" role="tablist" aria-label="技能看板">
+          <div class="boards" role="tablist" aria-label="技能看板" data-boot-rv style="--rv:3">
             <button class="board-tab active" data-board="shared" role="tab" aria-selected="true">
               <span class="tab-icon"><svg class="icon" aria-hidden="true"><use href="#i-layers"></use></svg></span>
               <span class="tab-main">
-                <span class="tab-title"><b>共有技能</b><em id="tab-shared-em">7 / 7 agents</em></span>
-                <span class="tab-sub">所有本地 agent 都能用 · 由中央仓库统一分发</span>
+                <span class="tab-title"><b>共有技能</b><em id="tab-shared-em">7 个分类文件夹</em></span>
+                <span class="tab-sub">手动建夹 · 拖拽归档 · 像资源管理器一样管理</span>
               </span>
               <span class="tab-num" id="tab-shared-num">51</span>
             </button>
@@ -182,7 +214,9 @@
             </button>
           </div>
 
-          <div class="list-card">
+          <div class="crumb-bar" id="crumb-bar" hidden></div>
+
+          <div class="list-card" id="list-card">
             <div class="list-head" id="list-head">
               <span></span>
               <span id="col-name">SKILL</span>
@@ -201,17 +235,19 @@
             <div class="list-foot">
               <span class="hint">
                 <svg class="icon" aria-hidden="true"><use href="#i-info"></use></svg>
-                <span id="list-foot-hint">点任意一行，在右侧改显示名、分类与备注</span>
+                <span id="list-foot-hint">点任意一行，在右侧改显示名、归属分类与备注</span>
               </span>
               <span id="list-foot-count">51 条</span>
             </div>
           </div>
 
+          <div class="folder-scroll" id="grid-root" hidden></div>
+
         </div>
       </main>
 
       <!-- ------------------------------------------------ inspector -->
-      <aside class="inspector" aria-label="Skill 编辑面板">
+      <aside class="inspector" aria-label="Skill 编辑面板" data-boot-rv style="--rv:5">
         <div class="ins-head">
           <div class="ins-head-main">
             <span class="eyebrow">Skill Detail</span>
@@ -228,7 +264,7 @@
     </div>
 
     <!-- ==================================================== statusbar -->
-    <footer class="statusbar">
+    <footer class="statusbar" data-boot-rv style="--rv:6">
       <span class="status-health"><i></i><b id="sb-health">51 共有 · 2 独有</b></span>
       <span class="status-sep"></span>
       <span class="status-path" id="sb-path">D:\skillkit\store</span>
@@ -239,7 +275,7 @@
         <span class="status-sep"></span>
         <span>扫描 <b id="sb-scan">22:16</b></span>
         <span class="status-sep"></span>
-        <span>v0.1.0</span>
+        <span>v0.2.1</span>
       </div>
     </footer>
 
@@ -286,6 +322,10 @@
   <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></symbol>
   <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.4 8 8 9 4.6-1 8-4 8-9V6Z"></path><path d="m9 12 2 2 4-4"></path></symbol>
   <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"></rect><rect x="14" y="3" width="7" height="7" rx="2"></rect><rect x="3" y="14" width="7" height="7" rx="2"></rect><rect x="14" y="14" width="7" height="7" rx="2"></rect></symbol>
+  <symbol id="i-folder-open" viewBox="0 0 24 24"><path d="M6 14l1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5c0-1.1.9-2 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2"></path></symbol>
+  <symbol id="i-folder-plus" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path><path d="M12 10v6M9 13h6"></path></symbol>
+  <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"></path><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></symbol>
+  <symbol id="i-ellipsis" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></symbol>
   <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="11" rx="3"></rect><path d="M12 8V5M11 3.6h2M8 12v2M16 12v2M3.5 11.5v4M20.5 11.5v4"></path></symbol>
 </svg>
 

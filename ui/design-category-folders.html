@@ -1,0 +1,1519 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>skillkit · 分类文件夹高仿真原型</title>
+</head>
+<body>
+<!--SK-FRAGMENT-START-->
+<style>
+/* ============ skillkit 分类文件夹原型 · 全部样式 #sk-app 作用域 ============ */
+#sk-app {
+  --font: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Noto Sans SC", sans-serif;
+  --display: "Bahnschrift", "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  --mono: "Cascadia Mono", "Consolas", "SFMono-Regular", monospace;
+  --sidebar-w: 216px;
+  --inspector-w: 344px;
+  --titlebar-h: 46px;
+  --topbar-h: 66px;
+  --statusbar-h: 30px;
+  --page-pad: 20px;
+  --row-h: 60px;
+  --bg: #f3f6fb;
+  --surface: #ffffff;
+  --surface-2: #f7f9fd;
+  --surface-3: #edf1f8;
+  --ink: #0b1020;
+  --ink-2: rgba(11, 16, 32, 0.62);
+  --ink-3: rgba(11, 16, 32, 0.40);
+  --ink-4: rgba(11, 16, 32, 0.24);
+  --line: rgba(14, 22, 40, 0.075);
+  --line-strong: rgba(14, 22, 40, 0.14);
+  --accent: #2e63f6;
+  --accent-soft: #e9efff;
+  --accent-ink: #1b3fc0;
+  --success: #0e9f6e;
+  --success-soft: #e7f7f0;
+  --warning: #c07a09;
+  --warning-soft: #fbf2e1;
+  --danger: #d93a3f;
+  --danger-soft: #fdeced;
+  --violet: #6f56e3;
+  --violet-soft: #f0edfe;
+  --rose: #d2406f;
+  --rose-soft: #fdecf2;
+  --teal: #0a8f96;
+  --teal-soft: #e6f6f6;
+  --slate: #51607a;
+  --slate-soft: #eef1f6;
+  --shadow-1: 0 1px 2px rgba(10, 16, 30, 0.04), 0 10px 26px rgba(10, 16, 30, 0.05);
+  --shadow-2: 0 2px 6px rgba(10, 16, 30, 0.06), 0 20px 44px rgba(10, 16, 30, 0.10);
+  --shadow-3: 0 30px 90px rgba(4, 8, 18, 0.30);
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --fast: 120ms;
+  --base: 180ms;
+  --slow: 300ms;
+
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+#sk-app.theme-dark {
+  --bg: #080b12;
+  --surface: #111722;
+  --surface-2: #151d2a;
+  --surface-3: #1d2635;
+  --ink: #ffffff;
+  --ink-2: rgba(255, 255, 255, 0.64);
+  --ink-3: rgba(255, 255, 255, 0.42);
+  --ink-4: rgba(255, 255, 255, 0.24);
+  --line: rgba(255, 255, 255, 0.075);
+  --line-strong: rgba(255, 255, 255, 0.15);
+  --accent: #7c9dff;
+  --accent-soft: rgba(78, 116, 255, 0.16);
+  --accent-ink: #b9c9ff;
+  --success: #3dd68c;
+  --success-soft: rgba(61, 214, 140, 0.13);
+  --warning: #f4b740;
+  --warning-soft: rgba(244, 183, 64, 0.13);
+  --danger: #ff6b6b;
+  --danger-soft: rgba(255, 107, 107, 0.14);
+  --violet: #a78bfa;
+  --violet-soft: rgba(167, 139, 250, 0.14);
+  --rose: #ff7aa6;
+  --rose-soft: rgba(255, 122, 166, 0.14);
+  --teal: #46d4d8;
+  --teal-soft: rgba(70, 212, 216, 0.13);
+  --slate: #9fb0c9;
+  --slate-soft: rgba(159, 176, 201, 0.13);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.24), 0 10px 26px rgba(0, 0, 0, 0.28);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.28), 0 20px 44px rgba(0, 0, 0, 0.34);
+  --shadow-3: 0 30px 90px rgba(0, 0, 0, 0.55);
+}
+#sk-app *, #sk-app *::before, #sk-app *::after { box-sizing: border-box; }
+#sk-app button, #sk-app input, #sk-app textarea, #sk-app select { font: inherit; color: inherit; }
+#sk-app [hidden] { display: none !important; }
+#sk-app button { border: 0; background: none; cursor: pointer; }
+#sk-app button:disabled { cursor: not-allowed; opacity: 0.45; }
+#sk-app input::placeholder, #sk-app textarea::placeholder { color: var(--ink-4); }
+#sk-app textarea { resize: vertical; }
+#sk-app svg { flex: none; }
+#sk-app ::selection { background: color-mix(in srgb, var(--accent) 26%, transparent); }
+#sk-app :focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 2px; }
+
+/* ---------- 窗口 ---------- */
+#sk-app .window {
+  width: min(1440px, 100%);
+  min-height: 640px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--bg);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.09), 0 44px 120px rgba(0, 0, 0, 0.45);
+}
+
+/* ---------- 图标 ---------- */
+#sk-app .icon, #sk-app svg.lucide-ic { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+#sk-app .icon-btn { width: 30px; height: 30px; border-radius: 8px; border: 1px solid transparent; display: grid; place-items: center; color: var(--ink-2); transition: background var(--fast), color var(--fast), border-color var(--fast), transform var(--fast); }
+#sk-app .icon-btn:hover { background: var(--surface-2); color: var(--ink); border-color: var(--line); }
+#sk-app .icon-btn:active { transform: scale(0.95); }
+#sk-app .icon-btn.is-busy { pointer-events: none; color: var(--ink-3); }
+#sk-app .icon-btn.is-busy .icon { animation: sk-spin 0.9s linear infinite; }
+@keyframes sk-spin { to { transform: rotate(360deg); } }
+
+/* ---------- 按钮 ---------- */
+#sk-app .btn { height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); font-size: 12px; font-weight: 550; display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; transition: background var(--fast), border-color var(--fast), transform var(--fast); }
+#sk-app .btn:hover { background: var(--surface-2); border-color: color-mix(in srgb, var(--ink) 18%, transparent); transform: translateY(-1px); }
+#sk-app .btn:active { transform: translateY(0) scale(0.985); }
+#sk-app .btn .icon { width: 14px; height: 14px; }
+#sk-app .btn-sm { height: 28px; padding: 0 10px; font-size: 11.5px; border-radius: 7px; }
+#sk-app .btn-primary { border-color: transparent; color: #fff; background: linear-gradient(180deg, #3d74ff 0%, #2e63f6 100%); box-shadow: 0 6px 16px rgba(46, 99, 246, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.22); }
+#sk-app .btn-primary:hover { filter: brightness(1.05); border-color: transparent; }
+#sk-app .btn-danger { border-color: transparent; color: #fff; background: linear-gradient(180deg, #e55457 0%, #d93a3f 100%); box-shadow: 0 6px 16px rgba(217, 58, 63, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.2); }
+#sk-app .btn-danger:hover { filter: brightness(1.05); border-color: transparent; }
+#sk-app .btn-ghost { background: transparent; border-color: transparent; color: var(--ink-2); }
+#sk-app .btn-ghost:hover { background: var(--surface-2); color: var(--ink); border-color: transparent; }
+#sk-app .eyebrow { font-size: 10.5px; line-height: 1; letter-spacing: 0.16em; color: var(--ink-3); font-weight: 600; text-transform: uppercase; }
+
+/* ---------- 标题栏 ---------- */
+#sk-app .titlebar { height: var(--titlebar-h); flex: 0 0 var(--titlebar-h); display: flex; align-items: center; padding-left: 14px; position: relative; z-index: 30; background: color-mix(in srgb, var(--surface) 86%, transparent); border-bottom: 1px solid var(--line); backdrop-filter: blur(20px) saturate(140%); }
+#sk-app .brand { display: flex; align-items: center; gap: 9px; min-width: 0; }
+#sk-app .logo { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; background: linear-gradient(135deg, #3d7bff 0%, #2e63f6 46%, #12c2cf 100%); box-shadow: 0 5px 12px rgba(46, 99, 246, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.42); }
+#sk-app .logo .icon { width: 14px; height: 14px; color: #fff; }
+#sk-app .wordmark { font-family: var(--display); font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+#sk-app .brand-divider { width: 1px; height: 16px; background: var(--line-strong); margin: 0 2px; }
+#sk-app .brand-sub { font-size: 11px; letter-spacing: 0.16em; color: var(--ink-3); white-space: nowrap; }
+#sk-app .gsearch { position: relative; width: 300px; height: 30px; flex: 0 0 300px; margin: 0 16px; }
+#sk-app .gsearch .icon { position: absolute; left: 9px; top: 50%; width: 14px; height: 14px; transform: translateY(-50%); color: var(--ink-3); pointer-events: none; }
+#sk-app .gsearch input { width: 100%; height: 100%; padding: 0 44px 0 29px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font-size: 12px; outline: none; transition: border-color var(--fast), background var(--fast), box-shadow var(--fast); }
+#sk-app .gsearch input:focus { border-color: color-mix(in srgb, var(--accent) 46%, transparent); background: var(--surface); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
+#sk-app .gsearch .kbd { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); height: 19px; padding: 0 5px; border-radius: 5px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-3); font-family: var(--mono); font-size: 10px; display: flex; align-items: center; pointer-events: none; }
+#sk-app .title-actions { margin-left: auto; display: flex; align-items: center; gap: 3px; height: 100%; }
+#sk-app .local-pill { height: 20px; padding: 0 7px; display: flex; align-items: center; gap: 5px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-3); font-size: 10px; letter-spacing: 0.10em; margin-right: 6px; }
+#sk-app .local-pill i { width: 5px; height: 5px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 2px var(--success-soft); }
+#sk-app .win-controls { display: flex; height: var(--titlebar-h); margin-left: 6px; }
+#sk-app .win-btn { width: 46px; height: var(--titlebar-h); display: grid; place-items: center; color: var(--ink-2); transition: background var(--fast), color var(--fast); }
+#sk-app .win-btn:hover { background: var(--surface-3); color: var(--ink); }
+#sk-app .win-btn.close:hover { background: #e5484d; color: #fff; }
+#sk-app .win-btn .icon { width: 12px; height: 12px; }
+
+/* ---------- 主体 ---------- */
+#sk-app .app-body { flex: 1; min-height: 0; display: flex; }
+
+/* ---------- 侧栏 ---------- */
+#sk-app .sidebar { width: var(--sidebar-w); flex: 0 0 var(--sidebar-w); min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 12px 10px 16px; border-right: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 72%, var(--surface)); position: relative; }
+#sk-app .store-card { padding: 11px; border-radius: 12px; border: 1px solid var(--line); background: radial-gradient(170px 80px at 100% 0%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 72%), linear-gradient(155deg, var(--surface), var(--surface-2)); box-shadow: var(--shadow-1); }
+#sk-app .store-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+#sk-app .live { display: flex; align-items: center; gap: 4px; font-size: 9.5px; letter-spacing: 0.12em; color: var(--ink-3); }
+#sk-app .live i { width: 4px; height: 4px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 2px var(--success-soft); }
+#sk-app .store-path { margin-top: 8px; font-family: var(--mono); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#sk-app .store-meta { display: flex; align-items: center; justify-content: space-between; margin-top: 5px; font-size: 11px; color: var(--ink-3); }
+#sk-app .store-meta b { font-family: var(--display); font-size: 14px; color: var(--ink); font-weight: 600; margin-right: 2px; }
+#sk-app .health-track { height: 4px; margin-top: 9px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, var(--warning) 34%, var(--surface-3)); }
+#sk-app .health-track span { display: block; height: 100%; width: 96%; border-radius: 2px; background: linear-gradient(90deg, #12b981, #0e9f6e); }
+#sk-app .nav-label { margin: 4px 6px 5px; font-size: 10.5px; letter-spacing: 0.15em; color: var(--ink-3); font-weight: 600; text-transform: uppercase; }
+#sk-app .nav-label-row { display: flex; align-items: center; justify-content: space-between; margin: 4px 6px 5px; }
+#sk-app .nav-label-row .nav-label { margin: 0; }
+#sk-app .mini-add { height: 20px; padding: 0 7px; border-radius: 6px; border: 1px dashed var(--line-strong); color: var(--ink-3); font-size: 10.5px; display: inline-flex; align-items: center; gap: 3px; transition: color var(--fast), border-color var(--fast), background var(--fast); }
+#sk-app .mini-add:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: var(--accent-soft); }
+#sk-app .mini-add .icon { width: 11px; height: 11px; }
+#sk-app .nav { display: flex; flex-direction: column; gap: 2px; }
+#sk-app .nav-item { height: 40px; width: 100%; display: flex; align-items: center; gap: 9px; padding: 0 9px; border-radius: 9px; color: var(--ink); font-size: 12.5px; font-weight: 500; text-align: left; position: relative; transition: background var(--fast), box-shadow var(--fast), transform var(--fast); }
+#sk-app .nav-item .icon { width: 15px; height: 15px; color: var(--ink-2); }
+#sk-app .nav-item:hover { background: var(--surface-2); }
+#sk-app .nav-item.active { background: var(--accent-soft); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
+#sk-app .nav-item.active .icon { color: var(--accent); }
+#sk-app .nav-item:active { transform: scale(0.985); }
+#sk-app .nav-badge { margin-left: auto; min-width: 20px; height: 18px; padding: 0 5px; border-radius: 6px; background: var(--surface-3); color: var(--ink-2); font-family: var(--display); font-size: 11px; font-weight: 600; display: grid; place-items: center; }
+#sk-app .nav-item.cat-nav { height: 32px; font-size: 12px; gap: 8px; padding: 0 9px; border-radius: 8px; }
+#sk-app .nav-item.cat-nav .nav-badge { height: 17px; min-width: 18px; font-size: 10.5px; }
+#sk-app #side-folders { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-right: 2px; scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
+#sk-app #side-folders::-webkit-scrollbar { width: 4px; }
+#sk-app #side-folders::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 2px; }
+#sk-app .catdot { width: 7px; height: 7px; border-radius: 2px; background: var(--c, var(--ink-3)); flex: none; }
+#sk-app .catdot.dashed { background: transparent; border: 1.4px dashed var(--ink-4); }
+#sk-app .nav-item.drop-hint { box-shadow: inset 0 0 0 1.5px var(--accent); background: var(--accent-soft); }
+#sk-app .side-stat { margin-top: 2px; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); display: grid; grid-template-columns: 1fr 1fr; gap: 8px 6px; }
+#sk-app .side-stat div { min-width: 0; }
+#sk-app .side-stat b { display: block; font-family: var(--display); font-size: 16px; line-height: 1.1; font-weight: 600; letter-spacing: -0.02em; }
+#sk-app .side-stat span { display: block; margin-top: 1px; font-size: 10px; color: var(--ink-3); white-space: nowrap; }
+#sk-app .sidebar-foot { margin-top: auto; flex: none; display: flex; flex-direction: column; gap: 7px; padding-bottom: 2px; }
+#sk-app .settings-btn { height: 32px; padding: 0 9px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-2); transition: background var(--fast), color var(--fast); }
+#sk-app .settings-btn:hover { background: var(--surface-3); color: var(--ink); }
+#sk-app .settings-btn kbd { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--ink-3); border: 1px solid var(--line); border-radius: 4px; padding: 0 3px; }
+#sk-app .version { font-size: 10.5px; color: var(--ink-3); text-align: center; letter-spacing: 0.03em; }
+
+/* ---------- 工作区 ---------- */
+#sk-app .workspace { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
+#sk-app .topbar { height: var(--topbar-h); flex: 0 0 var(--topbar-h); display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 var(--page-pad); border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 86%, transparent); backdrop-filter: blur(14px); position: relative; z-index: 5; }
+#sk-app .topbar-title { min-width: 0; }
+#sk-app .topbar-title h1 { margin: 0; font-family: var(--display); font-size: 21px; line-height: 1.12; letter-spacing: -0.025em; font-weight: 600; white-space: nowrap; display: flex; align-items: center; gap: 8px; }
+#sk-app .topbar-title p { margin: 3px 0 0; font-size: 11.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#sk-app .topbar-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+#sk-app .content { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; padding: 0 var(--page-pad) 16px; position: relative; }
+#sk-app .boards-wrap { flex: none; padding: 14px var(--page-pad) 0; position: relative; }
+
+/* ---------- 看板卡 ---------- */
+#sk-app .boards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; flex: none; margin-bottom: 12px; }
+#sk-app .board-tab { height: 80px; padding: 0 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow-1); display: flex; align-items: center; gap: 12px; position: relative; overflow: hidden; text-align: left; transition: border-color var(--base), box-shadow var(--base), transform var(--base), background var(--base); }
+#sk-app .board-tab::after { content: ""; position: absolute; inset: 0 0 auto 0; height: 2px; background: transparent; transition: background var(--base); }
+#sk-app .board-tab:hover { transform: translateY(-1px); box-shadow: var(--shadow-2); border-color: var(--line-strong); }
+#sk-app .board-tab.active { border-color: color-mix(in srgb, var(--accent) 34%, transparent); background: radial-gradient(240px 90px at 100% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 72%), linear-gradient(150deg, var(--surface) 30%, color-mix(in srgb, var(--accent-soft) 70%, var(--surface)) 100%); }
+#sk-app .board-tab.active::after { background: linear-gradient(90deg, var(--accent), color-mix(in srgb, #12c2cf 62%, var(--accent))); }
+#sk-app .tab-icon { width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--line); flex: none; }
+#sk-app .tab-icon .icon { width: 18px; height: 18px; }
+#sk-app .board-tab.active .tab-icon { background: var(--accent); color: #fff; border-color: transparent; box-shadow: 0 8px 18px rgba(46, 99, 246, 0.24); }
+#sk-app .tab-main { min-width: 0; flex: 1; }
+#sk-app .tab-title { display: flex; align-items: baseline; gap: 7px; white-space: nowrap; }
+#sk-app .tab-title b { font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; }
+#sk-app .tab-title em { font-family: var(--display); font-size: 11.5px; font-style: normal; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#sk-app .tab-sub { display: block; margin-top: 3px; font-size: 11px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#sk-app .tab-num { font-family: var(--display); font-size: 26px; line-height: 1; font-weight: 600; letter-spacing: -0.03em; flex: none; }
+#sk-app .board-tab.active .tab-num { color: var(--accent); }
+
+/* ---------- 视图切换 / 排序 ---------- */
+#sk-app .segmented { display: inline-flex; padding: 2px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); gap: 1px; flex: none; }
+#sk-app .segmented button { height: 26px; padding: 0 9px; border-radius: 6px; font-size: 11px; font-weight: 550; color: var(--ink-2); display: inline-flex; align-items: center; gap: 5px; transition: background var(--fast), color var(--fast), box-shadow var(--fast); }
+#sk-app .segmented button .icon { width: 12px; height: 12px; }
+#sk-app .segmented button:hover { color: var(--ink); }
+#sk-app .segmented button.active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.10); }
+#sk-app .sort-btn { height: 26px; padding: 0 8px; border-radius: 7px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); font-size: 11px; display: inline-flex; align-items: center; gap: 4px; }
+#sk-app .sort-btn:hover { background: var(--surface-2); color: var(--ink); }
+#sk-app .sort-btn .icon { width: 12px; height: 12px; }
+
+/* ---------- 面包屑（进入分类文件夹后） ---------- */
+#sk-app .crumb-bar { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-bottom: 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow-1); }
+#sk-app .crumb-root { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 7px; font-size: 12px; font-weight: 550; color: var(--ink-2); transition: background var(--fast), color var(--fast); }
+#sk-app .crumb-root:hover { background: var(--surface-2); color: var(--ink); }
+#sk-app .crumb-root.drop-hint { background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1.5px var(--accent); }
+#sk-app .crumb-root .icon { width: 13px; height: 13px; }
+#sk-app .crumb-sep { color: var(--ink-4); display: grid; place-items: center; }
+#sk-app .crumb-sep .icon { width: 12px; height: 12px; }
+#sk-app .crumb-here { display: inline-flex; align-items: center; gap: 7px; padding: 4px 9px; border-radius: 7px; background: var(--cs); color: var(--c); font-size: 12.5px; font-weight: 650; }
+#sk-app .crumb-here .icon { width: 14px; height: 14px; }
+#sk-app .crumb-meta { font-size: 11px; color: var(--ink-3); }
+#sk-app .crumb-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+
+/* ---------- 列表卡 ---------- */
+#sk-app .list-card { flex: 1; min-height: 0; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow-1); display: flex; flex-direction: column; overflow: hidden; }
+#sk-app .list-head, #sk-app .row { display: grid; grid-template-columns: 34px minmax(196px, 1.3fr) 168px minmax(150px, 1fr) 132px 40px; align-items: center; gap: 10px; padding: 0 14px; }
+#sk-app .row.in-folder { grid-template-columns: 34px minmax(196px, 1.3fr) minmax(150px, 1fr) 132px 40px; }
+#sk-app .list-head { height: 36px; flex: none; border-bottom: 1px solid var(--line); background: var(--surface-2); font-size: 10px; letter-spacing: 0.12em; color: var(--ink-3); font-weight: 600; text-transform: uppercase; }
+#sk-app .list-body { flex: 1; min-height: 0; overflow: auto; max-height: 480px; scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
+#sk-app .row { height: var(--row-h); border-bottom: 1px solid var(--line); position: relative; cursor: pointer; transition: background var(--fast); }
+#sk-app .row::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: transparent; transition: background var(--fast); }
+#sk-app .row:hover { background: var(--surface-2); }
+#sk-app .row.is-selected { background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+#sk-app .row.is-selected::before { background: var(--accent); }
+#sk-app .row.is-dragging { opacity: 0.45; }
+#sk-app .row-mark { width: 26px; height: 26px; border-radius: 8px; background: var(--surface-3); color: var(--ink-2); font-family: var(--display); font-size: 11px; font-weight: 600; display: grid; place-items: center; text-transform: uppercase; }
+#sk-app .row-num { font-family: var(--display); font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--ink-3); }
+#sk-app .row.is-selected .row-num { color: var(--accent); }
+#sk-app .row-main { min-width: 0; }
+#sk-app .row-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+#sk-app .row-name { display: block; font-size: 13px; line-height: 1.3; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#sk-app .row-label { display: block; font-family: var(--mono); font-size: 9.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+#sk-app .cat { height: 20px; padding: 0 6px; border-radius: 5px; font-size: 10px; font-weight: 550; display: inline-flex; align-items: center; gap: 4px; background: var(--cs); color: var(--c); white-space: nowrap; max-width: 100%; }
+#sk-app .cat i { width: 4px; height: 4px; border-radius: 2px; background: var(--c); flex: none; }
+#sk-app .cat.none { background: transparent; color: var(--ink-4); border: 1px dashed var(--line-strong); height: 19px; }
+#sk-app button.cat { cursor: pointer; transition: filter var(--fast), transform var(--fast); }
+#sk-app button.cat:hover { filter: brightness(0.96); transform: translateY(-1px); }
+#sk-app .row-note { min-width: 0; font-size: 11px; line-height: 1.4; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#sk-app .row-note.is-empty { color: var(--ink-4); }
+#sk-app .row-cover { display: flex; align-items: center; gap: 7px; min-width: 0; }
+#sk-app .cover-bar { display: flex; align-items: center; gap: 2px; }
+#sk-app .cover-seg { width: 9px; height: 7px; border-radius: 2px; background: var(--success); }
+#sk-app .cover-text { font-family: var(--display); font-size: 11.5px; color: var(--ink-2); white-space: nowrap; }
+#sk-app .row-go { display: flex; align-items: center; justify-content: flex-end; gap: 2px; color: var(--ink-4); }
+#sk-app .row:hover .row-go { color: var(--ink-2); }
+#sk-app .row-go .icon { width: 12px; height: 12px; }
+#sk-app .row-more { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; color: var(--ink-3); opacity: 0; transition: opacity var(--fast), background var(--fast); }
+#sk-app .row:hover .row-more, #sk-app .row-more.show { opacity: 1; }
+#sk-app .row-more:hover { background: var(--surface-3); color: var(--ink); }
+#sk-app .row-more .icon { width: 14px; height: 14px; }
+#sk-app .empty { flex: 1; min-height: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; padding: 30px; text-align: center; color: var(--ink-3); }
+#sk-app .empty-icon { width: 44px; height: 44px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); display: grid; place-items: center; color: var(--ink-3); }
+#sk-app .empty b { font-size: 13px; color: var(--ink); font-weight: 600; }
+#sk-app .empty span { font-size: 11px; }
+#sk-app .empty .btn { margin-top: 3px; }
+#sk-app .list-foot { flex: none; height: 36px; padding: 0 14px; border-top: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--ink-3); background: var(--surface-2); }
+#sk-app .list-foot .hint { display: flex; align-items: center; gap: 5px; }
+#sk-app .list-foot .hint .icon { width: 12px; height: 12px; }
+#sk-app .count-text { font-size: 11px; color: var(--ink-3); white-space: nowrap; }
+
+/* ---------- 分类文件夹卡片网格 ---------- */
+#sk-app .folder-scroll { flex: 1; min-height: 0; overflow: auto; padding: 2px; scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
+#sk-app .folder-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(236px, 1fr)); gap: 12px; }
+#sk-app .grid-sect { display: flex; align-items: baseline; gap: 8px; margin: 16px 2px 9px; }
+#sk-app .grid-sect:first-child { margin-top: 2px; }
+#sk-app .grid-sect b { font-family: var(--display); font-size: 13px; font-weight: 650; letter-spacing: -0.01em; }
+#sk-app .grid-sect span { font-size: 11px; color: var(--ink-3); }
+#sk-app .grid-sect .count-text { margin-left: auto; }
+#sk-app .folder-card { position: relative; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-1); padding: 13px 13px 12px; cursor: pointer; text-align: left; transition: border-color var(--base), box-shadow var(--base), transform var(--base); animation: rowIn 220ms var(--ease) both; }
+#sk-app .folder-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); border-color: color-mix(in srgb, var(--c) 38%, var(--line)); }
+#sk-app .folder-card:active { transform: translateY(0) scale(0.99); }
+#sk-app .folder-card.drop-hint { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 5%, var(--surface)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
+#sk-app .fc-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+#sk-app .fc-icon { width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; background: var(--cs); color: var(--c); flex: none; }
+#sk-app .fc-icon .icon { width: 20px; height: 20px; }
+#sk-app .fc-more { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; color: var(--ink-3); opacity: 0; transition: opacity var(--fast), background var(--fast); }
+#sk-app .folder-card:hover .fc-more, #sk-app .fc-more.show { opacity: 1; }
+#sk-app .fc-more:hover { background: var(--surface-3); color: var(--ink); }
+#sk-app .fc-more .icon { width: 15px; height: 15px; }
+#sk-app .fc-name { margin-top: 10px; font-size: 13.5px; font-weight: 650; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#sk-app .fc-meta { margin-top: 2px; font-size: 11px; color: var(--ink-3); }
+#sk-app .fc-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 9px; min-height: 20px; }
+#sk-app .fc-chip { max-width: 100%; height: 20px; padding: 0 6px; border-radius: 5px; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-2); font-family: var(--mono); font-size: 9.5px; line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#sk-app .fc-chip.more { border-style: dashed; color: var(--ink-3); }
+#sk-app .fc-chip.none { border-style: dashed; color: var(--ink-4); font-family: var(--font); }
+#sk-app .folder-card.ghost { border-style: dashed; border-color: var(--line-strong); background: transparent; box-shadow: none; display: flex; align-items: center; gap: 11px; min-height: 108px; color: var(--ink-2); }
+#sk-app .folder-card.ghost:hover { border-color: var(--accent); color: var(--accent); transform: translateY(-2px); }
+#sk-app .folder-card.ghost .fc-icon { background: var(--surface-2); color: var(--ink-3); border: 1px dashed var(--line-strong); }
+#sk-app .folder-card.ghost:hover .fc-icon { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: var(--accent-soft); }
+#sk-app .folder-card.ghost .fc-name { margin: 0; }
+#sk-app .folder-card.ghost .fc-meta { margin-top: 2px; }
+#sk-app .file-card { position: relative; display: flex; align-items: center; gap: 9px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); box-shadow: var(--shadow-1); cursor: pointer; transition: border-color var(--fast), box-shadow var(--fast), transform var(--fast); animation: rowIn 220ms var(--ease) both; }
+#sk-app .file-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-2); border-color: var(--line-strong); }
+#sk-app .file-card.is-selected { border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: color-mix(in srgb, var(--accent) 5%, var(--surface)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent); }
+#sk-app .file-card.is-dragging { opacity: 0.45; }
+#sk-app .fc-mark { width: 26px; height: 26px; border-radius: 8px; background: var(--surface-3); color: var(--ink-2); font-family: var(--display); font-size: 10px; font-weight: 600; display: grid; place-items: center; text-transform: uppercase; flex: none; }
+#sk-app .file-card.is-selected .fc-mark { background: var(--accent-soft); color: var(--accent); }
+#sk-app .fc-main { min-width: 0; flex: 1; }
+#sk-app .fc-main b { display: block; font-size: 12.5px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#sk-app .fc-main span { display: block; margin-top: 1px; font-family: var(--mono); font-size: 9.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#sk-app .file-card .row-more { flex: none; }
+
+/* ---------- 检查器 ---------- */
+#sk-app .inspector { width: var(--inspector-w); flex: 0 0 var(--inspector-w); min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 55%, var(--surface)); position: relative; }
+#sk-app .ins-head { height: var(--topbar-h); flex: 0 0 var(--topbar-h); padding: 0 16px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
+#sk-app .ins-head-main { min-width: 0; flex: 1; }
+#sk-app .ins-head .eyebrow { font-size: 10px; }
+#sk-app .ins-head h2 { margin: 3px 0 0; font-family: var(--mono); font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#sk-app .save-state[hidden] { display: none; }
+#sk-app .save-state { display: flex; align-items: center; gap: 4px; height: 21px; padding: 0 7px; border-radius: 6px; background: var(--success-soft); color: var(--success); font-size: 10px; font-weight: 600; flex: none; }
+#sk-app .save-state .icon { width: 10px; height: 10px; }
+#sk-app .ins-body { flex: 1; min-height: 0; overflow: auto; max-height: 560px; padding: 14px 16px 16px; scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
+#sk-app .field-block { margin-bottom: 15px; }
+#sk-app .field-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; font-size: 10.5px; letter-spacing: 0.10em; color: var(--ink-3); font-weight: 600; text-transform: uppercase; }
+#sk-app .name-input { width: 100%; height: 40px; padding: 0 11px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface); font-size: 14px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); outline: none; transition: border-color var(--fast), box-shadow var(--fast); }
+#sk-app .name-input:focus { border-color: color-mix(in srgb, var(--accent) 46%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 11%, transparent); }
+#sk-app .field-help { margin-top: 5px; font-size: 10.5px; line-height: 1.45; color: var(--ink-3); }
+#sk-app .fold-picker { display: flex; flex-wrap: wrap; gap: 4px; }
+#sk-app .fold-chip { height: 26px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); font-size: 11px; display: inline-flex; align-items: center; gap: 5px; transition: background var(--fast), border-color var(--fast), color var(--fast); }
+#sk-app .fold-chip .icon { width: 11px; height: 11px; }
+#sk-app .fold-chip:hover { border-color: var(--line-strong); color: var(--ink); }
+#sk-app .fold-chip.on { background: var(--cs); border-color: color-mix(in srgb, var(--c) 30%, transparent); color: var(--c); font-weight: 600; }
+#sk-app .fold-chip.dashed { border-style: dashed; color: var(--ink-3); }
+#sk-app .fold-chip.dashed.on { color: var(--ink-2); background: var(--surface-2); border-color: var(--line-strong); }
+#sk-app .fold-chip.add { color: var(--accent); border-style: dashed; }
+#sk-app .fold-chip.add:hover { background: var(--accent-soft); }
+#sk-app .note-area { width: 100%; min-height: 92px; padding: 9px 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface); font-size: 11.5px; line-height: 1.6; color: var(--ink); outline: none; transition: border-color var(--fast), box-shadow var(--fast); }
+#sk-app .note-area:focus { border-color: color-mix(in srgb, var(--accent) 46%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent); }
+#sk-app .note-meta { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; font-size: 10px; color: var(--ink-3); }
+#sk-app .divider { height: 1px; background: var(--line); margin: 14px 0; }
+#sk-app .meta-list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+#sk-app .meta-row { min-height: 32px; padding: 6px 9px; display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--line); background: var(--surface); font-size: 11px; }
+#sk-app .meta-row:first-child { border-top: 0; }
+#sk-app .meta-row span:first-child { width: 58px; flex: none; color: var(--ink-3); font-size: 10.5px; }
+#sk-app .meta-row b { flex: 1; min-width: 0; font-family: var(--mono); font-size: 10.5px; font-weight: 400; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#sk-app .desc-text { font-size: 11px; line-height: 1.62; color: var(--ink-2); display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+#sk-app .path-box { display: flex; align-items: center; gap: 6px; padding: 7px 8px; border-radius: 7px; border: 1px solid var(--line); background: var(--surface); font-family: var(--mono); font-size: 10px; color: var(--ink-2); }
+#sk-app .path-box b { flex: 1; min-width: 0; font-weight: 400; word-break: break-all; }
+#sk-app .path-box button { width: 22px; height: 22px; border-radius: 5px; display: grid; place-items: center; color: var(--ink-3); flex: none; }
+#sk-app .path-box button:hover { background: var(--surface-3); color: var(--ink); }
+#sk-app .path-box .icon { width: 10px; height: 10px; }
+#sk-app .ins-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 14px; }
+#sk-app .ins-actions .btn { font-size: 11px; }
+#sk-app .ins-danger { margin-top: 10px; padding: 9px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--danger) 22%, transparent); background: color-mix(in srgb, var(--danger-soft) 62%, var(--surface)); }
+#sk-app .ins-danger .btn { width: 100%; justify-content: center; font-size: 11px; }
+#sk-app .ins-danger p { margin: 6px 1px 0; font-size: 10.5px; line-height: 1.5; color: var(--ink-3); }
+#sk-app .ins-empty { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; color: var(--ink-3); padding: 30px; }
+#sk-app .ins-empty .empty-icon { width: 40px; height: 40px; }
+
+/* ---------- 状态栏 ---------- */
+#sk-app .statusbar { height: var(--statusbar-h); flex: 0 0 var(--statusbar-h); padding: 0 14px; display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 70%, var(--surface)); font-size: 10.5px; color: var(--ink-3); position: relative; z-index: 10; }
+#sk-app .status-health { display: flex; align-items: center; gap: 5px; color: var(--ink-2); }
+#sk-app .status-health i { width: 5px; height: 5px; border-radius: 50%; background: var(--success); }
+#sk-app .status-sep { width: 1px; height: 12px; background: var(--line); }
+#sk-app .status-path { font-family: var(--mono); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px; }
+#sk-app .status-right { margin-left: auto; display: flex; align-items: center; gap: 9px; }
+#sk-app .status-right b { font-family: var(--display); font-weight: 600; color: var(--ink-2); }
+
+/* ---------- 弹窗 / 菜单 / Toast ---------- */
+#sk-app .overlay { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 28px; background: rgba(4, 7, 12, 0.56); backdrop-filter: blur(10px); animation: sk-fadeIn 140ms var(--ease) both; }
+#sk-app .modal { width: 460px; max-width: calc(100vw - 48px); max-height: calc(100vh - 56px); overflow: auto; border-radius: 16px; border: 1px solid var(--line-strong); background: var(--surface); box-shadow: 0 40px 120px rgba(0, 0, 0, 0.35); animation: sk-modalIn 240ms var(--spring) both; position: relative; }
+#sk-app .modal-head { padding: 20px 22px 0; }
+#sk-app .modal-eyebrow { font-size: 10px; letter-spacing: 0.16em; color: var(--ink-3); font-weight: 600; }
+#sk-app .modal-head h2 { margin: 5px 0 0; font-family: var(--display); font-size: 19px; line-height: 1.15; letter-spacing: -0.02em; font-weight: 600; padding-right: 28px; }
+#sk-app .modal-close { position: absolute; top: 14px; right: 14px; width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; color: var(--ink-3); }
+#sk-app .modal-close:hover { background: var(--surface-2); color: var(--ink); }
+#sk-app .modal-close .icon { width: 13px; height: 13px; }
+#sk-app .modal-body { padding: 14px 22px 4px; font-size: 12px; line-height: 1.62; color: var(--ink-2); }
+#sk-app .modal-body p { margin: 0 0 9px; }
+#sk-app .modal-body b { color: var(--ink); }
+#sk-app .modal-foot { padding: 14px 22px 20px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+#sk-app .modal .field-label { margin-top: 4px; }
+#sk-app .modal .name-input { height: 38px; font-size: 13.5px; }
+#sk-app .palette { display: flex; align-items: center; gap: 7px; padding: 2px 0; }
+#sk-app .palette button { width: 24px; height: 24px; border-radius: 8px; background: var(--pc); position: relative; transition: transform var(--fast), box-shadow var(--fast); }
+#sk-app .palette button:hover { transform: scale(1.12); }
+#sk-app .palette button.on { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--pc); }
+#sk-app .palette button.on::after { content: ""; position: absolute; inset: 0; margin: auto; width: 7px; height: 7px; border-radius: 50%; background: #fff; box-shadow: 0 0 2px rgba(0,0,0,.35); }
+#sk-app .ctx-menu { position: fixed; z-index: 160; min-width: 190px; padding: 4px; border-radius: 11px; border: 1px solid var(--line-strong); background: var(--surface); box-shadow: var(--shadow-2); animation: sk-fadeIn 100ms var(--ease) both; }
+#sk-app .ctx-label { padding: 6px 8px 4px; font-size: 9.5px; letter-spacing: 0.12em; color: var(--ink-3); font-weight: 600; text-transform: uppercase; }
+#sk-app .ctx-item { width: 100%; height: 30px; padding: 0 8px; border-radius: 7px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink); text-align: left; transition: background var(--fast); }
+#sk-app .ctx-item:hover { background: var(--surface-2); }
+#sk-app .ctx-item .icon { width: 13px; height: 13px; color: var(--ink-2); }
+#sk-app .ctx-item .catdot { width: 8px; height: 8px; }
+#sk-app .ctx-item.danger { color: var(--danger); }
+#sk-app .ctx-item.danger .icon { color: var(--danger); }
+#sk-app .ctx-item.current { color: var(--ink-3); pointer-events: none; }
+#sk-app .ctx-item b { margin-left: auto; font-size: 10px; color: var(--ink-3); font-weight: 500; }
+#sk-app .ctx-sep { height: 1px; background: var(--line); margin: 4px 6px; }
+#sk-app .toasts { position: fixed; right: 20px; bottom: 42px; z-index: 200; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+#sk-app .toast { width: 330px; min-height: 50px; padding: 10px 11px; border-radius: 11px; border: 1px solid var(--line-strong); background: color-mix(in srgb, var(--surface) 94%, transparent); box-shadow: var(--shadow-3); backdrop-filter: blur(18px); display: flex; align-items: flex-start; gap: 9px; pointer-events: auto; animation: sk-toastIn 280ms var(--spring) both; }
+#sk-app .toast.out { animation: sk-toastOut 180ms var(--ease) both; }
+#sk-app .toast-icon { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; flex: none; background: var(--success-soft); color: var(--success); }
+#sk-app .toast-icon.warn { background: var(--warning-soft); color: var(--warning); }
+#sk-app .toast-icon.bad { background: var(--danger-soft); color: var(--danger); }
+#sk-app .toast-icon.info { background: var(--accent-soft); color: var(--accent); }
+#sk-app .toast-icon .icon { width: 13px; height: 13px; }
+#sk-app .toast-main { flex: 1; min-width: 0; }
+#sk-app .toast-main b { display: block; font-size: 12px; font-weight: 600; line-height: 1.3; }
+#sk-app .toast-main span { display: block; margin-top: 2px; font-size: 10.5px; line-height: 1.45; color: var(--ink-2); word-break: break-word; }
+#sk-app .tooltip { position: fixed; z-index: 150; max-width: 280px; padding: 7px 9px; border-radius: 8px; background: #0b0f17; color: #fff; font-size: 11px; line-height: 1.45; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.30); pointer-events: none; opacity: 0; transform: translateY(4px); transition: opacity 120ms var(--ease), transform 120ms var(--ease); }
+#sk-app .tooltip.show { opacity: 1; transform: translateY(0); }
+#sk-app .progress { position: absolute; left: 0; right: 0; top: var(--titlebar-h); height: 2px; z-index: 45; overflow: hidden; pointer-events: none; opacity: 0; transition: opacity var(--fast); }
+#sk-app .progress.show { opacity: 1; }
+#sk-app .progress i { display: block; width: 0; height: 100%; background: linear-gradient(90deg, var(--accent), #12c2cf); box-shadow: 0 0 12px var(--accent); transition: width 0.6s var(--ease); }
+
+/* ---------- 动画 / 响应式 ---------- */
+@keyframes sk-fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes sk-modalIn { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes sk-toastIn { from { opacity: 0; transform: translateX(18px) scale(0.97); } to { opacity: 1; transform: translateX(0) scale(1); } }
+@keyframes sk-toastOut { from { opacity: 1; } to { opacity: 0; transform: translateX(18px); } }
+@keyframes rowIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 1340px) { #sk-app { --inspector-w: 312px; --sidebar-w: 204px; } #sk-app .gsearch { width: 240px; flex-basis: 240px; } #sk-app .row, #sk-app .list-head { grid-template-columns: 34px minmax(170px, 1.3fr) 150px minmax(110px, 1fr) 116px 40px; } #sk-app .row.in-folder, #sk-app .list-head.in-folder { grid-template-columns: 34px minmax(170px, 1.3fr) minmax(110px, 1fr) 116px 40px; } }
+@media (max-width: 1200px) { #sk-app { --inspector-w: 292px; --sidebar-w: 192px; } #sk-app .brand-sub { display: none; } #sk-app .board-tab { height: 76px; } #sk-app .tab-sub, #sk-app .tab-title em { display: none; } #sk-app .tab-num { font-size: 22px; } }
+@media (max-width: 1060px) { #sk-app .inspector { display: none; } }
+@media (max-width: 860px) { #sk-app .sidebar { display: none; } #sk-app .boards { grid-template-columns: 1fr; } #sk-app .board-tab { height: 60px; } }
+</style>
+
+<div id="sk-app">
+  <div class="window">
+    <div class="progress" id="progress"><i></i></div>
+
+    <header class="titlebar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true"><span data-sk-icon="layers"></span></div>
+        <span class="wordmark">skillkit</span>
+        <span class="brand-divider"></span>
+        <span class="brand-sub">CATEGORY FOLDERS · 原型</span>
+      </div>
+      <div class="gsearch">
+        <span data-sk-icon="search"></span>
+        <input id="gsearch" type="text" placeholder="搜索名称、备注、分类" autocomplete="off" spellcheck="false" aria-label="搜索 skill">
+        <span class="kbd">Ctrl K</span>
+      </div>
+      <div class="title-actions">
+        <span class="local-pill"><i></i>PROTOTYPE</span>
+        <button class="icon-btn" id="theme-toggle" title="切换深色模式" aria-label="切换深色模式"><span data-sk-icon="moon"></span></button>
+        <div class="win-controls">
+          <button class="win-btn" id="win-min" title="最小化" aria-label="最小化"><span data-sk-icon="minus"></span></button>
+          <button class="win-btn" id="win-max" title="最大化" aria-label="最大化"><span data-sk-icon="maximize"></span></button>
+          <button class="win-btn close" id="win-close" title="关闭" aria-label="关闭"><span data-sk-icon="x"></span></button>
+        </div>
+      </div>
+    </header>
+
+    <div class="app-body">
+      <aside class="sidebar">
+        <div class="store-card">
+          <div class="store-top">
+            <span class="eyebrow">Central Store</span>
+            <span class="live"><i></i>LIVE</span>
+          </div>
+          <div class="store-path" title="D:\skillkit\store">D:\skillkit\store</div>
+          <div class="store-meta">
+            <span><b id="store-count">51</b> skills</span>
+            <span>54.4 MB</span>
+          </div>
+          <div class="health-track"><span></span></div>
+        </div>
+
+        <div>
+          <div class="nav-label">看板</div>
+          <nav class="nav" aria-label="看板切换">
+            <button class="nav-item active" data-board="shared">
+              <span data-sk-icon="layers"></span><span>共有技能</span>
+              <span class="nav-badge" id="nav-shared">51</span>
+            </button>
+            <button class="nav-item" data-board="unique">
+              <span data-sk-icon="sparkle"></span><span>独有技能</span>
+              <span class="nav-badge">2</span>
+            </button>
+            <button class="nav-item" data-board="agents">
+              <span data-sk-icon="bot"></span><span>智能体</span>
+              <span class="nav-badge">7</span>
+            </button>
+          </nav>
+        </div>
+
+        <div class="side-stat" aria-label="库概览">
+          <div><b id="stat-folders">7</b><span>分类文件夹</span></div>
+          <div><b id="stat-edited">0</b><span>已编辑</span></div>
+          <div><b id="stat-agents">7</b><span>agents</span></div>
+          <div><b id="stat-unfiled">12</b><span>未归档</span></div>
+        </div>
+
+        <div class="nav-label-row">
+          <span class="nav-label">分类文件夹</span>
+          <button class="mini-add" id="side-add-folder" title="新建分类文件夹"><span data-sk-icon="plus"></span>新建</button>
+        </div>
+        <nav class="nav" id="side-folders" aria-label="分类文件夹导航"></nav>
+
+        <div class="sidebar-foot">
+          <button class="settings-btn" id="open-settings-note">
+            <span data-sk-icon="settings"></span>
+            <span>设置与数据</span>
+            <kbd>⌘,</kbd>
+          </button>
+          <div class="version">v0.2.0-proto · 分类文件夹设计稿</div>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div class="topbar-title">
+            <h1 id="page-title">共有技能</h1>
+            <p id="page-sub">7 个分类文件夹 · 51 个 skill · 拖拽归档，像资源管理器一样管理</p>
+          </div>
+          <div class="topbar-actions">
+            <div class="segmented" id="view-seg" role="group" aria-label="视图切换">
+              <button data-view-mode="grid" class="active" title="卡片网格视图"><span data-sk-icon="grid"></span>网格</button>
+              <button data-view-mode="list" title="列表视图"><span data-sk-icon="rows"></span>列表</button>
+            </div>
+            <button class="sort-btn" id="sort-btn" title="切换排序">
+              <span data-sk-icon="sort"></span>
+              <span id="sort-label">名称 A→Z</span>
+            </button>
+            <button class="icon-btn" id="refresh-btn" title="刷新" aria-label="刷新">
+              <span data-sk-icon="refresh"></span>
+            </button>
+          </div>
+        </header>
+
+        <div class="boards-wrap">
+          <div class="boards" role="tablist" aria-label="技能看板">
+            <button class="board-tab active" data-board="shared" role="tab" aria-selected="true">
+              <span class="tab-icon"><span data-sk-icon="layers"></span></span>
+              <span class="tab-main">
+                <span class="tab-title"><b>共有技能</b><em id="tab-shared-em">7 个分类文件夹</em></span>
+                <span class="tab-sub">手动建夹 · 拖拽归档 · 像资源管理器一样管理</span>
+              </span>
+              <span class="tab-num">51</span>
+            </button>
+            <button class="board-tab" data-board="unique" role="tab" aria-selected="false">
+              <span class="tab-icon"><span data-sk-icon="sparkle"></span></span>
+              <span class="tab-main">
+                <span class="tab-title"><b>独有技能</b><em>1 + 1 同名覆盖</em></span>
+                <span class="tab-sub">只存在于某个 agent · 中央仓库没有或内容不同</span>
+              </span>
+              <span class="tab-num">2</span>
+            </button>
+            <button class="board-tab" data-board="agents" role="tab" aria-selected="false">
+              <span class="tab-icon"><span data-sk-icon="bot"></span></span>
+              <span class="tab-main">
+                <span class="tab-title"><b>智能体</b><em>7 已连接</em></span>
+                <span class="tab-sub">本机 agent 与 skills 目录的链接开关</span>
+              </span>
+              <span class="tab-num">7</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="content" id="content"></div>
+      </main>
+
+      <aside class="inspector" aria-label="Skill 编辑面板">
+        <div class="ins-head">
+          <div class="ins-head-main">
+            <span class="eyebrow">Skill Detail</span>
+            <h2 id="ins-raw-name">—</h2>
+          </div>
+          <span class="save-state" id="save-state" hidden>
+            <span data-sk-icon="check"></span>
+            <span>已保存</span>
+          </span>
+        </div>
+        <div class="ins-body" id="ins-body"></div>
+      </aside>
+    </div>
+
+    <footer class="statusbar">
+      <span class="status-health"><i></i><b id="sb-health">51 共有 · 7 分类</b></span>
+      <span class="status-sep"></span>
+      <span class="status-path">D:\skillkit\store</span>
+      <span class="status-sep"></span>
+      <span>未归档 <b id="sb-unfiled">0</b> 条</span>
+      <div class="status-right">
+        <span>SQLite <b>WAL</b></span>
+        <span class="status-sep"></span>
+        <span>扫描 <b>22:16</b></span>
+        <span class="status-sep"></span>
+        <span>v0.2.0-proto</span>
+      </div>
+    </footer>
+  </div>
+</div>
+
+<div id="sk-modal-root"></div>
+<div class="toasts" id="sk-toasts" aria-live="polite"></div>
+<div class="tooltip" id="sk-tooltip" role="tooltip"></div>
+
+<!-- 图标雪碧图：内联预览环境没有它时自动退回 lucide -->
+<svg id="sk-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Z"></path><path d="m3 12 9 5 9-5M3 16.5l9 5 9-5"></path></symbol>
+  <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8Z"></path><path d="M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8Z"></path></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"></path></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"></path></symbol>
+  <symbol id="i-maximize" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1"></rect></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M19 14.5A7.5 7.5 0 0 1 9.5 5a7.5 7.5 0 1 0 9.5 9.5Z"></path></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"></path></symbol>
+  <symbol id="i-sort" viewBox="0 0 24 24"><path d="M7 4v16M4 17l3 3 3-3M14 4h6M14 10h5M14 16h3"></path></symbol>
+  <symbol id="i-rows" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="6" rx="2"></rect><rect x="4" y="14" width="16" height="6" rx="2"></rect></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"></rect><rect x="14" y="3" width="7" height="7" rx="2"></rect><rect x="3" y="14" width="7" height="7" rx="2"></rect><rect x="14" y="14" width="7" height="7" rx="2"></rect></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path></symbol>
+  <symbol id="i-folder-open" viewBox="0 0 24 24"><path d="M6 14l1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5c0-1.1.9-2 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2"></path></symbol>
+  <symbol id="i-folder-plus" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path><path d="M12 10v6M9 13h6"></path></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14-4"></path><path d="M4 13a8 8 0 0 0 14 4"></path><path d="M4 4v4h4M20 20v-4h-4"></path></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M15.5 4.5 19.5 8.5 8 20H4v-4L15.5 4.5Z"></path></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"></path></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2.6 20h18.8L12 3Z"></path><path d="M12 8v5M12 16.5v.6"></path></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"></path><path d="M9 11v5M15 11v5"></path></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"></path><circle cx="9" cy="6" r="2"></circle><circle cx="15" cy="12" r="2"></circle><circle cx="8" cy="18" r="2"></circle></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v6M12 7v.5"></path></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></symbol>
+  <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="11" rx="3"></rect><path d="M12 8V5M11 3.6h2M8 12v2M16 12v2M3.5 11.5v4M20.5 11.5v4"></path></symbol>
+  <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"></path><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></symbol>
+  <symbol id="i-ellipsis" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></symbol>
+</svg>
+
+<script>
+(function () {
+  'use strict';
+  var root = document.getElementById('sk-app');
+  var SPRITE = !!document.getElementById('sk-sprite');
+  var LUCIDE = { layers:'layers', sparkle:'sparkle', search:'search', x:'x', minus:'minus', maximize:'square',
+    moon:'moon', sun:'sun', 'chevron-right':'chevron-right', sort:'arrow-up-down', rows:'rows-2', grid:'layout-grid',
+    copy:'copy', folder:'folder', 'folder-open':'folder-open', 'folder-plus':'folder-plus', refresh:'refresh-cw',
+    pencil:'pencil', check:'check', alert:'triangle-alert', trash:'trash-2', settings:'settings-2', info:'info',
+    plus:'plus', bot:'bot', inbox:'inbox', ellipsis:'ellipsis' };
+
+  function icon(id, cls) {
+    if (SPRITE) return '<svg class="icon ' + (cls || '') + '" aria-hidden="true"><use href="#i-' + id + '"></use></svg>';
+    return '<i class="lucide-ic ' + (cls || '') + '" data-lucide="' + (LUCIDE[id] || id) + '" aria-hidden="true"></i>';
+  }
+  function mountIcons() {
+    root.querySelectorAll('span[data-sk-icon]').forEach(function (el) {
+      el.outerHTML = icon(el.getAttribute('data-sk-icon'), el.getAttribute('data-cls') || '');
+    });
+    if (!SPRITE && window.lucide) {
+      try {
+        lucide.createIcons({ attrs: { width: 16, height: 16, 'stroke-width': 1.7 } });
+        root.querySelectorAll('svg.lucide-ic').forEach(function (s) { s.classList.add('icon'); });
+      } catch (e) {}
+    }
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function mark(name) {
+    var s = String(name || '').replace(/[^a-z0-9]/gi, '');
+    return (s.slice(0, 2) || '?').toUpperCase();
+  }
+  function hash8(s) {
+    var h = 5381, i;
+    for (i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+    return ('00000000' + h.toString(16)).slice(-8);
+  }
+
+  /* ---------------- 数据：51 个真实 skill + 迁移自旧预置分类的文件夹 ---------------- */
+  var SKILLS = [
+    ['AI HOT','aihot','查询 AI HOT 的中文 AI 资讯、精选与当前热点日报。'],
+    ['aihot','aihot','查询 AI HOT 的中文 AI 资讯、精选与当前热点日报。'],
+    ['brandkit','brandkit','高端品牌套件图片生成：徽标、色彩与版式系统。'],
+    ['brutalist-skill','industrial-brutalist-ui','瑞士版式 × 机械工业风的原始界面美学。'],
+    ['ci-compile-guard','ci-compile-guard','无本机工具链时改走远端 CI 编译守护。'],
+    ['design-app-ui-prototype','design-app-ui-prototype','PM + UI/UX 视角拆解 App 需求并定义页面流程。'],
+    ['design-app-ui-prototype__skillhub','design-app-ui-prototype','skillhub 镜像版本，内容同 design-app-ui-prototype。'],
+    ['dev-expert','dev-expert','P8 级全栈编程助手：网站 / 软件 / API 设计。'],
+    ['dsh-armory-feature-integration','dsh-armory-feature-integration','dsh-armory 插件市场 / RPC 功能端到端清单。'],
+    ['frontend-design','frontend-design','产出有个性的生产级前端界面。'],
+    ['github-pages-auto-deploy','github-pages-auto-deploy','配置 GitHub Pages 自动部署网站。'],
+    ['github-publish-via-api','github-publish-via-api','git push 不通时改走 GitHub API 发布。'],
+    ['github-sandbox-download','github-sandbox-download','按字节精确下载 GitHub 仓库 / 文件。'],
+    ['gpt-tasteskill','gpt-taste','Elite UX/UI 与 GSAP 动效工程规范。'],
+    ['image-to-code-skill','image-to-code','视觉级网站截图转代码。'],
+    ['imagegen-frontend-mobile','imagegen-frontend-mobile','高端移动 App 界面图片生成。'],
+    ['imagegen-frontend-web','imagegen-frontend-web','高端 Web 前端视觉方向图生成。'],
+    ['minimalist-skill','minimalist-ui','温暖单色编辑风的干净界面。'],
+    ['mnemosyne-memory__skillhub','mnemosyne-os-memory','多层记忆 + 遗忘曲线的本地化记忆系统。'],
+    ['mnemosyne-os-memory','mnemosyne-os-memory','多层记忆 + 遗忘曲线的本地化记忆系统（正式版）。'],
+    ['open-code-review','open-code-review','基于 ocr CLI 的 AI 代码评审。'],
+    ['open-code-review-delegate','open-code-review-delegate','OCR 委派模式：只出评审清单不动手。'],
+    ['output-skill','full-output-enforcement','强制完整输出，覆盖默认截断行为。'],
+    ['pdf','pdf','PDF 读取 / 拆分 / 合并 / 表单全流程。'],
+    ['prompt-engineering-expert','prompt-engineering-expert','提示词工程与自定义指令专家。'],
+    ['prompt-optimizer-zh','prompt-optimizer-zh','EARS 方法论的中文提示词优化。'],
+    ['prompt-optimizer-zh__skillhub','prompt-optimizer-zh','skillhub 镜像版本，内容同 prompt-optimizer-zh。'],
+    ['redesign-skill','redesign-existing-projects','存量网站 / App 质量升级改版。'],
+    ['remotion-best-practices','remotion-best-practices','Remotion 技能路由。'],
+    ['remotion-captions','remotion-captions','字幕转录、展示与动画。'],
+    ['remotion-create','remotion-create','创建新的 Remotion 视频。'],
+    ['remotion-docs','remotion-docs','搜索 Remotion 文档。'],
+    ['remotion-interactivity','remotion-interactivity','Remotion 交互结构。'],
+    ['remotion-maps','remotion-maps','Remotion 地图动画知识。'],
+    ['remotion-markup','remotion-markup','内容、动画与特效最佳实践。'],
+    ['remotion-multimedia','remotion-multimedia','MediaBunny 媒体交互。'],
+    ['remotion-render','remotion-render','导出 Remotion 视频。'],
+    ['remotion-saas','remotion-saas','用 Remotion 构建 SaaS 应用。'],
+    ['remotion-studio','remotion-studio','预览 Remotion 视频。'],
+    ['remotion-upgrade','remotion-upgrade','升级 Remotion 与相关依赖。'],
+    ['skill-creator','skill-creator','创建与改进 skills。'],
+    ['soft-skill','high-end-visual-design','像高端设计公司一样做视觉定义。'],
+    ['stitch-skill','stitch-design-taste','Google Stitch 语义设计系统。'],
+    ['taste-skill','design-taste-frontend','反模板化的落地页 / 作品集前端品味。'],
+    ['taste-skill-v1','design-taste-frontend-v1','v1 原版保留，供旧项目依赖。'],
+    ['ui-design-system','ui-design-system','专业 UI 生成与既有界面优化。'],
+    ['ui-new__skillhub','ui-design-system','skillhub 镜像版本，内容同 ui-design-system。'],
+    ['video-shotcraft','video-shotcraft','按分镜卡创建电影感产品视频。'],
+    ['web-artifacts-builder','web-artifacts-builder','多组件复杂前端工件构建套件。'],
+    ['web-deploy-github','web-deploy-github','单页静态网站部署到 GitHub Pages。'],
+    ['webapp-testing','webapp-testing','本地 Web 应用 Playwright 测试工具箱。']
+  ].map(function (r) { return { name: r[0], label: r[1], desc: r[2] }; });
+
+  var PALETTE = ['violet', 'accent', 'warning', 'rose', 'teal', 'slate', 'green'];
+  var CVARS = {
+    violet: ['var(--violet)', 'var(--violet-soft)'], accent: ['var(--accent)', 'var(--accent-soft)'],
+    warning: ['var(--warning)', 'var(--warning-soft)'], rose: ['var(--rose)', 'var(--rose-soft)'],
+    teal: ['var(--teal)', 'var(--teal-soft)'], slate: ['var(--slate)', 'var(--slate-soft)'],
+    green: ['var(--success)', 'var(--success-soft)']
+  };
+  function cvars(color) {
+    var p = CVARS[color] || CVARS.slate;
+    return '--c:' + p[0] + ';--cs:' + p[1];
+  }
+
+  // 首次进入原型：旧 7 个预置分类迁移为同名文件夹，每个 skill 按规则归入其一
+  var PRESET = [
+    { id: 'design', name: '设计', color: 'violet' },
+    { id: 'frontend', name: '前端', color: 'accent' },
+    { id: 'doc', name: '文档', color: 'warning' },
+    { id: 'video', name: '视频', color: 'rose' },
+    { id: 'memory', name: '记忆', color: 'teal' },
+    { id: 'eng', name: '工程', color: 'slate' },
+    { id: 'search', name: '检索', color: 'green' }
+  ];
+  function seedFolder(name) {
+    var n = String(name).toLowerCase();
+    if (/remotion|video/.test(n)) return 'video';
+    if (/mnemosyne|memory/.test(n)) return 'memory';
+    if (/aihot|ai hot/.test(n)) return 'search';
+    if (/pdf|docx|xlsx|pptx/.test(n)) return 'doc';
+    if (/^web-|webapp/.test(n)) return 'frontend';
+    if (/design|taste|stitch|minimalist|brutalist|brandkit|imagegen|image-to-code|redesign|ui-new|ui-design|soft-skill/.test(n)) return 'design';
+    return 'eng';
+  }
+
+  var LS_KEY = 'sk.proto.categoryFolders.v1';
+  function lsGet() {
+    try { return JSON.parse(localStorage.getItem(LS_KEY) || 'null'); } catch (e) { return null; }
+  }
+  function lsSave() {
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify({
+        folders: FOLDERS, assign: ASSIGN, notes: NOTES, displays: DISPLAYS,
+        theme: prefs.theme, view: prefs.view, sort: prefs.sort
+      }));
+    } catch (e) {}
+  }
+
+  var saved = lsGet();
+  var FOLDERS = (saved && saved.folders) || PRESET.slice();
+  var ASSIGN = (saved && saved.assign) || {};
+  var NOTES = (saved && saved.notes) || {};
+  var DISPLAYS = (saved && saved.displays) || {};
+  var prefs = {
+    theme: (saved && saved.theme) || 'light',
+    view: (saved && saved.view) || 'grid',
+    sort: (saved && saved.sort) || 'name'
+  };
+  SKILLS.forEach(function (s) { if (!ASSIGN[s.name]) ASSIGN[s.name] = seedFolder(s.name); });
+  if (!saved) {
+    // 演示需要：首次进入留几条未归档的 skill（「文档」夹因此为空，可看空态与拖拽归档全流程）
+    ['pdf', 'webapp-testing', 'output-skill', 'ci-compile-guard'].forEach(function (n) { delete ASSIGN[n]; });
+  }
+
+  var state = { folder: null, q: '', sort: prefs.sort, selected: SKILLS[23].name }; // 默认选中 pdf
+
+  function folderById(id) {
+    for (var i = 0; i < FOLDERS.length; i++) if (FOLDERS[i].id === id) return FOLDERS[i];
+    return null;
+  }
+  function displayOf(s) { return DISPLAYS[s.name] || s.label || s.name; }
+  function noteOf(s) { return NOTES[s.name] || ''; }
+  function editedCount() {
+    var n = 0;
+    SKILLS.forEach(function (s) { if (DISPLAYS[s.name] || NOTES[s.name]) n++; });
+    return n;
+  }
+  function skillsIn(folderId) {
+    var out = SKILLS.filter(function (s) {
+      return folderId === 'none' ? !ASSIGN[s.name] : ASSIGN[s.name] === folderId;
+    });
+    out.sort(function (a, b) {
+      return String(displayOf(a)).localeCompare(String(displayOf(b)), 'zh-Hans-CN');
+    });
+    return out;
+  }
+  function matchSkills(q) {
+    var t = q.toLowerCase();
+    return SKILLS.filter(function (s) {
+      return (s.name + ' ' + displayOf(s) + ' ' + s.label + ' ' + noteOf(s)).toLowerCase().indexOf(t) > -1;
+    });
+  }
+  function sortList(list) {
+    var out = list.slice();
+    if (state.sort === 'edited') {
+      out.sort(function (a, b) {
+        var ea = DISPLAYS[a.name] || NOTES[a.name] ? 1 : 0;
+        var eb = DISPLAYS[b.name] || NOTES[b.name] ? 1 : 0;
+        return eb - ea || String(displayOf(a)).localeCompare(String(displayOf(b)), 'zh-Hans-CN');
+      });
+    }
+    return out;
+  }
+
+  /* ---------------- 渲染 ---------------- */
+  function chipHtml(s, clickable) {
+    var f = folderById(ASSIGN[s.name]);
+    if (!f) return '<span class="cat none">未归档</span>';
+    return '<button class="cat" data-jump-folder="' + esc(f.id) + '" style="' + cvars(f.color) + '" title="打开分类「' + esc(f.name) + '」"><i></i>' + esc(f.name) + '</button>';
+  }
+
+  function coverHtml() {
+    var segs = '';
+    for (var i = 0; i < 7; i++) segs += '<span class="cover-seg"></span>';
+    return '<div class="row-cover"><div class="cover-bar">' + segs + '</div><span class="cover-text">7/7</span></div>';
+  }
+
+  function rowHtml(s, i, inFolder) {
+    var isSel = state.selected === s.name;
+    var dn = displayOf(s);
+    return '<div class="row' + (inFolder ? ' in-folder' : '') + (isSel ? ' is-selected' : '') + '" data-skill="' + esc(s.name) + '" draggable="true" role="button" tabindex="0">' +
+      '<span class="row-mark row-num">' + (i + 1) + '</span>' +
+      '<div class="row-main"><div class="row-title"><span class="row-name">' + esc(dn) + '</span></div>' +
+      '<span class="row-label">' + esc(s.name === dn ? s.label : s.name) + '</span></div>' +
+      (inFolder ? '' : '<div>' + chipHtml(s) + '</div>') +
+      '<div>' + (noteOf(s)
+        ? '<span class="row-note">' + esc(noteOf(s)) + '</span>'
+        : '<span class="row-note is-empty">添加备注…</span>') + '</div>' +
+      coverHtml() +
+      '<span class="row-go">' +
+        '<button class="row-more" data-more-skill="' + esc(s.name) + '" title="移动 / 更多操作">' + icon('ellipsis') + '</button>' +
+        icon('chevron-right') +
+      '</span></div>';
+  }
+
+  function folderCard(f, i) {
+    var list = skillsIn(f.id);
+    var chips = list.slice(0, 3).map(function (s) {
+      return '<span class="fc-chip" title="' + esc(displayOf(s)) + '">' + esc(displayOf(s)) + '</span>';
+    }).join('');
+    if (list.length > 3) chips += '<span class="fc-chip more">+' + (list.length - 3) + '</span>';
+    if (!list.length) chips = '<span class="fc-chip none">空文件夹</span>';
+    return '<div class="folder-card" role="button" tabindex="0" data-folder-card="' + esc(f.id) + '" data-drop-folder="' + esc(f.id) + '" style="' + cvars(f.color) + '">' +
+      '<div class="fc-top"><span class="fc-icon">' + icon('folder') + '</span>' +
+      '<button class="fc-more" data-more-folder="' + esc(f.id) + '" title="重命名 / 删除">' + icon('ellipsis') + '</button></div>' +
+      '<div class="fc-name">' + esc(f.name) + '</div>' +
+      '<div class="fc-meta">' + list.length + ' 个 skill</div>' +
+      '<div class="fc-chips">' + chips + '</div></div>';
+  }
+
+  function fileCard(s) {
+    var isSel = state.selected === s.name;
+    var f = folderById(ASSIGN[s.name]);
+    var sub = f ? '已归档 · ' + f.name : '未归档';
+    return '<div class="file-card' + (isSel ? ' is-selected' : '') + '" role="button" tabindex="0" data-skill="' + esc(s.name) + '" draggable="true">' +
+      '<span class="fc-mark">' + esc(mark(s.name)) + '</span>' +
+      '<div class="fc-main"><b>' + esc(displayOf(s)) + '</b><span>' + esc(sub) + '</span></div>' +
+      '<button class="row-more" data-more-skill="' + esc(s.name) + '" title="移动 / 更多操作">' + icon('ellipsis') + '</button>' +
+      '</div>';
+  }
+
+  function crumbHtml() {
+    var parts = '<button class="crumb-root" data-crumb-root data-drop-unfile="1" title="返回全部，也可把 skill 拖到这里移出分类">' +
+      icon('folder-open') + '全部技能</button><span class="crumb-sep">' + icon('chevron-right') + '</span>';
+    if (state.folder === 'none') {
+      parts += '<span class="crumb-here" style="--c:var(--ink-2);--cs:var(--surface-2)">' + icon('inbox') + '未归档</span>';
+      parts += '<span class="crumb-meta">' + skillsIn('none').length + ' 个 skill 待归档</span>';
+    } else {
+      var f = folderById(state.folder);
+      parts += '<span class="crumb-here" style="' + cvars(f.color) + '">' + icon('folder') + esc(f.name) + '</span>';
+      parts += '<span class="crumb-meta">' + skillsIn(f.id).length + ' 个 skill · 拖拽行到面包屑「全部技能」可移出</span>';
+      parts += '<div class="crumb-actions">' +
+        '<button class="btn btn-sm" data-rename-folder="' + esc(f.id) + '">' + icon('pencil') + '重命名</button>' +
+        '<button class="btn btn-sm btn-ghost" data-del-folder="' + esc(f.id) + '" style="color:var(--danger)">' + icon('trash') + '删除分类</button>' +
+        '</div>';
+    }
+    return '<div class="crumb-bar">' + parts + '</div>';
+  }
+
+  function listCardHtml(rows, inFolder, footHint) {
+    var head = '<div class="list-head' + (inFolder ? ' in-folder' : '') + '"><span></span><span>SKILL</span>' +
+      (inFolder ? '' : '<span>分类</span>') + '<span>备注</span><span>分发覆盖</span><span></span></div>';
+    var body = rows.length
+      ? rows.map(function (s, i) { return rowHtml(s, i, inFolder); }).join('')
+      : '<div class="empty"><div class="empty-icon">' + icon('inbox') + '</div>' +
+        '<b>' + (state.folder === 'none' ? '全部 skill 都已归档' : '这个分类还是空的') + '</b>' +
+        '<span>' + (state.folder === 'none' ? '所有 skill 都已放入分类文件夹' : '回到「全部技能」把 skill 拖进来，或用行菜单移动') + '</span></div>';
+    return '<div class="list-card">' + head + '<div class="list-body sk-scroll">' + body + '</div>' +
+      '<div class="list-foot"><span class="hint">' + icon('info') +
+      '<span>' + esc(footHint) + '</span></span><span id="list-count">' + rows.length + ' 条</span></div></div>';
+  }
+
+  function gridHtml() {
+    var html = '';
+    if (state.q) {
+      var hits = matchSkills(state.q);
+      html += '<div class="grid-sect"><b>搜索结果</b><span>“' + esc(state.q) + '”</span><span class="count-text">' + hits.length + ' 个匹配</span></div>';
+      html += hits.length
+        ? '<div class="folder-grid">' + hits.map(fileCard).join('') + '</div>'
+        : '<div class="empty" style="min-height:180px"><div class="empty-icon">' + icon('search') + '</div><b>没有匹配的 skill</b><span>换个关键词试试</span></div>';
+      return html;
+    }
+    html += '<div class="grid-sect"><b>分类文件夹</b><span>点击进入 · 拖拽 skill 卡片到文件夹即可归档</span><span class="count-text">' + FOLDERS.length + ' 个文件夹</span></div>';
+    html += '<div class="folder-grid">';
+    html += FOLDERS.map(folderCard).join('');
+    html += '<button class="folder-card ghost" id="grid-new-folder">' +
+      '<span class="fc-icon">' + icon('folder-plus') + '</span>' +
+      '<span><span class="fc-name">新建分类</span><span class="fc-meta" style="display:block">手动建分类，把 skill 归档进去</span></span>' +
+      '</button>';
+    html += '</div>';
+    var unfiled = skillsIn('none');
+    html += '<div class="grid-sect"><b>未归档</b><span>还没放入任何分类的 skill</span><span class="count-text">' + unfiled.length + ' 个</span></div>';
+    html += unfiled.length
+      ? '<div class="folder-grid">' + unfiled.map(fileCard).join('') + '</div>'
+      : '<div class="empty" style="min-height:140px"><div class="empty-icon">' + icon('check') + '</div><b>全部已归档</b><span>每个 skill 都在某个分类文件夹里</span></div>';
+    return html;
+  }
+
+  function renderChrome() {
+    var unfiled = skillsIn('none').length;
+    document.getElementById('store-count').textContent = SKILLS.length;
+    document.getElementById('nav-shared').textContent = SKILLS.length;
+    document.getElementById('stat-folders').textContent = FOLDERS.length;
+    document.getElementById('stat-edited').textContent = editedCount();
+    document.getElementById('stat-unfiled').textContent = unfiled;
+    document.getElementById('sb-unfiled').textContent = unfiled;
+    document.getElementById('sb-health').textContent = SKILLS.length + ' 共有 · ' + FOLDERS.length + ' 分类';
+
+    var title = document.getElementById('page-title');
+    var sub = document.getElementById('page-sub');
+    if (state.folder === 'none') {
+      title.textContent = '未归档';
+      sub.textContent = unfiled + ' 个 skill 还没放入任何分类 · 拖到侧栏文件夹即可归档';
+    } else if (state.folder) {
+      var f = folderById(state.folder);
+      title.textContent = f.name;
+      sub.textContent = f.name + ' · ' + skillsIn(f.id).length + ' 个 skill · 由你手动维护的分类文件夹';
+    } else {
+      title.textContent = '共有技能';
+      sub.textContent = FOLDERS.length + ' 个分类文件夹 · ' + SKILLS.length + ' 个 skill · 拖拽归档，像资源管理器一样管理';
+    }
+
+    document.getElementById('sort-label').textContent = state.sort === 'edited' ? '最近编辑' : '名称 A→Z';
+    Array.prototype.forEach.call(root.querySelectorAll('#view-seg button'), function (b) {
+      b.classList.toggle('active', b.getAttribute('data-view-mode') === prefs.view);
+    });
+    Array.prototype.forEach.call(root.querySelectorAll('#side-folders .nav-item'), function (el) {
+      var fb = el.getAttribute('data-folder-nav');
+      el.classList.toggle('active', (state.folder || 'all') === fb);
+    });
+  }
+
+  function renderSide() {
+    var html = '<button class="nav-item cat-nav' + (!state.folder ? ' active' : '') + '" data-folder-nav="all">' +
+      icon('grid') + '全部技能<b class="nav-badge">' + SKILLS.length + '</b></button>';
+    FOLDERS.forEach(function (f) {
+      html += '<button class="nav-item cat-nav' + (state.folder === f.id ? ' active' : '') + '" data-folder-nav="' + esc(f.id) + '" data-drop-folder="' + esc(f.id) + '" title="打开「' + esc(f.name) + '」，也可拖拽 skill 进来">' +
+        '<span class="catdot" style="--c:' + CVARS[f.color][0] + '"></span>' + esc(f.name) +
+        '<b class="nav-badge">' + skillsIn(f.id).length + '</b></button>';
+    });
+    html += '<button class="nav-item cat-nav' + (state.folder === 'none' ? ' active' : '') + '" data-folder-nav="none" title="查看未归档 skill">' +
+      '<span class="catdot dashed"></span>未归档<b class="nav-badge">' + skillsIn('none').length + '</b></button>';
+    document.getElementById('side-folders').innerHTML = html;
+  }
+
+  function renderContent(animate) {
+    var c = document.getElementById('content');
+    if (state.folder) {
+      var rows = sortList(skillsIn(state.folder));
+      c.innerHTML = crumbHtml() + listCardHtml(rows, true,
+        state.folder === 'none'
+          ? '点 ⋯ 菜单或直接拖拽侧栏文件夹，把 skill 归档进分类'
+          : '行菜单 ⋯ 可移动到其他分类；拖到面包屑「全部技能」移出分类');
+    } else if (prefs.view === 'grid') {
+      c.innerHTML = '<div class="folder-scroll sk-scroll">' + gridHtml() + '</div>';
+    } else {
+      var all = sortList(state.q ? matchSkills(state.q) : SKILLS.slice());
+      c.innerHTML = listCardHtml(all, false, state.q
+        ? '搜索结果 · “' + state.q + '” 命中 ' + all.length + ' 条'
+        : '点行选中 · ⋯ 菜单移动分类 · 分类列的 chip 可直接进入文件夹');
+    }
+    mountIcons();
+  }
+
+  function renderInspector() {
+    var s = null;
+    for (var i = 0; i < SKILLS.length; i++) if (SKILLS[i].name === state.selected) s = SKILLS[i];
+    var head = document.getElementById('ins-raw-name');
+    var body = document.getElementById('ins-body');
+    if (!s) {
+      head.textContent = '—';
+      body.innerHTML = '<div class="ins-empty"><div class="empty-icon">' + icon('pencil') + '</div>' +
+        '<b style="font-size:12.5px">选一个 skill</b><span style="font-size:11px">点列表 / 卡片任意一项，在右侧改归属、显示名与备注</span></div>';
+      mountIcons();
+      return;
+    }
+    head.textContent = s.name;
+    var cur = ASSIGN[s.name];
+    var chips = '<button class="fold-chip dashed' + (!cur ? ' on' : '') + '" data-assign="" ' + 'style="--c:var(--ink-2);--cs:var(--surface-2)">' + icon('inbox') + '未归档</button>';
+    chips += FOLDERS.map(function (f) {
+      return '<button class="fold-chip' + (cur === f.id ? ' on' : '') + '" data-assign="' + esc(f.id) + '" style="' + cvars(f.color) + '">' +
+        icon('folder') + esc(f.name) + '</button>';
+    }).join('');
+    chips += '<button class="fold-chip add" data-new-folder-for="' + esc(s.name) + '">' + icon('plus') + '新建分类</button>';
+
+    var path = 'D:\\skillkit\\store\\' + s.name;
+    body.innerHTML =
+      '<div class="field-block"><div class="field-label"><span>显示名称</span></div>' +
+      '<input class="name-input" id="ins-name" type="text" maxlength="48" value="' + esc(displayOf(s)) + '" spellcheck="false">' +
+      '<div class="field-help">只改界面叫法，磁盘目录名 <b style="font-family:var(--mono)">' + esc(s.name) + '</b> 不变。</div></div>' +
+      '<div class="field-block"><div class="field-label"><span>归属分类</span><span style="text-transform:none;letter-spacing:0;font-weight:400">单选 · 一个 skill 只在一个文件夹</span></div>' +
+      '<div class="fold-picker">' + chips + '</div>' +
+      '<div class="field-help">旧的多选分类已替换为文件夹归属；点 chip 即移动，也可在列表里拖拽。</div></div>' +
+      '<div class="field-block"><div class="field-label"><span>备注</span></div>' +
+      '<textarea class="note-area" id="ins-note" maxlength="400" placeholder="记下这个 skill 的用途、坑、来源…">' + esc(noteOf(s)) + '</textarea>' +
+      '<div class="note-meta"><span>自动保存（原型写 localStorage）</span><span id="note-count">' + noteOf(s).length + ' / 400</span></div></div>' +
+      '<div class="divider"></div>' +
+      '<div class="field-block"><div class="field-label"><span>分发覆盖</span><span style="text-transform:none;letter-spacing:0;font-weight:400">7 个 agent</span></div>' +
+      '<div class="meta-list">' +
+      '<div class="meta-row"><span>目录名</span><b>' + esc(s.name) + '</b></div>' +
+      '<div class="meta-row"><span>内容哈希</span><b>' + hash8(s.name) + '</b></div>' +
+      '<div class="meta-row"><span>入库来源</span><b>scan</b></div>' +
+      '<div class="meta-row"><span>覆盖 agent</span><b>7 / 7</b></div>' +
+      '</div></div>' +
+      '<div class="field-block"><div class="field-label"><span>描述</span></div><div class="desc-text">' + esc(s.desc) + '</div></div>' +
+      '<div class="field-block"><div class="field-label"><span>路径</span></div>' +
+      '<div class="path-box"><b>' + esc(path) + '</b><button data-copy="' + esc(path) + '" title="复制路径">' + icon('copy') + '</button></div></div>' +
+      '<div class="ins-actions">' +
+      '<button class="btn" data-open="' + esc(path) + '">' + icon('folder') + '打开目录</button>' +
+      '<button class="btn" data-copy="' + esc(path) + '">' + icon('copy') + '复制路径</button></div>' +
+      '<div class="ins-danger"><button class="btn btn-danger" data-del-skill="1">' + icon('trash') + '彻底删除 skill</button>' +
+      '<p>删除中央仓库实体并撤掉所有 agent 链接，操作不可恢复（原型内不执行）。</p></div>';
+    mountIcons();
+  }
+
+  function renderAll() {
+    renderChrome();
+    renderSide();
+    renderContent();
+    renderInspector();
+  }
+
+  /* ---------------- 反馈 ---------------- */
+  var saveTimer = null;
+  function flashSaved() {
+    var el = document.getElementById('save-state');
+    if (!el) return;
+    el.hidden = false;
+    clearTimeout(el._t);
+    el._t = setTimeout(function () { el.hidden = true; }, 1400);
+  }
+  function toast(kind, title, text) {
+    var wrap = document.getElementById('sk-toasts');
+    var el = document.createElement('div');
+    el.className = 'toast';
+    var icons = { ok: 'check', info: 'info', warn: 'alert', bad: 'alert' };
+    var cls = kind === 'ok' ? '' : ' ' + kind;
+    el.innerHTML = '<span class="toast-icon' + cls + '">' + icon(icons[kind] || 'info') + '</span>' +
+      '<div class="toast-main"><b>' + esc(title) + '</b>' + (text ? '<span>' + esc(text) + '</span>' : '') + '</div>' +
+      '<button class="toast-close" aria-label="关闭" style="width:20px;height:20px;border-radius:5px;display:grid;place-items:center;color:var(--ink-3)">' + icon('x') + '</button>';
+    wrap.appendChild(el);
+    var kill = function () { el.classList.add('out'); setTimeout(function () { el.remove(); }, 190); };
+    el.querySelector('.toast-close').addEventListener('click', kill);
+    setTimeout(kill, 3200);
+  }
+  function runProgress(ms, done) {
+    var bar = document.getElementById('progress');
+    bar.classList.add('show');
+    var fill = bar.querySelector('i');
+    fill.style.width = '0%';
+    setTimeout(function () { fill.style.width = '72%'; }, 20);
+    setTimeout(function () {
+      bar.classList.remove('show');
+      fill.style.width = '0%';
+      done();
+    }, ms);
+  }
+
+  /* ---------------- 弹窗 / 菜单 ---------------- */
+  function openModal(html) {
+    var mroot = document.getElementById('sk-modal-root');
+    mroot.innerHTML = '<div class="overlay" data-overlay="1">' + html + '</div>';
+    mroot.querySelector('.overlay').addEventListener('mousedown', function (e) {
+      if (e.target === e.currentTarget) closeModal();
+    });
+    mountIcons();
+  }
+  function closeModal() { document.getElementById('sk-modal-root').innerHTML = ''; }
+
+  function folderModal(mode, folderId, assignName) {
+    var f = folderId ? folderById(folderId) : null;
+    var color = f ? f.color : 'violet';
+    var name = f ? f.name : '';
+    openModal(
+      '<div class="modal">' +
+      '<button class="modal-close" data-close="1" aria-label="关闭">' + icon('x') + '</button>' +
+      '<div class="modal-head"><span class="modal-eyebrow">' + (f ? 'RENAME FOLDER' : 'NEW FOLDER') + '</span>' +
+      '<h2>' + (f ? '重命名分类' : '新建分类文件夹') + '</h2></div>' +
+      '<div class="modal-body">' +
+      '<div class="field-label"><span>名称</span></div>' +
+      '<input class="name-input" id="fm-name" type="text" maxlength="12" placeholder="例如：自动化 / 写作 / 数据…" value="' + esc(name) + '" spellcheck="false">' +
+      '<div class="field-label" style="margin-top:12px"><span>颜色</span></div>' +
+      '<div class="palette" id="fm-palette">' +
+      PALETTE.map(function (c) {
+        return '<button data-color="' + c + '" class="' + (c === color ? 'on' : '') + '" style="--pc:var(--' + (c === 'green' ? 'success' : c) + ')" aria-label="' + c + '"></button>';
+      }).join('') +
+      '</div>' +
+      '<p style="margin-top:10px;font-size:11px">' +
+      (f ? '分类名与颜色只影响展示；其中 ' + skillsIn(f.id).length + ' 个 skill 的归属保持不变。'
+         : (assignName ? '创建后会把「' + esc(assignName) + '」直接归入这个分类。' : '创建后是一个空文件夹，把 skill 拖进来或用 ⋯ 菜单移动。')) +
+      '</p></div>' +
+      '<div class="modal-foot"><button class="btn" data-close="1">取消</button>' +
+      '<button class="btn btn-primary" id="fm-ok">' + (f ? '保存' : '创建') + '</button></div>' +
+      '</div>');
+    var picked = color;
+    document.getElementById('fm-palette').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-color]');
+      if (!b) return;
+      picked = b.getAttribute('data-color');
+      Array.prototype.forEach.call(this.querySelectorAll('button'), function (x) {
+        x.classList.toggle('on', x === b);
+      });
+    });
+    document.getElementById('fm-name').focus();
+    document.getElementById('fm-ok').addEventListener('click', function () {
+      var val = document.getElementById('fm-name').value.trim().slice(0, 12);
+      if (!val) { toast('warn', '名称不能为空', '给分类起个名字再保存'); return; }
+      if (f) {
+        f.name = val; f.color = picked;
+        toast('ok', '分类已更新', val);
+      } else {
+        var id = 'f-' + Date.now().toString(36).slice(-6);
+        FOLDERS.push({ id: id, name: val, color: picked });
+        if (assignName) ASSIGN[assignName] = id;
+        toast('ok', '分类已创建', val + (assignName ? ' · 「' + assignName + '」已归入' : ' · 空文件夹'));
+      }
+      lsSave(); closeModal(); renderAll();
+    });
+    document.getElementById('fm-name').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') document.getElementById('fm-ok').click();
+    });
+  }
+
+  function confirmDeleteFolder(f) {
+    var n = skillsIn(f.id).length;
+    openModal(
+      '<div class="modal">' +
+      '<button class="modal-close" data-close="1" aria-label="关闭">' + icon('x') + '</button>' +
+      '<div class="modal-head"><span class="modal-eyebrow">CONFIRM</span><h2>删除分类「' + esc(f.name) + '」？</h2></div>' +
+      '<div class="modal-body"><p>其中 <b>' + n + ' 个 skill</b> 将回到<b>未归档</b>，skill 文件本身不受影响；' +
+      '此操作只删除你手动建立的分类。也可以先把里面的 skill 拖到其他文件夹。</p></div>' +
+      '<div class="modal-foot"><button class="btn" data-close="1">取消</button>' +
+      '<button class="btn btn-danger" id="fm-del">删除分类</button></div></div>');
+    document.getElementById('fm-del').addEventListener('click', function () {
+      FOLDERS = FOLDERS.filter(function (x) { return x.id !== f.id; });
+      SKILLS.forEach(function (s) { if (ASSIGN[s.name] === f.id) delete ASSIGN[s.name]; });
+      if (state.folder === f.id) state.folder = null;
+      lsSave(); closeModal(); renderAll();
+      toast('ok', '分类已删除', '「' + f.name + '」里的 ' + n + ' 个 skill 已回到未归档');
+    });
+  }
+
+  var ctxEl = null;
+  function closeCtx() {
+    if (ctxEl) { ctxEl.remove(); ctxEl = null; }
+  }
+  function openCtx(items, x, y) {
+    closeCtx();
+    ctxEl = document.createElement('div');
+    ctxEl.className = 'ctx-menu';
+    ctxEl.innerHTML = items.map(function (it) {
+      if (it === '-') return '<div class="ctx-sep"></div>';
+      if (it.label === '移动到…') return '<div class="ctx-label">移动到…</div>';
+      return '<button class="ctx-item' + (it.danger ? ' danger' : '') + (it.disabled ? ' current' : '') + '" data-ctx="' + esc(it.act || '') + '"' + (it.arg ? ' data-arg="' + esc(it.arg) + '"' : '') + '>' +
+        (it.dot ? '<span class="catdot" style="--c:' + it.dot + '"></span>' : icon(it.ic || 'folder')) +
+        esc(it.label) + (it.badge ? '<b>' + it.badge + '</b>' : '') + '</button>';
+    }).join('');
+    document.body.appendChild(ctxEl);
+    mountIcons();
+    var r = ctxEl.getBoundingClientRect();
+    ctxEl.style.left = Math.min(x, window.innerWidth - r.width - 10) + 'px';
+    ctxEl.style.top = Math.min(y, window.innerHeight - r.height - 10) + 'px';
+  }
+  function skillMenu(skillName, x, y) {
+    var cur = ASSIGN[skillName];
+    var items = [{ label: '移动到…', ic: 'folder' }];
+    FOLDERS.forEach(function (f) {
+      items.push({
+        label: f.name, dot: CVARS[f.color][0], act: 'move', arg: f.id,
+        badge: cur === f.id ? '当前' : String(skillsIn(f.id).length),
+        disabled: cur === f.id
+      });
+    });
+    items.push('-');
+    items.push({ label: '移出分类（回到未归档）', ic: 'inbox', act: 'unfile', disabled: !cur });
+    openCtx(items, x, y);
+  }
+  function folderMenu(folderId, x, y) {
+    openCtx([
+      { label: '重命名', ic: 'pencil', act: 'rename', arg: folderId },
+      { label: '更改颜色', ic: 'folder', act: 'recolor', arg: folderId },
+      '-',
+      { label: '删除分类', ic: 'trash', danger: true, act: 'del', arg: folderId }
+    ], x, y);
+  }
+
+  /* ---------------- 动作 ---------------- */
+  function moveSkill(name, folderId) {
+    if (folderId) ASSIGN[name] = folderId;
+    else delete ASSIGN[name];
+    lsSave();
+    var f = folderById(folderId);
+    toast('ok', '已移动', '「' + name + '」→ ' + (f ? '「' + f.name + '」' : '未归档'));
+    renderAll();
+  }
+  function openFolder(id) {
+    state.folder = (id === 'all') ? null : id;
+    closeCtx();
+    renderAll();
+  }
+  function refresh() {
+    var btn = document.getElementById('refresh-btn');
+    btn.classList.add('is-busy');
+    runProgress(600, function () {
+      btn.classList.remove('is-busy');
+      toast('info', '已刷新', '原型模式：数据来自内置快照');
+    });
+  }
+
+  /* ---------------- 事件 ---------------- */
+  root.addEventListener('click', function (e) {
+    var t = e.target;
+
+    // ⋯ 按钮在卡片 / 行内部，必须先于导航判断
+    var moreF = t.closest('[data-more-folder]');
+    if (moreF) { e.stopPropagation(); folderMenu(moreF.getAttribute('data-more-folder'), e.clientX, e.clientY); return; }
+    var moreS = t.closest('[data-more-skill]');
+    if (moreS) {
+      e.stopPropagation();
+      skillMenu(moreS.getAttribute('data-more-skill'), e.clientX, e.clientY);
+      return;
+    }
+
+    if (t.closest('[data-board]')) {
+      var b = t.closest('[data-board]').getAttribute('data-board');
+      if (b !== 'shared') toast('info', '原型范围', '本原型聚焦「共有技能」的分类升级，其余看板保持现状');
+      return;
+    }
+    if (t.closest('[data-folder-nav]')) { openFolder(t.closest('[data-folder-nav]').getAttribute('data-folder-nav')); return; }
+    if (t.closest('[data-folder-card]')) { openFolder(t.closest('[data-folder-card]').getAttribute('data-folder-card')); return; }
+    if (t.closest('[data-crumb-root]')) { openFolder('all'); return; }
+    if (t.closest('[data-jump-folder]')) { openFolder(t.closest('[data-jump-folder]').getAttribute('data-jump-folder')); return; }
+
+    if (t.closest('#grid-new-folder') || t.closest('#side-add-folder')) { folderModal('create'); return; }
+    var newFor = t.closest('[data-new-folder-for]');
+    if (newFor) { folderModal('create', null, newFor.getAttribute('data-new-folder-for')); return; }
+
+    var ren = t.closest('[data-rename-folder]');
+    if (ren) { folderModal('edit', ren.getAttribute('data-rename-folder')); return; }
+    var del = t.closest('[data-del-folder]');
+    if (del) { confirmDeleteFolder(folderById(del.getAttribute('data-del-folder'))); return; }
+
+    var assign = t.closest('[data-assign]');
+    if (assign && state.selected) {
+      moveSkill(state.selected, assign.getAttribute('data-assign') || null);
+      return;
+    }
+
+    var copyEl = t.closest('[data-copy]');
+    if (copyEl) { toast('ok', '路径已复制', copyEl.getAttribute('data-copy')); return; }
+    if (t.closest('[data-open]')) { toast('info', '打开目录', '原型模式：桌面端会调用 explorer.exe'); return; }
+    if (t.closest('[data-del-skill]')) { toast('info', '原型模式', '真实删除由桌面端执行，这里不做任何改动'); return; }
+
+    if (t.closest('[data-close]')) { closeModal(); return; }
+
+    if (t.closest('#view-seg')) {
+      var vb = t.closest('[data-view-mode]');
+      if (vb) {
+        prefs.view = vb.getAttribute('data-view-mode');
+        lsSave(); renderChrome(); renderContent();
+      }
+      return;
+    }
+    if (t.closest('#sort-btn')) {
+      state.sort = state.sort === 'name' ? 'edited' : 'name';
+      prefs.sort = state.sort; lsSave();
+      renderChrome(); renderContent();
+      return;
+    }
+    if (t.closest('#refresh-btn')) { refresh(); return; }
+    if (t.closest('#theme-toggle')) {
+      prefs.theme = prefs.theme === 'dark' ? 'light' : 'dark';
+      root.classList.toggle('theme-dark', prefs.theme === 'dark');
+      document.getElementById('theme-toggle').innerHTML = icon(prefs.theme === 'dark' ? 'sun' : 'moon');
+      mountIcons(); lsSave();
+      return;
+    }
+    if (t.closest('#open-settings-note') || t.closest('#win-min') || t.closest('#win-max') || t.closest('#win-close')) {
+      toast('info', '原型模式', '这个交互保持与现有版本一致，原型未实现');
+      return;
+    }
+
+    var row = t.closest('.row, .file-card');
+    if (row && row.getAttribute('data-skill')) {
+      state.selected = row.getAttribute('data-skill');
+      renderContent();
+      renderInspector();
+    }
+  });
+
+  var pendingCtxSkill = null;
+  // ⋯ 菜单需要记住目标 skill：在捕获阶段记录
+  root.addEventListener('click', function (e) {
+    var m = e.target.closest && e.target.closest('[data-more-skill]');
+    if (m) pendingCtxSkill = m.getAttribute('data-more-skill');
+  }, true);
+
+  // ⋯ 弹出菜单挂在 body 上，点击处理统一放 document（冒泡阶段在 root 之后）
+  document.addEventListener('click', function (e) {
+    if (!ctxEl) return;
+    var ci = e.target.closest('[data-ctx]');
+    if (ci) {
+      var act = ci.getAttribute('data-ctx');
+      var arg = ci.getAttribute('data-arg');
+      closeCtx();
+      if (act === 'move' && arg) moveSkill(pendingCtxSkill, arg);
+      if (act === 'unfile') moveSkill(pendingCtxSkill, null);
+      if (act === 'rename') folderModal('edit', arg);
+      if (act === 'recolor') folderModal('edit', arg);
+      if (act === 'del') confirmDeleteFolder(folderById(arg));
+      return;
+    }
+    if (!e.target.closest('.ctx-menu') && !e.target.closest('[data-more-skill]') && !e.target.closest('[data-more-folder]')) closeCtx();
+  });
+
+  document.addEventListener('input', function (e) {
+    if (e.target.id === 'gsearch') {
+      state.q = e.target.value.trim();
+      if (state.q && state.folder) { state.folder = null; renderSide(); }
+      renderChrome(); renderContent();
+    }
+    if (e.target.id === 'ins-name' && state.selected) {
+      var v = e.target.value.trim();
+      if (v) DISPLAYS[state.selected] = v; else delete DISPLAYS[state.selected];
+      lsSave(); flashSaved();
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(function () { renderChrome(); renderContent(); }, 240);
+    }
+    if (e.target.id === 'ins-note' && state.selected) {
+      var n = e.target.value;
+      if (n) NOTES[state.selected] = n; else delete NOTES[state.selected];
+      var counter = document.getElementById('note-count');
+      if (counter) counter.textContent = n.length + ' / 400';
+      lsSave(); flashSaved();
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(function () { renderContent(); }, 240);
+    }
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      var s = document.getElementById('gsearch');
+      if (s) { s.focus(); s.select(); }
+      return;
+    }
+    if (e.key === 'Escape') {
+      if (document.getElementById('sk-modal-root').firstElementChild) { closeModal(); return; }
+      if (ctxEl) { closeCtx(); return; }
+      if (state.q) {
+        state.q = '';
+        document.getElementById('gsearch').value = '';
+        renderChrome(); renderContent();
+        return;
+      }
+      if (state.folder) openFolder('all');
+    }
+  });
+
+  /* ---------------- 拖拽归档 ---------------- */
+  var dragSkill = null;
+  root.addEventListener('dragstart', function (e) {
+    var src = e.target.closest && e.target.closest('[data-skill][draggable]');
+    if (!src) return;
+    dragSkill = src.getAttribute('data-skill');
+    src.classList.add('is-dragging');
+    try { e.dataTransfer.setData('text/plain', 'skill:' + dragSkill); e.dataTransfer.effectAllowed = 'move'; } catch (err) {}
+  });
+  root.addEventListener('dragend', function () {
+    root.querySelectorAll('.is-dragging, .drop-hint').forEach(function (el) {
+      el.classList.remove('is-dragging', 'drop-hint');
+    });
+    dragSkill = null;
+  });
+  function dropTarget(el) { return el.closest && el.closest('[data-drop-folder], [data-drop-unfile]'); }
+  root.addEventListener('dragover', function (e) {
+    var t = dropTarget(e.target);
+    if (!t || !dragSkill) return;
+    e.preventDefault();
+    t.classList.add('drop-hint');
+  });
+  root.addEventListener('dragleave', function (e) {
+    var t = dropTarget(e.target);
+    if (t) t.classList.remove('drop-hint');
+  });
+  root.addEventListener('drop', function (e) {
+    var t = dropTarget(e.target);
+    if (!t || !dragSkill) return;
+    e.preventDefault();
+    var data = '';
+    try { data = e.dataTransfer.getData('text/plain'); } catch (err) {}
+    var name = dragSkill || (data.indexOf('skill:') === 0 ? data.slice(6) : '');
+    t.classList.remove('drop-hint');
+    if (!name) return;
+    if (t.hasAttribute('data-drop-unfile')) moveSkill(name, null);
+    else moveSkill(name, t.getAttribute('data-drop-folder'));
+    dragSkill = null;
+  });
+
+  /* ---------------- 启动 ---------------- */
+  root.classList.toggle('theme-dark', prefs.theme === 'dark');
+  document.getElementById('theme-toggle').innerHTML = icon(prefs.theme === 'dark' ? 'sun' : 'moon');
+  renderAll();
+  mountIcons();
+  window.__SK_PROTO = {
+    state: function () { return state; },
+    folders: function () { return FOLDERS; },
+    assign: function () { return ASSIGN; },
+    moveSkill: moveSkill,
+    openFolder: openFolder,
+    createFolder: function (name, color) {
+      var id = 'f-' + Date.now().toString(36).slice(-6);
+      FOLDERS.push({ id: id, name: name, color: color || 'teal' });
+      lsSave(); renderAll();
+      return id;
+    }
+  };
+})();
+</script>
+<!--SK-FRAGMENT-END-->
+<style>
+/* 项目内浏览（固定视口）时的覆盖：窗口填满视口高度，内部区域滚动。内联预览不加载此块。 */
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; box-sizing: border-box;
+  background:
+    radial-gradient(1100px 720px at 16% 0%, #22375c 0%, transparent 58%),
+    radial-gradient(900px 700px at 94% 100%, #0a3742 0%, transparent 56%),
+    linear-gradient(145deg, #090d17 0%, #06080e 100%); }
+#sk-app .window { height: min(920px, calc(100vh - 48px)); min-height: 700px; }
+#sk-app .folder-scroll, #sk-app .list-body, #sk-app .ins-body { max-height: none; }
+</style>
+</body>
+</html>

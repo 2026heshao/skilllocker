@@ -64,6 +64,7 @@
 - **同名且内容与中央一致的实体一律不算独有**（无论来源）；同名不同内容记 `overridden`（同名覆盖，详情栏可看差异——`trae_cn/skill-creator` 就是这么来的：Trae 内置版与中央版同名不同内容）。
 - **共享目录去重归属**：多个 agent 声明同一个 `extra_dirs`（如 `~/.agents/skills`）时按路径去重，行归 `adapters.json` 里**先声明**它的 agent（固定归属，本机 = ZCode；不跟 `ordered_tools` 的 enabled 排序走，否则切换 agent 开关会让行键漂移、把行上已写的 meta 清掉），其余读取者放 `sharedWith`；行上带「外部」徽标，agent 徽标 hover 提示共读者，详情栏有「共读 agent」「来源目录」行。
 - **删除防线**：`deletable=false` 的行详情栏不渲染删除按钮；即便绕过 UI 直调 `delete_skill`，后端也按 `find_unique_row()` 现查行并拒绝（提示「外部来源，由 agent 自己管理」）；`open_dir` 同样走现查路径，不再假设主目录直拼。
+- **卸载外部来源（v0.2 显式开通）**：`deletable=false` 的行详情栏渲染「卸载」按钮（foreign-link 为「摘除链接」），走独立的 `uninstall_unique(key)` 接口——`delete_skill` 的原防线不动。规则：foreign-link **只摘链接**（真身在别处，绝不顺着链接删实体）；extra 目录 / 容器子目录**永久删除该目录**（`delete_tree` 自带 reparse 防护），确认弹窗给出完整路径、文件数与「agent 可能重新安装」警示；路径一律 `find_unique_row()` 现查，拒绝中央仓库内的任何路径；卸载同时清该行 unique meta 并记 `uninstall-unique` 事件。
 - `seed_meta()` 改为幂等补种：磁盘上新增的独有条目下次启动自动补预置分类，已有的 meta 不动。
 
 
@@ -177,13 +178,13 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 
 ## 7. 自检与验收
 
-### 7.1 桌面端自检（`--selftest`，离屏窗口，当前 67 项）
+### 7.1 桌面端自检（`--selftest`，离屏窗口，当前 91 项）
 
-**期望值一律现算，不写死库内数据**：共有/独有行数、独有行键集合、序号范围、已编辑条数、已连接 agent 数、store 路径全部取自 `skillkit.list_boards()` / `get_meta()` / `load_config()`；分类数 = app.js 的 7 个内置分类 + 本机 prefs 里的自建分类（从 WebView2 的 localStorage 读）。库内增删 skill、冲突收口之后重跑自检仍然成立。
+**期望值一律现算，不写死库内数据**：共有/独有行数、独有行键集合、序号范围、已编辑条数、已连接 agent 数、store 路径、**分类夹数与未归档数（`boards.folders` / `skill_meta.folder_id`）** 全部取自 `skillkit.list_boards()` / `get_meta()` / `load_config()`。库内增删 skill、冲突收口之后重跑自检仍然成立。
 
-覆盖：模式=db、0 条 JS 错误、共有行数与侧栏计数、独有行数 / 行键集合与后端一致（含 extra / 容器展开 / 外部链接来源，见 §1.2）、独有序号连续 1..N、已编辑条数与 meta 一致、分类数、已连接 agent 数、路径来自 `config.json`、选中 `pdf`、列表上方筛选行已移除、**序号列（首行=1、共有序号连续 1..N、第 10 行两位数仍 26×26 不溢出）**、详情栏删除按钮存在、**差异入口按冲突数据分支**（`boards.conflict` 来自独有板的同名覆盖行；共有板差异分支只在 `find_conflict_tool()` 现查到实体冲突时才测，否则核对「共有板无差异按钮」；独有板按 `scope=unique` 核对表头 `CONFLICT · tool / skill` 与弹窗出现——当前库覆盖 `trae_cn/skill-creator` 内置版与中央版同名不同内容的场景）、改名写库（**目标选一条当前没有人工改名/备注的共有 skill，结束后把该行元数据原样恢复，不再清 pdf 的 meta**）、已编辑计数 ±1、搜索（只校验「命中 pdf + 列表收窄」，不写死命中条数）与清筛选、非法删除被拒、从 UI 详情栏点击「彻底删除」并确认（临时 skill 的磁盘目录与列表行都消失、自动选中下一条）、设置弹窗文案、深色主题、智能体看板（10 行 / 侧栏 10 / tab 已连接数现算 / 4 个状态筛 / 每行开关 / 未安装开关禁用；没有未安装行时跳过「未安装调 API 被拒」）、**开关方向回归（点「开」着的开关必须先弹「关闭 … 分发？」确认框、一次点击只弹一个框、取消后开关回到开）**、**外部来源（agent 自己安装的目录如 `~/.agents/skills`：行标题出现「外部 N」标记且 N 与后端 `external[0].count` 一致、详情栏出现「外部来源」行；本机没有外部同名实体时整组跳过）**、**原生窗口（5 项：`WS_MINIMIZEBOX` 在、窗口小图标=ico 帧、窗口大图标=ico 帧、`ICON_SMALL2` 回退到小图标、最小化位被抹掉后能自动补回）**、8 个缩放手柄、窗口外框 API 可读（本机回读 1200 × 760 @ 168,28）、**标题栏拖动窗口（合成 pointerdown/move/up，外框应位移 dx=60,dy=40）**、**最大化态拖动先还原再位移**、启动尺寸 1180~1200 × 720~760、底部设置按钮与版本号完整可见、详情栏右边界 ≤ 窗口宽、1180 宽无横向溢出、外框写入 `1240×780` 回读一致、写入 `900×500` 被兜底成 `1180×720`。
+覆盖：模式=db、0 条 JS 错误、共有行数与侧栏计数、独有行数 / 行键集合与后端一致（含 extra / 容器展开 / 外部链接来源，见 §1.2）、独有序号连续 1..N、已编辑条数与 meta 一致（只有显示名 / 备注算编辑，归属夹不算）、**分类夹数、未归档数**、已连接 agent 数、路径来自 `config.json`、选中 `pdf`、列表上方筛选行已移除、**序号列（首行=1、共有序号连续 1..N、第 10 行两位数仍 26×26 不溢出）**、详情栏删除按钮存在、**分类文件夹 11 项**（网格视图卡片数=后端 folders 数、`#grid-new-folder` 虚卡存在、点 `data-folder-card` 进夹后标题=夹名且行数=后端夹内计数、面包屑返回根后 `.folder-grid` 重新出现、临时建夹+归入 pdf 后卡片数 +1、`folder_delete` 后卡片数复原且夹内行 `folder_id` 置空 / moved 计数正确、切列表视图 `.row` 数=sh_total、`set_meta(folder)` 落库与 `''` 复原、全新库上迁移回填一次且二次迁移零改动——自检用的临时库已在 `skillkit.db` 升级时完成真实迁移）、**差异入口按冲突数据分支**（`boards.conflict` 来自独有板的同名覆盖行；共有板差异分支只在 `find_conflict_tool()` 现查到实体冲突时才测，否则核对「共有板无差异按钮」；独有板按 `scope=unique` 核对表头 `CONFLICT · tool / skill` 与弹窗出现）、改名写库（**目标选一条当前没有人工改名/备注的共有 skill，结束后只还原显示名与时间戳——整行 insert-or-replace 会把 folder_id 抹掉**）、已编辑计数 ±1、搜索（只校验「命中 pdf + 列表收窄」，不写死命中条数）与清筛选、非法删除被拒、从 UI 详情栏点击「彻底删除」并确认（临时 skill 的磁盘目录与列表行都消失、自动选中下一条）、设置弹窗文案、深色主题、智能体看板（10 行 / 侧栏 10 / tab 已连接数现算 / 4 个状态筛 / 每行开关 / 未安装开关禁用 / **序号列（首行=1、连续 1..N、≥10 行时第 10 行两位数仍 26×26 不溢出，不足 10 行跳过该项）**；没有未安装行时跳过「未安装调 API 被拒」）、**开关方向回归（点「开」着的开关必须先弹「关闭 … 分发？」确认框、一次点击只弹一个框、取消后开关回到开）**、**外部来源（agent 自己安装的目录如 `~/.agents/skills`：行标题出现「外部 N」标记且 N 与后端 `external[0].count` 一致、详情栏出现「外部来源」行、外部行详情有「卸载」按钮且无「删除副本」按钮；本机没有外部同名实体时整组跳过）**、**原生窗口（5 项：`WS_MINIMIZEBOX` 在、窗口小图标=ico 帧、窗口大图标=ico 帧、`ICON_SMALL2` 回退到小图标、最小化位被抹掉后能自动补回）**、8 个缩放手柄、窗口外框 API 可读（本机回读 1200 × 760 @ 168,28）、**标题栏拖动窗口（合成 pointerdown/move/up，外框应位移 dx=60,dy=40）**、**最大化态拖动先还原再位移**、启动尺寸 1180~1200 × 720~760、底部设置按钮与版本号完整可见、详情栏右边界 ≤ 窗口宽、1180 宽无横向溢出、外框写入 `1240×780` 回读一致、写入 `900×500` 被兜底成 `1180×720`。
 
-结果：**67/67 PASS，`ERRORS: []`**（本机当前库：49 共有 / 152 独有 / 7 已连接 / 无共有实体冲突；独有 152 覆盖 6 个 agent —— codex 5（`.system` 容器展开）+ DSH 14（灵枢插件 7 + 安装目录 office-skills 7）+ Qoder 31（插件缓存 + 自建 5 + 安装目录扩展技能，computer-use 三个 OS 变体并存）+ Trae CN 12（内置）+ WorkBuddy 50（应用内置，含 workbuddy-docx 套件的 8 个子技能）+ ZCode 40（`~/.agents/skills` 16 + 插件缓存 23 + 包源 dynamic-workflows）；`~/.agents/skills` 归属 ZCode、Trae CN 共读）。Claude Code / WorkBuddy 商店 / codex `.tmp` 等其余技能源见 §1.2 的「刻意不收」清单。原生窗口那 5 项同时也在一台真实可见窗口（快捷方式启动的实例）上单独核对过：`WM_GETICON` 三档 = 20px 帧 / 40px 帧 / 同小图，样式 `0x16030000`，点任务栏按钮 = 最小化 ↔ 恢复，`WS_MINIMIZEBOX` 全程未丢。
+结果：**91/91 PASS，`ERRORS: []`**（本机当前库：51 共有 / 152 独有 / 7 已连接 / 无共有实体冲突 / 7 个分类文件夹，51 条旧分类全部一次性回填进预置夹）。原生窗口那 5 项同时也在一台真实可见窗口（快捷方式启动的实例）上单独核对过：`WM_GETICON` 三档 = 20px 帧 / 40px 帧 / 同小图，样式 `0x16030000`，点任务栏按钮 = 最小化 ↔ 恢复，`WS_MINIMIZEBOX` 全程未丢。
 
 > 旧版自检写死了 `独有 2 行`、`workbuddy/pdf` 的 19 行差异、`分类 7`、`agent 7`、`搜索 pdf 行数=1`，`workbuddy/pdf` 冲突收口成 junction 后这些项必 FAIL；现在已按上面的「现算」方式改写。
 
@@ -193,7 +194,9 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 
 ### 7.2 原型模式回归（Playwright + 系统 Edge，`file://`，13 项）
 
-结果：**13/13 PASS**（模式=local、快照 51/2 行、编辑器写 localStorage、刷新保留、快照差异 19 行、清理后回到 0 条、0 条 JS 错误）。注意原型读的是 `ui\data.js` 冻结快照（51 + 2），桌面端读的是真实仓库（当前 49 + 2），两者行数不同属正常。
+结果：**13/13 PASS**（模式=local、快照 51/2 行、编辑器写 localStorage、刷新保留、快照差异 19 行、清理后回到 0 条、0 条 JS 错误）。注意原型读的是 `ui\data.js` 冻结快照（51 + 2），桌面端读的是真实仓库（当前 51 + 152），两者行数不同属正常。
+
+**分类文件夹功能的原型回归（同一方式，45 项全过）**：网格默认渲染 / 卡片数 / 新建虚卡 / 检查器单选 chip、进夹标题与 5 列窄行、面包屑返回、列表 ⇄ 网格切换与行内文件夹 chip、chip 跳转进夹、⋯ 菜单（移动 toast、菜单关闭）、侧栏未归档项与标题、Esc 退出文件夹、新建弹窗→创建卡片数 +1、⋯ 重命名生效、删除确认文案含 N、删除后复原、刷新后视图偏好保持（prefs）、独有看板无视图分段 / 无文件夹导航、智能体侧栏=状态、0 条 JS 错误；**旧 localStorage 一次性迁移**（cats 多选 + customCats → 7 预置夹 + 自建夹、cats[0] 命中才回填、显示名保留、migrated 标记置位）；**三路拖拽**（行→面包屑移出、文件卡→文件夹卡、行→侧栏夹）与检查器 chip 移动后行即时离开原夹、未归档徽标 +1。
 
 字号调整后另做了一轮布局复查（同样 Playwright + 系统 Edge）：`body` 13px、标题栏 46、顶栏 66、状态栏 30、行 60、检查器名输入 14px / 40 高；1200 与 1180 宽均无横向溢出（`scrollWidth == innerWidth`），导航 / 看板 tab / agent chip 无纵向裁切，设置弹窗 560 宽，0 条 JS 错误。
 
@@ -258,4 +261,4 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 | 弹「启动失败：TypeError: create_window() got an unexpected keyword argument 'icon'」 | 旧版 `main()` 把 `icon=ICON` 传给 `webview.start()`，有的 pywebview 版本会把该参数透传给 `create_window()` | 本版已不再传 `icon`（Windows 图标由 `on_start()` → `_apply_window_icon()` 走 `WM_SETICON`）；不要把 `icon` 加回 `webview.start()` |
 | 打开/重连 agent 时黑窗口连闪（关掉→重连最明显） | `make_junction()` 每次都用 `cmd /c mklink` 建链接；`pythonw` 无控制台，每个控制台子进程都会新分配一个黑窗口，49 个 skill 就是 49 次闪窗 | `_quiet_kwargs()` 已给子进程加 `CREATE_NO_WINDOW` + `SW_HIDE`；实测子进程 `GetConsoleWindow()` 由 `1051536` 变 `0`。另：`cmd` 输出是 ANSI，**不能**用 `text=True`（会 `UnicodeDecodeError`），统一走 `_decode()` |
 | 自检卡住 | 异常抛出后窗口未销毁 | `selftest()` 已用 `try/finally` 保证打印并 `destroy()` |
-| 关闭某个 agent 后（skillkit 显示「已关闭」、目录也空了），**新开会话仍能调用它的 skill** | 该 agent 还有第二条读取路径：Trae CN 除 `~/.trae-cn/skills` 外还读 `~/.agents/skills`（ClawHub / GitHub 安装的真身，见 `~/.agents/.skill-lock.json`）。本工具只管 `skills_dir`，删链接不影响那里 | 看智能体行是否标了「外部 N」、详情栏是否列出 `.agents/skills` 与「N 个内容一致」——有就是如实检测，不是开关失效。要真正失效只能在该 agent 侧卸载（`clawhub` 移除/重装）；本工具刻意不删外部实体（那是第三方装的资产） |
+| 关闭某个 agent 后（skillkit 显示「已关闭」、目录也空了），**新开会话仍能调用它的 skill** | 该 agent 还有第二条读取路径：Trae CN 除 `~/.trae-cn/skills` 外还读 `~/.agents/skills`（ClawHub / GitHub 安装的真身，见 `~/.agents/.skill-lock.json`）。本工具只管 `skills_dir`，删链接不影响那里 | 看智能体行是否标了「外部 N」、详情栏是否列出 `.agents/skills` 与「N 个内容一致」——有就是如实检测，不是开关失效。要真正失效可以在独有看板对那条 skill 点「卸载」（v0.2 起支持，`uninstall_unique` 永久删除该目录或只摘 foreign-link 链接；agent 更新时可能重新安装） |

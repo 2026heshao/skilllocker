@@ -2,7 +2,7 @@
 window.SKILLKIT_DATA = {
  "meta": {
   "generated": "2026-10-29 22:16",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "python": "3.12.6",
   "store": "D:\\skillkit\\store",
   "storeSize": "54.4 MB",
@@ -1570,6 +1570,50 @@ window.SKILLKIT_DATA = {
    "conflicts": 0,
    "skillsTotal": 51,
    "dirExists": true
+  }
+ ],
+ "folders": [
+  {
+   "id": "design",
+   "name": "设计",
+   "color": "violet",
+   "position": 0
+  },
+  {
+   "id": "frontend",
+   "name": "前端",
+   "color": "accent",
+   "position": 1
+  },
+  {
+   "id": "doc",
+   "name": "文档",
+   "color": "warning",
+   "position": 2
+  },
+  {
+   "id": "video",
+   "name": "视频",
+   "color": "rose",
+   "position": 3
+  },
+  {
+   "id": "memory",
+   "name": "记忆",
+   "color": "teal",
+   "position": 4
+  },
+  {
+   "id": "eng",
+   "name": "工程",
+   "color": "slate",
+   "position": 5
+  },
+  {
+   "id": "search",
+   "name": "检索",
+   "color": "green",
+   "position": 6
   }
  ]
 };

@@ -15,6 +15,7 @@
   var ENABLED = [];
   var UNIQUE = [];
   var AGENTS = [];
+  var FOLDERS = [];
   var CONFLICT = null;
 
   var STORE = 'D:\\skillkit\\store';
@@ -31,6 +32,10 @@
     CONFLICT = (D.conflict && D.conflict.skill) ? D.conflict : null;
     STORE = META.store || STORE;
     SCAN = META.scanAt || SCAN;
+    // 桌面端永远信后端快照；本地模式的文件夹定义以 prefs（含自建夹）为准
+    FOLDERS = D.folders || [];
+    if (MODE !== 'db') FOLDERS = localFolders();
+    BootFX.data(data); // 就绪相位的目标数与 agent 点亮名单（刷新路径 BootFX 已收尾，自动跳过）
   }
 
   // agent key -> 显示名；共享目录提示 / 详情栏共读行都用它
@@ -65,16 +70,20 @@
     try { localStorage.removeItem(key); } catch (e) {}
   }
 
-  /* ---------------------------------------------------------- categories */
-  var CATS = [
-    { id: 'design', label: '设计', color: 'violet' },
-    { id: 'frontend', label: '前端', color: 'accent' },
-    { id: 'doc', label: '文档', color: 'warning' },
-    { id: 'video', label: '视频', color: 'rose' },
-    { id: 'memory', label: '记忆', color: 'teal' },
-    { id: 'eng', label: '工程', color: 'slate' },
-    { id: 'search', label: '检索', color: 'green' }
+  /* ---------------------------------------------------------- 分类文件夹 */
+  // 单归属模型：一个 skill 最多属于一个文件夹（meta[key].folder），
+  // '' = 未归档。旧「多选 cats」系统已废弃（prefs.customCats / meta.cats 不再读写）。
+  var PRESET_FOLDERS = [
+    { id: 'design', name: '设计', color: 'violet' },
+    { id: 'frontend', name: '前端', color: 'accent' },
+    { id: 'doc', name: '文档', color: 'warning' },
+    { id: 'video', name: '视频', color: 'rose' },
+    { id: 'memory', name: '记忆', color: 'teal' },
+    { id: 'eng', name: '工程', color: 'slate' },
+    { id: 'search', name: '检索', color: 'green' }
   ];
+
+  var PALETTE = ['violet', 'accent', 'warning', 'rose', 'teal', 'slate', 'green'];
 
   var COLORS = {
     violet: ['var(--violet)', 'var(--violet-soft)'],
@@ -86,8 +95,6 @@
     green: ['var(--success)', 'var(--success-soft)']
   };
 
-  var CUSTOM_PALETTE = ['violet', 'teal', 'accent', 'rose', 'warning', 'slate', 'green'];
-
   var prefs = lsGet(PREF_KEY, null) || {
     theme: 'light',
     density: 'comfortable',
@@ -95,21 +102,54 @@
     showDisabled: true,
     sort: 'name',
     board: 'shared',
-    customCats: [],
-    seeded: false
+    views: { shared: 'grid', unique: 'grid' }
   };
-  if (!prefs.customCats) prefs.customCats = [];
+  // 旧版单一 prefs.view 只服务于共有看板；网格视图上线到独有看板后按看板各存
+  // 一份。旧值迁给共有，独有首次默认网格；非法值一律拉回网格。
+  if (prefs.view != null) {
+    prefs.views = { shared: prefs.view === 'list' ? 'list' : 'grid', unique: 'grid' };
+    delete prefs.view;
+  }
+  if (!prefs.views || typeof prefs.views !== 'object') {
+    prefs.views = { shared: 'grid', unique: 'grid' };
+  }
+  if (prefs.views.shared !== 'list') prefs.views.shared = 'grid';
+  if (prefs.views.unique !== 'list') prefs.views.unique = 'grid';
+
+  function viewOf(board) {
+    return prefs.views[board] === 'list' ? 'list' : 'grid';
+  }
 
   var meta = {};
   var dirtyKeys = {};
 
   function savePrefs() { lsSet(PREF_KEY, prefs); }
 
+  // 本地模式的文件夹定义：prefs.folders（用户自建夹在这里持久化）优先，
+  // 其次快照自带，最后退回 7 个预置夹
+  function localFolders() {
+    if (Array.isArray(prefs.folders) && prefs.folders.length) return prefs.folders;
+    if (D && D.folders && D.folders.length) return D.folders;
+    return PRESET_FOLDERS.map(function (f, i) {
+      return { id: f.id, name: f.name, color: f.color, position: i };
+    });
+  }
+
   // 桌面端：编辑落到 skillkit.db 的 skill_meta 表；原型（file://）：写 localStorage。
   // 写库不做去抖：单机 SQLite 写入很轻，且避免隐藏窗口被节流时丢编辑。
   function scopeOf(key) { return key.indexOf('/') > -1 ? 'unique' : 'shared'; }
 
   function setMetaMap(map) { meta = map || {}; }
+
+  // pywebview 每个 js_api 调用各跑一个线程，「后发先至」不成立：快速连续
+  // 输入时旧 payload 可能晚于新 payload 落库（最后 commit 者胜），重载后就是
+  // 「丢编辑」。所以同一个 key 一次只放一个请求在飞，在飞期间的新编辑保持
+  // 脏标记，等在飞的落库后再补发最新值 —— 落库顺序与编辑顺序一致。
+  var metaInflight = {};   // key -> 在飞的 saveMeta promise
+  var metaRetries = {};    // key -> 已自动重试次数
+  var metaRetryTimer = null;
+  var META_RETRY_MAX = 3;
+  var META_RETRY_MS = 3000;
 
   function saveMeta(key) {
     if (MODE === 'db') {
@@ -120,32 +160,123 @@
     return lsSet(META_KEY, meta);
   }
 
+  function metaPayload(key) {
+    var m = meta[key] || {};
+    return {
+      tool: scopeOf(key) === 'unique' ? key.split('/')[0] : '',
+      display: m.display || '',
+      note: m.note || '',
+      folder: scopeOf(key) === 'shared' ? (m.folder || '') : ''
+    };
+  }
+
+  function sendMetaSave(key) {
+    var p = SKB.saveMeta(scopeOf(key), key, metaPayload(key));
+    metaInflight[key] = p;
+    p.then(function () {
+      if (metaInflight[key] === p) delete metaInflight[key];
+      delete metaRetries[key];
+      // 在飞期间的编辑：顺着这次落库补发，顺序才有保证
+      if (dirtyKeys[key]) {
+        delete dirtyKeys[key];
+        sendMetaSave(key);
+      }
+    }, function (err) {
+      if (metaInflight[key] === p) delete metaInflight[key];
+      var n = (metaRetries[key] || 0) + 1;
+      metaRetries[key] = n;
+      if (n > META_RETRY_MAX) {
+        delete metaRetries[key];
+        toast('bad', '保存失败', String(err && err.message || err));
+        return;
+      }
+      // 失败的 key 留在 dirtyKeys，稍后随下一轮 flush 重试（成功后清除）
+      if (!metaRetryTimer) {
+        metaRetryTimer = setTimeout(function () {
+          metaRetryTimer = null;
+          flushMeta();
+        }, META_RETRY_MS);
+      }
+    });
+  }
+
   function flushMeta() {
     if (MODE !== 'db' || !SKB) return;
-    var keys = Object.keys(dirtyKeys);
-    if (!keys.length) return;
-    dirtyKeys = {};
-    keys.forEach(function (key) {
-      var m = meta[key] || {};
-      SKB.saveMeta(scopeOf(key), key, {
-        tool: scopeOf(key) === 'unique' ? key.split('/')[0] : '',
-        display: m.display || '',
-        note: m.note || '',
-        cats: m.cats || []
-      }).catch(function (err) {
-        dirtyKeys[key] = 1;
-        toast('bad', '保存失败', String(err && err.message || err));
-      });
+    Object.keys(dirtyKeys).forEach(function (key) {
+      if (metaInflight[key]) return; // 在飞：保持脏标记，落库后自动补发
+      delete dirtyKeys[key];
+      sendMetaSave(key);
     });
   }
 
   var state = {
     board: /^(shared|unique|agents)$/.test(prefs.board || '') ? prefs.board : 'shared',
-    cat: 'all',
+    folder: null, // null=根；'none'=未归档；其余=文件夹 id
     agentStatus: 'all',
     q: '',
     selected: null
   };
+
+  function insScrollTop() {
+    var ins = document.getElementById('ins-body');
+    if (ins) ins.scrollTop = 0;
+  }
+
+  // state 的写入全部收敛到 setState：按变更的键决定渲染范围，调用方不再
+  // 自行拼 renderChrome / renderContent / renderInspector 组合——漏刷一处
+  // 就是「界面撒谎」类 bug。返回是否发生了变更（= 发生了渲染）。
+  // 不走这里的三类例外：renderList 的选中自愈（渲染期修正，走 setState 会
+  // 递归渲染）、applyBootstrap / start 的水合初始化、showResult /
+  // requestDelete 在水合前写下的「选中意向」（applyBootstrap 会再校验）。
+  function setState(patch, opts) {
+    opts = opts || {};
+    var keys = Object.keys(patch).filter(function (k) { return state[k] !== patch[k]; });
+    if (!keys.length) return false;
+    var board = keys.indexOf('board') > -1;
+    var folder = keys.indexOf('folder') > -1;
+    var filterReset = keys.indexOf('q') > -1 || keys.indexOf('agentStatus') > -1;
+    var sel = keys.indexOf('selected') > -1;
+    keys.forEach(function (k) { state[k] = patch[k]; });
+
+    if (board) {
+      // 换看板 = 换数据集：归属导航 / 状态筛选 / 搜索一并复位（归属导航只在
+      // 共有看板有意义），搜索框与选中同步回落到新看板第一行
+      prefs.board = state.board;
+      savePrefs();
+      if (!folder) state.folder = null;
+      if (keys.indexOf('agentStatus') < 0) state.agentStatus = 'all';
+      if (keys.indexOf('q') < 0) {
+        state.q = '';
+        var search = document.getElementById('gsearch');
+        if (search) search.value = '';
+      }
+      if (!sel) {
+        var rows = currentRows();
+        state.selected = rows.length ? rows[0].key : null;
+      }
+      renderChrome();
+      renderContent(true);
+      renderInspector();
+      var body = document.getElementById('list-body');
+      if (body) body.scrollTop = 0;
+      return true;
+    }
+    if (folder) closeCtx(); // 进出文件夹时收起 ⋯ 菜单（原 openFolder 语义）
+    if (folder || filterReset) {
+      renderChrome();
+      renderContent(false);
+      // 进出文件夹会改变「归属 chip」的语境，检查器总是刷新；仅搜索 / 状态
+      // 筛选变化时原本就不刷——选中若失效，renderList 的自愈会兜住
+      if (folder || sel) renderInspector();
+      if (sel && opts.insTop) insScrollTop();
+      return true;
+    }
+    // 纯选中变化：内容区高亮 + 检查器
+    renderContent(false);
+    renderInspector();
+    if (opts.insTop) insScrollTop();
+    return true;
+  }
 
   /* ---------------------------------------------------------- helpers */
   function esc(s) {
@@ -163,39 +294,36 @@
     return (s.slice(0, 3) || '?').toUpperCase();
   }
 
-  function catById(id) {
-    for (var i = 0; i < CATS.length; i++) if (CATS[i].id === id) return CATS[i];
-    return null;
-  }
-
-  function allCats() {
-    var out = CATS.slice();
-    prefs.customCats.forEach(function (c, i) {
-      out.push({ id: c.id, label: c.label, color: CUSTOM_PALETTE[i % CUSTOM_PALETTE.length], custom: true });
-    });
-    return out;
-  }
-
-  function catOf(id) {
-    var list = allCats();
-    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
-    return null;
-  }
-
   function catVars(color) {
     var pair = COLORS[color] || COLORS.slate;
     return '--c:' + pair[0] + ';--cs:' + pair[1];
   }
 
-  function catChip(id, extraCls) {
-    var c = catOf(id);
-    if (!c) return '';
-    return '<span class="cat ' + (extraCls || '') + '" style="' + catVars(c.color) + '"><i></i>' + esc(c.label) + '</span>';
+  // agent 文件夹的颜色：agent 夹不可自选色，按 key 稳定散列到调色板，
+  // 同一个 agent 在网格卡、面包屑、侧栏导航里永远同色
+  function agentColor(key) {
+    var s = String(key || '');
+    var h = 0;
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return PALETTE[h % PALETTE.length];
+  }
+
+  function folderById(id) {
+    if (!id) return null;
+    for (var i = 0; i < FOLDERS.length; i++) if (FOLDERS[i].id === id) return FOLDERS[i];
+    return null;
+  }
+
+  // 行内文件夹胶囊（可点击进入文件夹）；未归档显示虚线「未归档」
+  function folderChipHtml(fid) {
+    var f = folderById(fid);
+    if (!f) return '<span class="cat none">未归档</span>';
+    return '<button class="cat" data-jump-folder="' + esc(f.id) + '" style="' + catVars(f.color) +
+      '" title="打开「' + esc(f.name) + '」"><i></i>' + esc(f.name) + '</button>';
   }
 
   function metaOf(key) {
-    if (!meta[key]) meta[key] = { display: '', note: '', cats: [], updated: 0 };
-    if (!meta[key].cats) meta[key].cats = [];
+    if (!meta[key]) meta[key] = { display: '', note: '', folder: '', updated: 0 };
     return meta[key];
   }
 
@@ -204,15 +332,12 @@
     return (m && m.display) ? m.display : fallback;
   }
 
-  // 只有「显示名 / 备注 / 分类偏离默认值」才算用户编辑过；预置分类不算。
+  // 只有「显示名 / 备注被改过」才算用户编辑；归属夹不在内（与后端
+  // desktop._edited_count 同口径，预置归属不算编辑）。
   function editedCount() {
     return Object.keys(meta).filter(function (k) {
       var m = meta[k];
-      if (!m) return false;
-      if (m.display || m.note) return true;
-      var cats = m.cats || [];
-      if (m.seed) return !(cats.length === 1 && cats[0] === m.seed);
-      return false;
+      return !!(m && (m.display || m.note));
     }).length;
   }
 
@@ -223,7 +348,7 @@
     return (n / 1048576).toFixed(1) + ' MB';
   }
 
-  function seedCat(name) {
+  function seedFolder(name) {
     var n = String(name).toLowerCase();
     if (/remotion|video/.test(n)) return 'video';
     if (/mnemosyne|memory/.test(n)) return 'memory';
@@ -234,25 +359,55 @@
     return 'eng';
   }
 
-  function seedIfNeeded() {
-    if (MODE === 'db') return; // 桌面端由 skillkit.seed_meta() 在首启播种
-    if (prefs.seeded) return;
-    SKILLS.forEach(function (s) {
-      var seed = seedCat(s.name);
-      if (!meta[s.name]) meta[s.name] = { display: '', note: '', cats: [seed], seed: seed, updated: 0 };
-      else {
-        if (!meta[s.name].cats || !meta[s.name].cats.length) meta[s.name].cats = [seed];
-        if (!meta[s.name].seed) meta[s.name].seed = meta[s.name].cats.length === 1 ? meta[s.name].cats[0] : '';
+  // 本地模式一次性迁移（§2.4 的本地版）：旧多选分类 → 文件夹。
+  // customCats 直接在内存建夹并写进 prefs.folders；旧 cats[0] 命中夹 id 才
+  // 回填，其余 = 未归档。foldersMigrated 置位后不再进这个分支。
+  function migrateLocalFolders() {
+    if (prefs.foldersMigrated) {
+      if (!Array.isArray(prefs.folders) || !prefs.folders.length) {
+        prefs.folders = PRESET_FOLDERS.map(function (f, i) {
+          return { id: f.id, name: f.name, color: f.color, position: i };
+        });
+        savePrefs();
+      }
+      FOLDERS = prefs.folders;
+      return;
+    }
+    var folders = PRESET_FOLDERS.map(function (f, i) {
+      return { id: f.id, name: f.name, color: f.color, position: i };
+    });
+    (prefs.customCats || []).forEach(function (c, i) {
+      folders.push({ id: c.id, name: c.label || '未命名', color: PALETTE[i % PALETTE.length],
+                     position: folders.length });
+    });
+    prefs.folders = folders;
+    FOLDERS = folders;
+    Object.keys(meta).forEach(function (key) {
+      if (scopeOf(key) !== 'shared') return;
+      var m = meta[key];
+      if (!m) return;
+      if (m.folder == null) {
+        var first = (m.cats || [])[0];
+        m.folder = (first && folderById(first)) ? first : '';
       }
     });
-    UNIQUE.forEach(function (u) {
-      var key = u.tool + '/' + u.name;
-      var seed = u.sameName ? 'doc' : 'eng';
-      if (!meta[key]) meta[key] = { display: '', note: '', cats: [seed], seed: seed, updated: 0 };
-      else if (!meta[key].seed) meta[key].seed = meta[key].cats && meta[key].cats.length === 1 ? meta[key].cats[0] : '';
-    });
-    prefs.seeded = true;
+    delete prefs.customCats;
+    prefs.foldersMigrated = true;
     savePrefs();
+  }
+
+  function seedIfNeeded() {
+    if (MODE === 'db') return; // 桌面端由 skillkit.migrate_folders + seed_meta 在首启迁移/播种
+    migrateLocalFolders();
+    SKILLS.forEach(function (s) {
+      var m = meta[s.name];
+      if (!m) {
+        meta[s.name] = { display: '', note: '', folder: seedFolder(s.name), updated: 0 };
+      } else if (m.folder == null) {
+        // '' 是用户显式移出的未归档，不能重新播种
+        m.folder = seedFolder(s.name);
+      }
+    });
     saveMeta();
   }
 
@@ -266,7 +421,7 @@
         name: s.name,
         label: s.label,
         display: m.display || s.name,
-        cats: (m.cats || []).slice(),
+        folder: m.folder || '',
         note: m.note || '',
         updated: m.updated || 0,
         skill: s,
@@ -285,7 +440,6 @@
         name: u.name,
         label: u.toolLabel,
         display: m.display || u.name,
-        cats: (m.cats || []).slice(),
         note: m.note || '',
         updated: m.updated || 0,
         entry: u,
@@ -411,10 +565,9 @@
 
   function fallbackHay(r) {
     if (r.board === 'agents') return [r.dir, r.sub, r.statusText, r.mode].join(' ');
-    var catText = r.cats.map(function (id) {
-      var c = catOf(id);
-      return c ? c.label : '';
-    }).join(' ');
+    // 分类名 = 归属文件夹名；未归档不参与备注/分类回退匹配
+    var f = r.board === 'shared' ? folderById(r.folder) : null;
+    var catText = f ? f.name : '';
     if (r.board === 'unique') {
       return [r.label, r.entry ? r.entry.toolLabel : '', r.entry ? r.entry.mark : '', r.note, catText].join(' ');
     }
@@ -425,8 +578,7 @@
     if (r.board === 'agents') {
       return state.agentStatus === 'all' || r.status === state.agentStatus;
     }
-    if (state.cat === 'none') return !r.cats.length;
-    if (state.cat !== 'all') return r.cats.indexOf(state.cat) > -1;
+    // 共有 / 独有技能没有侧栏筛选了：归属在侧栏导航（文件夹）里完成
     return true;
   }
 
@@ -471,29 +623,35 @@
   }
 
   /* ---------------------------------------------------------- render: chrome */
+  function unfiledCount() {
+    return sharedRows().filter(function (r) { return !r.folder; }).length;
+  }
+
   function renderChrome() {
     document.body.dataset.view = state.board;
 
     document.getElementById('store-path').textContent = STORE;
     document.getElementById('store-path').title = STORE;
     document.getElementById('store-count').textContent = SKILLS.length;
-    document.getElementById('store-size').textContent = META.storeSize || '54.4 MB';
+    document.getElementById('store-size').textContent = META.storeSize || '—';
     document.getElementById('store-health').style.width =
       (100 - (UNIQUE.length / (SKILLS.length + UNIQUE.length)) * 100).toFixed(1) + '%';
 
     var sharedCount = SKILLS.length;
     var uniqueCount = UNIQUE.length;
     var agentStats = agentCounts(agentRows());
+    var unfiled = unfiledCount();
 
     document.getElementById('nav-shared').textContent = sharedCount;
     document.getElementById('nav-unique').textContent = uniqueCount;
     document.getElementById('nav-agents').textContent = agentStats.all;
     document.getElementById('stat-agents').textContent = agentStats.connected;
     document.getElementById('stat-edited').textContent = editedCount();
-    document.getElementById('stat-cats').textContent = allCats().length;
-    document.getElementById('stat-unique').textContent = uniqueCount;
+    document.getElementById('stat-folders').textContent = FOLDERS.length;
+    document.getElementById('stat-unfiled').textContent = unfiled;
     document.getElementById('sb-edited').textContent = editedCount();
-    document.getElementById('sb-health').textContent = sharedCount + ' 共有 · ' + uniqueCount + ' 独有';
+    document.getElementById('sb-health').textContent =
+      sharedCount + ' 共有 · ' + FOLDERS.length + ' 分类';
     document.getElementById('sb-path').textContent = STORE;
     document.getElementById('sb-path').title = STORE;
     document.getElementById('ver-scan').textContent = SCAN;
@@ -502,11 +660,12 @@
     document.getElementById('tab-shared-num').textContent = sharedCount;
     document.getElementById('tab-unique-num').textContent = uniqueCount;
     document.getElementById('tab-agents-num').textContent = agentStats.all;
-    document.getElementById('tab-shared-em').textContent = ENABLED.length + ' / ' + ENABLED.length + ' agents';
+    document.getElementById('tab-shared-em').textContent = FOLDERS.length + ' 个分类文件夹';
     document.getElementById('tab-agents-em').textContent = agentStats.connected + ' 已连接';
     var overridden = UNIQUE.filter(function (u) { return u.sameName; }).length;
+    // 与共有 tab 的「N 个分类文件夹」同款口径：独有 tab 报 agent 文件夹数
     document.getElementById('tab-unique-em').textContent =
-      (uniqueCount - overridden) + (overridden ? ' + ' + overridden + ' 同名覆盖' : '');
+      uniqueAgentGroups().length + ' 个 agent 文件夹';
 
     var colName = document.getElementById('col-name');
     var colMid = document.getElementById('col-mid');
@@ -514,53 +673,114 @@
     var colCover = document.getElementById('col-cover');
     var emptyTitle = document.getElementById('empty-title');
     var emptySub = document.getElementById('empty-sub');
+    var footHint = document.getElementById('list-foot-hint');
+    var inFolder = state.board === 'shared' && !!state.folder;
 
     if (state.board === 'shared') {
-      document.getElementById('page-title').textContent = '共有技能';
-      document.getElementById('page-sub').textContent =
-        sharedCount + ' 个 skill 同时存在于 ' + ENABLED.length + ' 个 agent · 全部指向中央仓库';
       colName.textContent = 'SKILL';
-      colMid.textContent = '分类';
       colRight.textContent = '备注';
       colCover.textContent = '分发覆盖';
-      emptyTitle.textContent = '没有匹配的 skill';
-      emptySub.textContent = '换个关键词，或把筛选切回“全部”';
-      document.getElementById('list-foot-hint').textContent = '点任意一行，在右侧改显示名、分类与备注';
-      document.getElementById('list-foot-count').textContent = sharedCount + ' 条';
-    } else if (state.board === 'unique') {
-      document.getElementById('page-title').textContent = '独有技能';
-      document.getElementById('page-sub').textContent =
-        '只存在于某一个 agent · ' + (uniqueCount - overridden) + ' 个中央仓库没有，' + overridden + ' 个同名但内容不同';
-      colName.textContent = 'SKILL';
       colMid.textContent = '分类';
+      colMid.hidden = inFolder;
+      if (state.folder === 'none') {
+        document.getElementById('page-title').textContent = '未归档';
+        document.getElementById('page-sub').textContent =
+          unfiled + ' 个 skill 还没放入任何分类 · 拖到侧栏文件夹即可归档';
+        emptyTitle.textContent = '全部 skill 都已归档';
+        emptySub.textContent = '所有 skill 都已放入分类文件夹';
+        footHint.textContent = '点 ⋯ 菜单或直接拖拽侧栏文件夹，把 skill 归档进分类';
+      } else if (inFolder) {
+        var f = folderById(state.folder);
+        document.getElementById('page-title').textContent = f ? f.name : '分类文件夹';
+        document.getElementById('page-sub').textContent =
+          (f ? f.name + ' · ' : '') + skillsInFolder(state.folder).length +
+          ' 个 skill · 由你手动维护的分类文件夹';
+        emptyTitle.textContent = '这个分类还是空的';
+        emptySub.textContent = '回到「全部技能」把 skill 拖进来，或用行菜单移动';
+        footHint.textContent = '行菜单 ⋯ 可移动到其他分类；拖到面包屑「全部技能」移出分类';
+      } else if (viewOf('shared') === 'grid') {
+        document.getElementById('page-title').textContent = '共有技能';
+        document.getElementById('page-sub').textContent =
+          FOLDERS.length + ' 个分类文件夹 · ' + sharedCount + ' 个 skill · 拖拽归档，像资源管理器一样管理';
+      } else {
+        document.getElementById('page-title').textContent = '共有技能';
+        document.getElementById('page-sub').textContent =
+          sharedCount + ' 个 skill · ' + FOLDERS.length + ' 个分类文件夹 · 点行选中，⋯ 菜单移动分类';
+        emptyTitle.textContent = '没有匹配的 skill';
+        emptySub.textContent = '换个关键词，或把筛选切回“全部”';
+        footHint.textContent = '点行选中 · ⋯ 菜单移动分类 · 分类列的 chip 可直接进入文件夹';
+      }
+    } else if (state.board === 'unique') {
+      colName.textContent = 'SKILL';
+      colMid.hidden = true;
       colRight.textContent = '备注';
       colCover.textContent = '来源';
-      emptyTitle.textContent = '没有匹配的 skill';
-      emptySub.textContent = '换个关键词，或把筛选切回“全部”';
-      document.getElementById('list-foot-hint').textContent = '这些 skill 不会被中央仓库覆盖，改名与备注只影响展示';
-      document.getElementById('list-foot-count').textContent = uniqueCount + ' 条';
+      var uGroups = uniqueAgentGroups();
+      if (state.folder) {
+        var ug = uGroups.filter(function (g) { return g.tool === state.folder; })[0];
+        document.getElementById('page-title').textContent = ug ? ug.label : 'Agent 文件夹';
+        document.getElementById('page-sub').textContent =
+          (ug ? ug.label + ' · ' : '') + (ug ? ug.rows.length : 0) +
+          ' 个 skill · 只存在于该 agent · 不会被中央仓库覆盖';
+        emptyTitle.textContent = '这个 agent 暂无独有 skill';
+        emptySub.textContent = '该 agent 目录里没有与中央仓库不同名的内容';
+        footHint.textContent = '这些 skill 不会被中央仓库覆盖，改名与备注只影响展示';
+      } else if (viewOf('unique') === 'grid') {
+        document.getElementById('page-title').textContent = '独有技能';
+        document.getElementById('page-sub').textContent =
+          uGroups.length + ' 个 agent 文件夹 · ' + uniqueCount + ' 个 skill' +
+          (overridden ? '（' + overridden + ' 个同名覆盖）' : '') +
+          ' · 点击 agent 进入，像资源管理器一样浏览';
+      } else {
+        document.getElementById('page-title').textContent = '独有技能';
+        document.getElementById('page-sub').textContent =
+          '只存在于某一个 agent · ' + (uniqueCount - overridden) + ' 个中央仓库没有，' + overridden + ' 个同名但内容不同';
+        emptyTitle.textContent = '没有匹配的 skill';
+        emptySub.textContent = '换个关键词，或把筛选切回“全部”';
+        footHint.textContent = '这些 skill 不会被中央仓库覆盖，改名与备注只影响展示';
+      }
     } else {
-      document.getElementById('page-title').textContent = '智能体';
-      document.getElementById('page-sub').textContent =
-        '本机检测到 ' + (agentStats.connected + agentStats.off) + ' 个 agent · ' +
-        agentStats.connected + ' 已连接、' + agentStats.off + ' 已关闭 · 另有 ' +
-        agentStats.missing + ' 个未安装';
       colName.textContent = 'AGENT';
+      colMid.hidden = false;
       colMid.textContent = '状态';
       colRight.textContent = '目录';
       colCover.textContent = '分发开关';
       emptyTitle.textContent = '没有匹配的 agent';
       emptySub.textContent = '换个关键词，或把状态筛选切回“全部”';
-      document.getElementById('list-foot-hint').textContent = '开关只建/删 junction 链接，中央仓库的 skill 实体不受影响';
-      document.getElementById('list-foot-count').textContent = agentStats.all + ' 个 agent';
+      footHint.textContent = '开关只建/删 junction 链接，中央仓库的 skill 实体不受影响';
+      document.getElementById('page-title').textContent = '智能体';
+      document.getElementById('page-sub').textContent =
+        '本机检测到 ' + (agentStats.connected + agentStats.off) + ' 个 agent · ' +
+        agentStats.connected + ' 已连接、' + agentStats.off + ' 已关闭 · 另有 ' +
+        agentStats.missing + ' 个未安装';
     }
 
-    document.getElementById('side-cat-label').textContent =
-      state.board === 'agents' ? '状态' : '分类';
-    document.getElementById('side-cats').setAttribute(
-      'aria-label', state.board === 'agents' ? '按状态筛选' : '分类筛选');
-    document.getElementById('sort-btn').hidden = state.board === 'agents';
+    // 侧栏导航区标题：文案与新建按钮随看板切换（独有=Agent 文件夹，不可新建）
+    var foldersHead = document.getElementById('side-folders-head');
+    var foldersLabel = document.getElementById('side-cat-label');
+    var foldersAdd = document.getElementById('side-add-folder');
+    if (state.board === 'agents') {
+      foldersHead.hidden = false;
+      foldersLabel.textContent = '状态';
+      foldersAdd.hidden = true;
+    } else if (state.board === 'unique') {
+      foldersHead.hidden = false;
+      foldersLabel.textContent = 'Agent 文件夹';
+      foldersAdd.hidden = true;
+    } else {
+      foldersHead.hidden = false;
+      foldersLabel.textContent = '分类文件夹';
+      foldersAdd.hidden = false;
+    }
 
+    // 视图分段：共有 / 独有看板的根层级出现（夹内只有列表一种形态）
+    var seg = document.getElementById('view-seg');
+    seg.hidden = (state.board !== 'shared' && state.board !== 'unique') || !!state.folder;
+    Array.prototype.forEach.call(seg.querySelectorAll('button'), function (b) {
+      b.classList.toggle('active', b.getAttribute('data-view-mode') === viewOf(state.board));
+    });
+
+    document.getElementById('sort-btn').hidden = state.board === 'agents';
 
     Array.prototype.forEach.call(document.querySelectorAll('[data-board]'), function (el) {
       var on = el.getAttribute('data-board') === state.board;
@@ -588,8 +808,10 @@
       shown === total ? total + unit : '筛出 ' + shown + ' / ' + total + unit;
   }
 
-  function renderFilters(rows) {
-    var total = currentRows().length;
+  // 侧栏导航：共有 = 全部技能 / 各文件夹（可投放）/ 未归档；
+  // 独有 = 全部独有 / 各 agent 文件夹；智能体 = 状态筛选。计数永远按全库算。
+  function renderFilters() {
+    var nav = document.getElementById('side-folders');
 
     if (state.board === 'agents') {
       var ac = agentCounts(currentRows());
@@ -604,38 +826,125 @@
           '<span class="catdot" style="--c:' + def.dot + '"></span>' + def.label +
           '<b class="nav-badge">' + n + '</b></button>';
       });
-      document.getElementById('side-cats').innerHTML = sideHtml;
-      updateFoot(rows.length, total);
+      nav.innerHTML = sideHtml;
+      nav.setAttribute('aria-label', '按状态筛选');
+      return;
+    }
+    // 独有看板：agent 即分类文件夹——全部独有 / 各 agent（带计数，可点击进入；
+    // 独有 skill 不能跨 agent 移动，所以不是投放区）
+    if (state.board === 'unique') {
+      nav.setAttribute('aria-label', 'Agent 文件夹导航');
+      var uHtml = '<button class="nav-item cat-nav' + (!state.folder ? ' active' : '') +
+        '" data-folder-nav="all" title="查看全部独有 skill">' +
+        icon('grid') + '全部独有<b class="nav-badge">' + UNIQUE.length + '</b></button>';
+      uniqueAgentGroups().forEach(function (g) {
+        uHtml += '<button class="nav-item cat-nav' + (state.folder === g.tool ? ' active' : '') +
+          '" data-folder-nav="' + esc(g.tool) +
+          '" title="打开「' + esc(g.label) + '」的独有技能">' +
+          '<span class="catdot" style="--c:' + COLORS[g.color][0] + '"></span>' + esc(g.label) +
+          '<b class="nav-badge">' + g.rows.length + '</b></button>';
+      });
+      nav.innerHTML = uHtml;
       return;
     }
 
-    var counts = { all: total };
-    var catCounts = {};
-    rows.forEach(function (r) {
-      r.cats.forEach(function (id) { catCounts[id] = (catCounts[id] || 0) + 1; });
+    nav.setAttribute('aria-label', '分类文件夹导航');
+    var html = '<button class="nav-item cat-nav' + (!state.folder ? ' active' : '') + '" data-folder-nav="all">' +
+      icon('grid') + '全部技能<b class="nav-badge">' + SKILLS.length + '</b></button>';
+    FOLDERS.forEach(function (f) {
+      html += '<button class="nav-item cat-nav' + (state.folder === f.id ? ' active' : '') +
+        '" data-folder-nav="' + esc(f.id) + '" data-drop-folder="' + esc(f.id) +
+        '" title="打开「' + esc(f.name) + '」，也可拖拽 skill 进来">' +
+        '<span class="catdot" style="--c:' + COLORS[f.color][0] + '"></span>' + esc(f.name) +
+        '<b class="nav-badge">' + skillsInFolder(f.id).length + '</b></button>';
     });
-
-    // sidebar categories
-    var side = '<button class="nav-item cat-nav ' + (state.cat === 'all' ? 'active' : '') + '" data-cat="all">' +
-      '<span class="catdot" style="--c:var(--ink-3)"></span>全部<b class="nav-badge">' + counts.all + '</b></button>';
-    allCats().forEach(function (c) {
-      var n = catCounts[c.id] || 0;
-      if (!n && state.cat !== c.id) return;
-      side += '<button class="nav-item cat-nav ' + (state.cat === c.id ? 'active' : '') + '" data-cat="' + c.id + '">' +
-        '<span class="catdot" style="--c:' + COLORS[c.color][0] + '"></span>' + esc(c.label) +
-        '<b class="nav-badge">' + n + '</b></button>';
-    });
-    document.getElementById('side-cats').innerHTML = side;
-
-    updateFoot(rows.length, total);
+    html += '<button class="nav-item cat-nav' + (state.folder === 'none' ? ' active' : '') +
+      '" data-folder-nav="none" title="查看未归档 skill">' +
+      '<span class="catdot dashed"></span>未归档<b class="nav-badge">' +
+      skillsInFolder('none').length + '</b></button>';
+    nav.innerHTML = html;
   }
 
-  /* ---------------------------------------------------------- render: list */
+  // 归属某文件夹（'none' = 未归档）的共有技能，按当前排序返回
+  function skillsInFolder(fid) {
+    var out = sharedRows().filter(function (r) {
+      return fid === 'none' ? !r.folder : r.folder === fid;
+    });
+    return sortRows(out);
+  }
+
+  // 归属某 agent 的独有技能（agent = 独有看板的「分类文件夹」），按当前排序返回
+  function skillsInAgentFolder(tool) {
+    return sortRows(uniqueRows().filter(function (r) { return r.entry.tool === tool; }));
+  }
+
+  // 独有看板的 agent 分组：组顺序按 UNIQUE 的扫描顺序；agent 不在探测结果里时
+  // 退回条目自带的 toolLabel / mark（与 uniqueGroupedHtml 的分割线同一口径）
+  function uniqueAgentGroups() {
+    var order = [];
+    var groups = {};
+    uniqueRows().forEach(function (r) {
+      var t = r.entry.tool;
+      if (!groups[t]) { groups[t] = []; order.push(t); }
+      groups[t].push(r);
+    });
+    return order.map(function (tool) {
+      var a = agentByKey(tool);
+      var first = groups[tool][0].entry;
+      return {
+        tool: tool,
+        label: a ? (a.label || tool) : (first.toolLabel || tool),
+        mark: a ? a.mark : (first.mark || mark(tool)),
+        color: agentColor(tool),
+        rows: sortRows(groups[tool])
+      };
+    });
+  }
+
+  /* ---------------------------------------------------------- render: content / list */
+  // 网格视图只在「共有 / 独有看板 + 根层级 + 该看板视图=网格」出现；
+  // 文件夹 / agent 文件夹 / 未归档永远是列表 + 面包屑。
+  function renderContent(animate) {
+    var gridRoot = document.getElementById('grid-root');
+    var listCard = document.getElementById('list-card');
+    var crumbBar = document.getElementById('crumb-bar');
+    var gridView = (state.board === 'shared' || state.board === 'unique') &&
+      !state.folder && viewOf(state.board) === 'grid';
+
+    if (gridView) {
+      listCard.hidden = true;
+      crumbBar.hidden = true;
+      gridRoot.hidden = false;
+      gridRoot.innerHTML = state.board === 'unique' ? uniqueGridHtml() : gridHtml();
+      renderFilters();
+      return;
+    }
+
+    gridRoot.hidden = true;
+    gridRoot.innerHTML = '';
+    listCard.hidden = false;
+    var inFolder = (state.board === 'shared' || state.board === 'unique') && !!state.folder;
+    crumbBar.hidden = !inFolder;
+    if (inFolder) crumbBar.innerHTML = crumbHtml();
+    renderList(animate);
+  }
+
   function renderList(animate) {
     var all = currentRows();
-    var rows = sortRows(filterRows(all));
+    var isUnique = state.board === 'unique';
+    var inFolder = (state.board === 'shared' || isUnique) && !!state.folder;
+    var rows;
+    var narrow = false; // 5 列行（进入文件夹的共有行 / 独有看板所有行）
+    if (inFolder) {
+      rows = isUnique ? skillsInAgentFolder(state.folder) : skillsInFolder(state.folder);
+      narrow = true;
+    } else {
+      rows = sortRows(filterRows(all));
+      if (isUnique) narrow = true;
+    }
 
     // 过滤后选中项失效时，自动选中第一条结果；无结果则清空选中。
+    // 这是渲染期自愈，不走 setState——setState 的渲染会再次进到这里，走它就递归了。
     var selChanged = false;
     if (!rows.length) {
       if (state.selected) { state.selected = null; selChanged = true; }
@@ -645,7 +954,11 @@
     }
     if (selChanged) renderInspector();
 
-    renderFilters(all);
+    renderFilters();
+
+    var head = document.getElementById('list-head');
+    head.classList.toggle('in-folder', narrow);
+    document.getElementById('col-mid').hidden = narrow;
 
     var body = document.getElementById('list-body');
     var empty = document.getElementById('list-empty');
@@ -654,6 +967,7 @@
       body.innerHTML = '';
       body.style.display = 'none';
       empty.hidden = false;
+      updateFoot(0, all.length); // 空态也要刷新脚部计数，别留下「51 条」的旧文案
       return;
     }
 
@@ -662,24 +976,20 @@
 
     if (state.board === 'agents') {
       body.innerHTML = renderAgentRows(rows, animate);
-      updateFoot(rows.length, all.length);
-      return;
-    }
-
-    var html;
-    if (state.board === 'unique') {
-      html = uniqueGroupedHtml(rows, animate);
+    } else if (isUnique && !inFolder) {
+      // 独有根列表：按 agent 分组 + 分割线；agent 夹内全是同一 agent，平铺即可
+      body.innerHTML = uniqueGroupedHtml(rows, animate);
     } else {
-      html = rows.map(function (r, i) { return skillRowHtml(r, i, animate); }).join('');
+      body.innerHTML = rows.map(function (r, i) {
+        return skillRowHtml(r, i, animate, narrow);
+      }).join('');
     }
-    // 脚部计数与智能体看板对齐：有筛选 / 搜索时显示「筛出 x / y」
-    updateFoot(rows.length, all.length);
-
-    body.innerHTML = html;
+    // 脚部计数：文件夹内没有筛选概念，直接显示条数；其余显示「筛出 x / y」
+    updateFoot(rows.length, inFolder ? rows.length : all.length);
   }
 
-  // 单条 skill 行（共有 / 独有看板共用）
-  function skillRowHtml(r, i, animate) {
+  // 单条 skill 行（共有 / 独有看板共用）；inFolder = 5 列窄行
+  function skillRowHtml(r, i, animate, inFolder) {
     var secondary = rowSecondary(r);
     var isSel = state.selected === r.key;
     var conflictFlag;
@@ -694,13 +1004,8 @@
     }
     if (r.board === 'unique' && r.entry.src && r.entry.src !== 'main') {
       conflictFlag += '<span class="mini-flag ext" title="来自外部目录 ' + esc(r.entry.src) +
-        '，本工具只展示不删除">外部</span>';
+        '，本工具不分发；需要移除可在详情里卸载">外部</span>';
     }
-
-    var cats = r.cats.length
-      ? r.cats.slice(0, 2).map(function (id) { return catChip(id); }).join('') +
-        (r.cats.length > 2 ? '<span class="cat more">+' + (r.cats.length - 2) + '</span>' : '')
-      : '<span class="cat none">未分类</span>';
 
     var note = r.note
       ? '<span class="row-note">' + esc(r.note) + '</span>'
@@ -723,23 +1028,176 @@
         '<span class="count-text" style="margin-left:auto">' + r.entry.files + ' 文件</span></div>';
     }
 
-    return '<div class="row' + (isSel ? ' is-selected' : '') + (r.conflict ? ' is-conflict' : '') + (animate ? '' : ' no-anim') +
+    var m = meta[r.key];
+    var edited = !!(m && (m.display || m.note));
+    var midCol = inFolder ? '' : '<div class="row-folder">' + folderChipHtml(r.folder) + '</div>';
+
+    return '<div class="row' + (inFolder ? ' in-folder' : '') + (isSel ? ' is-selected' : '') +
+      (r.conflict ? ' is-conflict' : '') + (animate ? '' : ' no-anim') +
       '" data-key="' + esc(r.key) + '" data-row-board="' + r.board + '" role="button" tabindex="0"' +
+      (r.board === 'shared' ? ' draggable="true"' : '') +
       (animate ? ' style="animation-delay:' + Math.min(i, 14) * 12 + 'ms"' : '') + '>' +
       // 序号列：按当前列表顺序 1..N（筛选 / 搜索 / 改排序后重新从 1 编），纯展示
       '<span class="row-mark row-num">' + (i + 1) + '</span>' +
       '<div class="row-main"><div class="row-title"><span class="row-name">' + esc(r.display) +
-      (meta[r.key] && (meta[r.key].display || meta[r.key].note || (meta[r.key].cats || []).length > 1) ? '<span class="edited-dot" title="已编辑"></span>' : '') +
+      (edited ? '<span class="edited-dot" title="已编辑"></span>' : '') +
       '</span>' + conflictFlag + '</div>' +
       (secondary ? '<span class="row-label">' + esc(secondary) + '</span>' : '') + '</div>' +
-      '<div class="row-cats">' + cats + '</div>' +
+      midCol +
       note +
       cover +
-      '<span class="row-go">' + icon('chevron-right') + '</span>' +
+      '<span class="row-go">' +
+      (r.board === 'shared'
+        ? '<button class="row-more" data-more-skill="' + esc(r.key) + '" title="移动 / 更多操作">' + icon('ellipsis') + '</button>'
+        : '') +
+      icon('chevron-right') +
+      '</span>' +
       '</div>';
   }
 
-  // 独有技能看板：同一 agent 的 skill 归为一组，组与组之间插一条 agent 分割线。
+  /* ---------------------------------------------------------- render: grid / crumb */
+  function folderCardHtml(f) {
+    var list = skillsInFolder(f.id);
+    var chips = list.slice(0, 3).map(function (r) {
+      return '<span class="fc-chip" title="' + esc(r.display) + '">' + esc(r.display) + '</span>';
+    }).join('');
+    if (list.length > 3) chips += '<span class="fc-chip more">+' + (list.length - 3) + '</span>';
+    if (!list.length) chips = '<span class="fc-chip none">空文件夹</span>';
+    return '<div class="folder-card" role="button" tabindex="0" data-folder-card="' + esc(f.id) +
+      '" data-drop-folder="' + esc(f.id) + '" style="' + catVars(f.color) + '">' +
+      '<div class="fc-top"><span class="fc-icon">' + icon('folder') + '</span>' +
+      '<button class="fc-more" data-more-folder="' + esc(f.id) + '" title="重命名 / 删除">' + icon('ellipsis') + '</button></div>' +
+      '<div class="fc-name">' + esc(f.name) + '</div>' +
+      '<div class="fc-meta">' + list.length + ' 个 skill</div>' +
+      '<div class="fc-chips">' + chips + '</div></div>';
+  }
+
+  function fileCardHtml(r) {
+    var isSel = state.selected === r.key;
+    // 共有卡副标题 = 归属夹；独有卡副标题 = 来源 agent（同名覆盖一并标出）
+    var sub;
+    var mk;
+    if (r.board === 'unique') {
+      sub = r.entry.toolLabel + (r.entry.sameName ? ' · 同名覆盖' : '');
+      mk = r.entry.mark || mark(r.name);
+    } else {
+      var f = folderById(r.folder);
+      sub = f ? '已归档 · ' + f.name : '未归档';
+      mk = mark(r.key);
+    }
+    // 独有 skill 不能跨 agent 移动：不设 draggable，也不出 ⋯ 菜单
+    return '<div class="file-card' + (isSel ? ' is-selected' : '') + '" role="button" tabindex="0" data-key="' +
+      esc(r.key) + '"' + (r.board === 'shared' ? ' draggable="true"' : '') + '>' +
+      '<span class="fc-mark">' + esc(mk) + '</span>' +
+      '<div class="fc-main"><b>' + esc(r.display) + '</b><span>' + esc(sub) + '</span></div>' +
+      (r.board === 'shared'
+        ? '<button class="row-more" data-more-skill="' + esc(r.key) + '" title="移动 / 更多操作">' + icon('ellipsis') + '</button>'
+        : '') +
+      '</div>';
+  }
+
+  function gridHtml() {
+    var html = '';
+    if (state.q) {
+      // 搜索态：结果以文件卡流展示（filterRows 已含名称优先 + 回退匹配）
+      var hits = sortRows(filterRows(sharedRows()));
+      html += '<div class="grid-sect"><b>搜索结果</b><span>“' + esc(state.q) + '”</span><span class="count-text">' +
+        hits.length + ' 个匹配</span></div>';
+      html += hits.length
+        ? '<div class="folder-grid">' + hits.map(fileCardHtml).join('') + '</div>'
+        : '<div class="empty" style="min-height:180px"><div class="empty-icon">' + icon('search') +
+          '</div><b>没有匹配的 skill</b><span>换个关键词试试</span></div>';
+      return html;
+    }
+    html += '<div class="grid-sect"><b>分类文件夹</b><span>点击进入 · 拖拽 skill 卡片到文件夹即可归档</span>' +
+      '<span class="count-text">' + FOLDERS.length + ' 个文件夹</span></div>';
+    html += '<div class="folder-grid">' + FOLDERS.map(folderCardHtml).join('') +
+      '<button class="folder-card ghost" id="grid-new-folder">' +
+      '<span class="fc-icon">' + icon('folder-plus') + '</span>' +
+      '<span><span class="fc-name">新建分类</span><span class="fc-meta" style="display:block">手动建分类，把 skill 归档进去</span></span>' +
+      '</button></div>';
+    var unfiled = skillsInFolder('none');
+    html += '<div class="grid-sect"><b>未归档</b><span>还没放入任何分类的 skill</span>' +
+      '<span class="count-text">' + unfiled.length + ' 个</span></div>';
+    html += unfiled.length
+      ? '<div class="folder-grid">' + unfiled.map(fileCardHtml).join('') + '</div>'
+      : '<div class="empty" style="min-height:140px"><div class="empty-icon">' + icon('check') +
+        '</div><b>全部已归档</b><span>每个 skill 都在某个分类文件夹里</span></div>';
+    return html;
+  }
+
+  // 独有看板的 agent 文件夹卡：与共有分类夹同一套 folder-card 视觉（icon 换成
+  // bot、颜色按 agentColor 散列）；agent 夹不是用户建的，没有重命名 / 删除的 ⋯
+  function agentFolderCardHtml(g) {
+    var chips = g.rows.slice(0, 3).map(function (r) {
+      return '<span class="fc-chip" title="' + esc(r.display) + '">' + esc(r.display) + '</span>';
+    }).join('');
+    if (g.rows.length > 3) chips += '<span class="fc-chip more">+' + (g.rows.length - 3) + '</span>';
+    if (!g.rows.length) chips = '<span class="fc-chip none">空文件夹</span>';
+    return '<div class="folder-card" role="button" tabindex="0" data-folder-card="' + esc(g.tool) +
+      '" style="' + catVars(g.color) + '">' +
+      '<div class="fc-top"><span class="fc-icon">' + icon('bot') + '</span></div>' +
+      '<div class="fc-name">' + esc(g.label) + '</div>' +
+      '<div class="fc-meta">' + g.rows.length + ' 个 skill</div>' +
+      '<div class="fc-chips">' + chips + '</div></div>';
+  }
+
+  // 独有看板网格：根层级 = agent 文件夹卡墙（一个 agent 一个分类夹）；
+  // 搜索态 = 结果文件卡流。没有「未归档」段——独有 skill 恒归属某 agent。
+  function uniqueGridHtml() {
+    if (state.q) {
+      var hits = sortRows(filterRows(uniqueRows()));
+      return '<div class="grid-sect"><b>搜索结果</b><span>“' + esc(state.q) + '”</span><span class="count-text">' +
+        hits.length + ' 个匹配</span></div>' +
+        (hits.length
+          ? '<div class="folder-grid">' + hits.map(fileCardHtml).join('') + '</div>'
+          : '<div class="empty" style="min-height:180px"><div class="empty-icon">' + icon('search') +
+            '</div><b>没有匹配的 skill</b><span>换个关键词试试</span></div>');
+    }
+    var groups = uniqueAgentGroups();
+    if (!groups.length) {
+      return '<div class="empty" style="min-height:180px"><div class="empty-icon">' + icon('check') +
+        '</div><b>没有独有 skill</b><span>每个 agent 都与中央仓库完全一致</span></div>';
+    }
+    return '<div class="grid-sect"><b>Agent 文件夹</b><span>一个 agent 一个文件夹 · 点击进入它的独有 skill</span>' +
+      '<span class="count-text">' + groups.length + ' 个 agent</span></div>' +
+      '<div class="folder-grid">' + groups.map(agentFolderCardHtml).join('') + '</div>';
+  }
+
+  // 面包屑内容（#crumb-bar 是容器）：共有根节点同时是「移出分类」的投放区；
+  // 独有根节点只是返回入口（独有 skill 不能跨 agent 移动，没有移出语义）
+  function crumbHtml() {
+    var isUnique = state.board === 'unique';
+    var parts = '<button class="crumb-root" data-crumb-root' + (isUnique ? '' : ' data-drop-unfile="1"') +
+      ' title="' + (isUnique ? '返回全部独有技能' : '返回全部，也可把 skill 拖到这里移出分类') + '">' +
+      icon('folder-open') + (isUnique ? '全部独有' : '全部技能') + '</button>' +
+      '<span class="crumb-sep">' + icon('chevron-right') + '</span>';
+    if (isUnique) {
+      var ug = uniqueAgentGroups().filter(function (g) { return g.tool === state.folder; })[0];
+      parts += '<span class="crumb-here" style="' + catVars(ug ? ug.color : 'slate') + '">' +
+        icon('bot') + esc(ug ? ug.label : state.folder) + '</span>';
+      parts += '<span class="crumb-meta">' + (ug ? ug.rows.length : 0) +
+        ' 个 skill · 只存在于该 agent 的目录里</span>';
+      return parts;
+    }
+    if (state.folder === 'none') {
+      parts += '<span class="crumb-here" style="--c:var(--ink-2);--cs:var(--surface-2)">' + icon('inbox') + '未归档</span>';
+      parts += '<span class="crumb-meta">' + skillsInFolder('none').length + ' 个 skill 待归档</span>';
+    } else {
+      var f = folderById(state.folder);
+      if (!f) return '';
+      parts += '<span class="crumb-here" style="' + catVars(f.color) + '">' + icon('folder') + esc(f.name) + '</span>';
+      parts += '<span class="crumb-meta">' + skillsInFolder(f.id).length + ' 个 skill · 拖拽行到「全部技能」可移出</span>';
+      parts += '<div class="crumb-actions">' +
+        '<button class="btn btn-sm" data-rename-folder="' + esc(f.id) + '">' + icon('pencil') + '重命名</button>' +
+        '<button class="btn btn-sm btn-ghost" data-del-folder="' + esc(f.id) + '" style="color:var(--danger)">' +
+        icon('trash') + '删除分类</button></div>';
+    }
+    return parts;
+  }
+
+  // 独有技能看板（根层级 + 列表视图）：同一 agent 的 skill 归为一组，组与组之间
+  // 插一条 agent 分割线；网格视图与 agent 夹内不走这里（卡片流 / 平铺行）。
   // 组顺序按 UNIQUE 里 agent 的出现顺序（后端扫描顺序）；rows 已按当前排序稳定排好，
   // 分组是稳定划分，不打乱组内次序。分割线不是 .row，行选中与键盘导航不会命中它。
   function uniqueGroupedHtml(rows, animate) {
@@ -770,7 +1228,7 @@
         (overridden ? ' · ' + overridden + ' 同名覆盖' : '') + '</span>' +
         '<span class="ad-line"></span>' +
         '</div>';
-      g.forEach(function (r) { html += skillRowHtml(r, num++, animate); });
+      g.forEach(function (r) { html += skillRowHtml(r, num++, animate, true); });
     });
     return html;
   }
@@ -798,7 +1256,7 @@
         var extTotal = r.external.reduce(function (s, e) { return s + e.count; }, 0);
         var extTip = r.external.map(function (e) {
           return e.path + '：' + e.count + ' 个';
-        }).join('\n') + '\n本工具不分发、不删除这些目录，开关不影响它们';
+        }).join('\n') + '\n本工具不分发这些目录，开关不影响它们；移除单个 skill 可在独有看板里卸载';
         extHtml = '<span class="ext-badge" title="' + esc(extTip) +
           '">外部 ' + extTotal + '</span>';
       }
@@ -806,7 +1264,8 @@
         (r.status === 'missing' ? ' is-missing' : '') + (animate ? '' : ' no-anim') +
         '" data-key="' + esc(r.key) + '" data-row-board="agents" role="button" tabindex="0"' +
         (animate ? ' style="animation-delay:' + Math.min(i, 14) * 12 + 'ms"' : '') + '>' +
-        '<span class="row-mark">' + esc(r.mark) + '</span>' +
+        // 序号列：与共有 / 独有看板同款，按当前列表顺序 1..N（状态筛选后重新从 1 编），纯展示
+        '<span class="row-mark row-num">' + (i + 1) + '</span>' +
         '<div class="row-main"><div class="row-title"><span class="row-name">' +
         esc(r.label) + '</span>' + extHtml + '</div>' +
         '<span class="row-label">' + esc(r.key) + '</span></div>' +
@@ -842,7 +1301,7 @@
         '<span style="font-size:11px">' +
         (state.board === 'agents'
           ? '左侧点任意一行，这里可以查看目录并切换分发开关'
-          : '左侧点任意一行，这里可以改显示名、分类与备注') +
+          : '左侧点任意一行，这里可以改显示名、归属分类与备注') +
         '</span></div>';
       return;
     }
@@ -854,11 +1313,25 @@
     }
     head.textContent = r.name;
 
-    var catsHtml = allCats().map(function (c) {
-      var on = r.cats.indexOf(c.id) > -1;
-      return '<button class="cat-chip ' + (on ? 'on' : '') + '" data-toggle-cat="' + c.id + '" style="' + catVars(c.color) + '" aria-pressed="' + on + '">' +
-        '<i></i>' + esc(c.label) + (on ? icon('check') : '') + '</button>';
-    }).join('');
+    // 归属分类（单选）：未归档 + 各文件夹 + 新建；独有技能不参与归档
+    var foldHtml = '';
+    if (r.board === 'shared') {
+      var cur = (meta[r.key] && meta[r.key].folder) || '';
+      var chips = '<button class="fold-chip dashed' + (!cur ? ' on' : '') + '" data-assign="" ' +
+        'style="--c:var(--ink-2);--cs:var(--surface-2)">' + icon('inbox') + '未归档</button>';
+      chips += FOLDERS.map(function (f) {
+        return '<button class="fold-chip' + (cur === f.id ? ' on' : '') + '" data-assign="' + esc(f.id) +
+          '" style="' + catVars(f.color) + '">' + icon('folder') + esc(f.name) + '</button>';
+      }).join('');
+      chips += '<button class="fold-chip add" data-new-folder-for="' + esc(r.key) + '">' +
+        icon('plus') + '新建分类</button>';
+      foldHtml = '<div class="field-block">' +
+        '<div class="field-label"><span>归属分类</span>' +
+        '<span style="text-transform:none;letter-spacing:0;font-weight:400">单选 · 一个 skill 只在一个文件夹</span></div>' +
+        '<div class="fold-picker">' + chips + '</div>' +
+        '<div class="field-help">点 chip 即移动；也可以在列表 / 网格里直接拖拽。</div>' +
+        '</div>';
+    }
 
     var coverHtml = '';
     if (r.board === 'shared') {
@@ -946,14 +1419,7 @@
         '<input class="name-input" id="ins-name" type="text" maxlength="48" value="' + esc(r.display) + '" spellcheck="false">' +
         '<div class="field-help">只改界面里的叫法，磁盘目录名 <b style="font-family:var(--mono)">' + esc(r.name) + '</b> 不变。</div>' +
       '</div>' +
-      '<div class="field-block">' +
-        '<div class="field-label"><span>分类</span><span style="text-transform:none;letter-spacing:0;font-weight:400">可多选</span></div>' +
-        '<div class="cat-picker">' + catsHtml + '</div>' +
-        '<div class="cat-add-row">' +
-          '<input class="cat-add" id="cat-add" type="text" maxlength="12" placeholder="新增分类并应用…" spellcheck="false">' +
-          '<button class="btn btn-sm" id="cat-add-btn">' + icon('plus') + '添加</button>' +
-        '</div>' +
-      '</div>' +
+      foldHtml +
       '<div class="field-block">' +
         '<div class="field-label"><span>备注</span></div>' +
         '<textarea class="note-area" id="ins-note" maxlength="400" placeholder="记下这个 skill 的用途、坑、来源…">' + esc(r.note) + '</textarea>' +
@@ -981,8 +1447,16 @@
       (r.board === 'unique' && r.entry.deletable === false
         ? '<div class="agent-hint ext">' + esc(
             r.entry.kind === 'foreign-link'
-              ? '这是指向 agent 外部目录的链接，真身不归本工具管理：只展示，不删除、不分发。'
-              : '来自外部目录 ' + r.entry.src + '，由 agent 自己安装/管理：本工具不删除、不分发。') + '</div>'
+              ? '这是指向 agent 外部目录的链接，真身不归本工具管理：只展示、不分发；需要移除时只摘链接，不碰真身。'
+              : '来自外部目录 ' + r.entry.src + '，由 agent 自己安装/管理：本工具不分发；需要移除时可以卸载（永久删除该目录）。') + '</div>' +
+          '<div class="ins-danger">' +
+          '<button class="btn btn-danger" data-uninstall="1">' + icon('trash') +
+          (r.entry.kind === 'foreign-link' ? '摘除链接（卸载）' : '卸载（删除外部目录）') + '</button>' +
+          '<p>' + (r.entry.kind === 'foreign-link'
+            ? '移除 junction 链接后 agent 不再加载该 skill；链接真身与中央仓库都不受影响。'
+            : '永久删除 ' + esc(r.entry.path) + '（' + r.entry.files + ' 个文件 / ' + fmtBytes(r.entry.bytes) +
+              '），不进回收站。该目录由 agent 自己安装，之后可能被它重新安装。') + '</p>' +
+          '</div>'
         : '<div class="ins-danger">' +
           '<button class="btn btn-danger" data-delete="1">' + icon('trash') +
           (r.board === 'shared' ? '彻底删除 skill' : '删除本地副本') + '</button>' +
@@ -1010,7 +1484,8 @@
       extHint += '<div class="agent-hint ext">' + esc(
         e.path + ' 里另有 ' + e.count + ' 个与中央仓库同名的实体（' +
         e.same + ' 个内容一致、' + e.diff + ' 个不同），是该 agent 自己安装/读取的；' +
-        '本工具不分发、不删除这里，所以开关关闭后它们仍会被加载。') + '</div>';
+        '本工具不分发这里，所以开关关闭后它们仍会被加载；' +
+        '需要移除某个 skill 可在独有看板它的详情里卸载。') + '</div>';
     });
 
     var extMeta = (a.external || []).map(function (e) {
@@ -1091,88 +1566,46 @@
   }
 
   function patchRow(key) {
-    var row = document.querySelector('.row[data-key="' + (window.CSS && CSS.escape ? CSS.escape(key) : key) + '"]');
-    if (!row) return;
+    // 列表行与网格文件卡都可能有这个 key：一并原位更新，避免整表重渲染丢焦点
+    var esc_key = window.CSS && CSS.escape ? CSS.escape(key) : key;
     var r = currentRows().filter(function (x) { return x.key === key; })[0];
     if (!r) return;
+    var m = meta[key];
+    var edited = !!(m && (m.display || m.note));
 
-    var nameEl = row.querySelector('.row-name');
-    if (nameEl) {
-      var dot = nameEl.querySelector('.edited-dot');
-      nameEl.textContent = r.display;
-      var m = meta[key];
-      if (m && (m.display || m.note || (m.cats || []).length > 1)) {
-        var d = document.createElement('span');
-        d.className = 'edited-dot';
-        d.title = '已编辑';
-        nameEl.appendChild(d);
-      }
-    }
-
-    var catsEl = row.querySelector('.row-cats');
-    if (catsEl) {
-      catsEl.innerHTML = r.cats.length
-        ? r.cats.slice(0, 2).map(function (id) { return catChip(id); }).join('') +
-          (r.cats.length > 2 ? '<span class="cat more">+' + (r.cats.length - 2) + '</span>' : '')
-        : '<span class="cat none">未分类</span>';
-    }
-
-    var noteEl = row.querySelector('.row-note');
-    if (noteEl) {
-      noteEl.textContent = r.note || '添加备注…';
-      noteEl.classList.toggle('is-empty', !r.note);
-    }
-  }
-
-  function toggleCat(key, id) {
-    var m = metaOf(key);
-    var idx = m.cats.indexOf(id);
-    if (idx > -1) m.cats.splice(idx, 1);
-    else m.cats.push(id);
-    m.updated = Date.now();
-    saveMeta(key);
-    renderList(false);
-    renderInspector();
-    renderChrome();
-    flashSaved();
-  }
-
-  function addCategory(key, raw) {
-    var label = String(raw || '').trim().slice(0, 12);
-    if (!label) return;
-    var found = allCats().filter(function (c) { return c.label === label; })[0];
-    var id;
-    if (found) {
-      id = found.id;
-    } else {
-      id = 'c-' + Date.now().toString(36).slice(-5);
-      prefs.customCats.push({ id: id, label: label });
-      savePrefs();
-    }
-    if (metaOf(key).cats.indexOf(id) < 0) metaOf(key).cats.push(id);
-    metaOf(key).updated = Date.now();
-    saveMeta(key);
-    renderList(false);
-    renderInspector();
-    renderChrome();
-    toast('ok', '分类已添加', '“' + label + '” 已应用到当前 skill');
-  }
-
-  function resetKey(key) {
-    delete meta[key];
-    delete dirtyKeys[key];
-    if (MODE === 'db' && SKB) {
-      SKB.clearMeta(scopeOf(key), key).catch(function (err) {
-        toast('bad', '还原失败', String(err && err.message || err));
+    Array.prototype.forEach.call(
+      document.querySelectorAll('.row[data-key="' + esc_key + '"], .file-card[data-key="' + esc_key + '"]'),
+      function (row) {
+        var nameEl = row.querySelector('.row-name') || row.querySelector('.fc-main b');
+        if (nameEl) {
+          nameEl.textContent = r.display;
+          if (edited && row.classList.contains('row')) {
+            var d = document.createElement('span');
+            d.className = 'edited-dot';
+            d.title = '已编辑';
+            nameEl.appendChild(d);
+          }
+        }
+        if (row.classList.contains('row')) {
+          var foldEl = row.querySelector('.row-folder');
+          if (foldEl) foldEl.innerHTML = folderChipHtml(r.folder);
+          var noteEl = row.querySelector('.row-note');
+          if (noteEl) {
+            noteEl.textContent = r.note || '添加备注…';
+            noteEl.classList.toggle('is-empty', !r.note);
+          }
+        } else {
+          var subEl = row.querySelector('.fc-main span');
+          if (subEl) {
+            if (r.board === 'unique') {
+              subEl.textContent = r.entry.toolLabel + (r.entry.sameName ? ' · 同名覆盖' : '');
+            } else {
+              var f = folderById(r.folder);
+              subEl.textContent = f ? '已归档 · ' + f.name : '未归档';
+            }
+          }
+        }
       });
-    } else {
-      saveMeta(key);
-    }
-    renderList(false);
-    renderInspector();
-    renderChrome();
-    flashSaved();
-    toast('info', '已还原', '显示名、分类与备注都回到默认值');
   }
 
   /* ---------------------------------------------------------- diff modal */
@@ -1191,9 +1624,15 @@
 
   function renderDiff(c) {
     if (!c) return;
-    var cMap = {}, lMap = {};
-    c.central.files.forEach(function (f) { cMap[f.name] = f.size; });
-    c.local.files.forEach(function (f) { lMap[f.name] = f.size; });
+    var cMap = {}, lMap = {}, cFlag = {}, lFlag = {};
+    (c.central.files || []).forEach(function (f) {
+      cMap[f.name] = f.size;
+      if (f.flag) cFlag[f.name] = f.flag;
+    });
+    (c.local.files || []).forEach(function (f) {
+      lMap[f.name] = f.size;
+      if (f.flag) lFlag[f.name] = f.flag;
+    });
 
     var names = Object.keys(cMap).concat(Object.keys(lMap).filter(function (n) { return !cMap[n]; }));
     names.sort(function (a, b) {
@@ -1204,8 +1643,12 @@
 
     var rows = names.map(function (n) {
       var cs = cMap[n], ls = lMap[n];
-      var flag = cs == null ? 'local-only' : ls == null ? 'central-only' : (cs !== ls ? 'diff' : 'same');
-      var label = { 'local-only': '仅本地', 'central-only': '仅中央', 'diff': '大小不同', 'same': '一致' }[flag];
+      // 后端已按「大小 + 内容哈希」定过 flag（同大小不同内容也报 diff）；
+      // 原型快照没有哈希信息，同大小按一致展示
+      var flag = cFlag[n] === 'diff' || lFlag[n] === 'diff' ? 'diff'
+        : cs == null ? 'local-only'
+        : ls == null ? 'central-only' : 'same';
+      var label = { 'local-only': '仅本地', 'central-only': '仅中央', 'diff': '不同', 'same': '一致' }[flag];
       return '<div class="diff-row"><span class="n">' + esc(n) + '</span>' +
         '<span class="sz">' + (cs == null ? '—' : fmtBytes(cs)) + '</span>' +
         '<span class="sz">' + (ls == null ? '—' : fmtBytes(ls)) + '</span>' +
@@ -1270,19 +1713,19 @@
         '</div>' +
         '<div class="divider"></div>' +
         '<div class="setting-row">' +
-          '<div class="setting-main"><b>我的编辑</b><span>' + edited + ' 条 skill 有显示名、分类或备注改动，' +
+          '<div class="setting-main"><b>我的编辑</b><span>' + edited + ' 条 skill 有显示名或备注改动，' +
             (MODE === 'db' ? '存在 skillkit.db 的 skill_meta 表。' : '存在浏览器 localStorage。') + '</span></div>' +
           '<button class="btn btn-sm" id="set-export">' + icon('download') + '导出 JSON</button>' +
         '</div>' +
         '<div class="setting-row">' +
           '<div class="setting-main"><b>清空我的编辑</b><span>' +
-            (MODE === 'db' ? '清空 skill_meta 并恢复预置分类，不碰磁盘上的 skill。' : '只清本机 UI 数据，不碰 skillkit.db 与磁盘。') +
+            (MODE === 'db' ? '清空显示名与备注，归属回到预置分类夹；自建文件夹保留。' : '只清本机 UI 数据，不碰 skillkit.db 与磁盘上的任何 skill。') +
             '</span></div>' +
           '<button class="btn btn-sm" id="set-clear" style="border-color:color-mix(in srgb,var(--danger) 26%,transparent);color:var(--danger)">' + icon('trash') + '清空</button>' +
         '</div>' +
         '<div class="divider"></div>' +
         '<div class="setting-row">' +
-          '<div class="setting-main"><b>中央仓库</b><span>' + SKILLS.length + ' 个 skill · ' + esc(META.storeSize || '54.4 MB') + ' · 快照 ' + esc(SCAN) + '</span></div>' +
+          '<div class="setting-main"><b>中央仓库</b><span>' + SKILLS.length + ' 个 skill · ' + esc(META.storeSize || '—') + ' · 快照 ' + esc(SCAN) + '</span></div>' +
           '<button class="btn btn-sm" data-copy="' + esc(STORE) + '">' + icon('copy') + '复制路径</button>' +
         '</div>' +
         '<div class="setting-row">' +
@@ -1292,9 +1735,9 @@
         '<div class="divider"></div>' +
         '<p style="margin:0;font-size:11px;line-height:1.6;color:var(--ink-3)">' +
           (MODE === 'db'
-            ? '桌面端：pywebview 直接 import skillkit，不启 HTTP。显示名 / 备注 / 分类写入 skill_meta(scope, key) 表；' +
-              '重置删除行，清空则清表后重新播种预置分类。'
-            : '原型说明：桌面端用 pywebview 直接 import skillkit，不启 HTTP。这里的改名 / 备注 / 分类只写 localStorage；' +
+            ? '桌面端：pywebview 直接 import skillkit，不启 HTTP。显示名 / 备注 / 归属分类夹写入 skill_meta(scope, key) 表；' +
+              '「清空我的编辑」只清显示名与备注、归属拉回预置夹，自建文件夹保留。'
+            : '原型说明：桌面端用 pywebview 直接 import skillkit，不启 HTTP。这里的改名 / 备注 / 归属只写 localStorage；' +
               '桌面端对应 skill_meta(scope, key) 表与 set_meta() 写库函数。') +
         '</p>' +
       '</div>' +
@@ -1334,7 +1777,7 @@
       var payload = {
         exportedAt: new Date().toISOString(),
         skills: meta,
-        categories: allCats()
+        folders: FOLDERS
       };
       if (MODE === 'db' && SKB) {
         SKB.exportJson('skillkit-meta.json', payload).then(function (res) {
@@ -1353,15 +1796,16 @@
       confirmModal(
         '清空所有编辑？',
         MODE === 'db'
-          ? '显示名、分类、备注都会回到预置值。只清 skill_meta 表，不会改动磁盘上的任何 skill。'
-          : '显示名、分类、备注都会回到默认值。不会改动 skillkit.db 和磁盘上的任何 skill。',
+          ? '显示名与备注会清空，归属回到预置分类夹；不会改动磁盘上的任何 skill，也不会删除你自建的文件夹。'
+          : '显示名与备注会清空，归属回到预置分类夹；不会改动 skillkit.db 和磁盘上的任何 skill，自建文件夹保留。',
         '清空',
         function () {
+          // 先关弹窗再发请求：连点时确认框还在，一次点击会冒出两个 change
+          closeModal();
           if (MODE === 'db' && SKB) {
             SKB.reseedMeta().then(function (res) {
               applyBootstrap(res);
-              closeModal();
-              toast('ok', '已清空', '编辑记录已重置为预置分类');
+              toast('ok', '已清空', '显示名与备注已清空，归属回到预置分类夹');
             }).catch(function (err) {
               toast('bad', '清空失败', String(err && err.message || err));
             });
@@ -1369,12 +1813,10 @@
           }
           meta = {};
           lsDel(META_KEY);
-          prefs.seeded = false;
           savePrefs();
-          seedIfNeeded();
+          seedIfNeeded(); // prefs.folders 保留（自建夹不清），归属按规则重新播种
           renderAll(true);
-          closeModal();
-          toast('ok', '已清空', '编辑记录已重置为初始分类');
+          toast('ok', '已清空', '显示名与备注已清空，归属回到预置分类夹');
         }
       );
     });
@@ -1405,6 +1847,10 @@
   }
 
   /* ---------------------------------------------------------- modal / toast */
+  // 当前弹窗的取消回调（confirmModal 专用）：Esc 关闭也要走一遍，
+  // 否则「关闭分发」这类确认框按 Esc 后复选框停在翻转态，界面撒谎
+  var modalOnCancel = null;
+
   function openModal(html) {
     var root = document.getElementById('modal-root');
     root.innerHTML = '<div class="overlay" data-overlay="1">' + html + '</div>';
@@ -1412,12 +1858,14 @@
     overlay.addEventListener('mousedown', function (e) {
       if (e.target === overlay) closeModal();
     });
+    modalOnCancel = null;
     document.body.style.overflow = 'hidden';
   }
 
   function closeModal() {
     document.getElementById('modal-root').innerHTML = '';
     document.body.style.overflow = '';
+    modalOnCancel = null;
   }
 
   function confirmModal(title, text, okLabel, onOk, opts) {
@@ -1434,8 +1882,9 @@
       '</div>'
     );
     document.getElementById('confirm-ok').addEventListener('click', onOk);
-    // 取消 / 右上角关闭 / 点遮罩：让调用方回滚自己先改过的界面状态
+    // 取消 / 右上角关闭 / 点遮罩 / Esc：让调用方回滚自己先改过的界面状态
     if (opts && typeof opts.onCancel === 'function') {
+      modalOnCancel = opts.onCancel;
       var cancels = document.querySelectorAll('#modal-root [data-close]');
       for (var i = 0; i < cancels.length; i++) {
         cancels[i].addEventListener('click', opts.onCancel);
@@ -1513,23 +1962,9 @@
 
   /* ---------------------------------------------------------- interactions */
   function setBoard(board) {
-    if (!/^(shared|unique|agents)$/.test(board) || state.board === board) return;
-    state.board = board;
-    prefs.board = board;
-    savePrefs();
-    state.cat = 'all';
-    state.agentStatus = 'all';
-    state.q = '';
-    var search = document.getElementById('gsearch');
-    if (search) search.value = '';
-    state.selected = null;
-    var rows = currentRows();
-    if (rows.length) state.selected = rows[0].key;
-    renderChrome();
-    renderList(true);
-    renderInspector();
-    var body = document.getElementById('list-body');
-    if (body) body.scrollTop = 0;
+    if (!/^(shared|unique|agents)$/.test(board)) return;
+    // 复位筛选 / 清搜索框 / 默认选中 / 全量渲染都在 setState 的 board 分支
+    setState({ board: board });
   }
 
   function agentByKey(key) {
@@ -1554,6 +1989,7 @@
     }
 
     var showResult = function (res) {
+      // 水合前的选中意向：applyBootstrap 会校验该行是否仍存在，失效才回落
       state.selected = key;
       applyBootstrap(res);
       var act = res.action || {};
@@ -1618,6 +2054,7 @@
       closeModal();
       runProgress(500, function () {
         SKB.deleteSkill(r.board, r.key).then(function (res) {
+          // 水合前的选中意向：指向相邻行，applyBootstrap 校验后生效
           state.selected = next ? next.key : null;
           applyBootstrap(res);
           var act = res.action || {};
@@ -1632,21 +2069,329 @@
     }, { danger: true });
   }
 
-  function setCat(id) {
-    state.cat = id;
-    renderList(false);
+  function requestUninstall() {
+    // 外部来源独有行的「卸载」（deletable=false 的三类：extra 目录 / 容器子目录 /
+    // foreign-link）。与「删除本地副本」的区别在后端 uninstall_unique：
+    // foreign-link 只摘链接；实体目录永久删除。deletable 行仍走 requestDelete。
+    var r = selectedRow();
+    if (!r || r.board !== 'unique' || r.entry.deletable !== false) return;
+    if (MODE !== 'db' || !SKB) {
+      toast('info', '原型模式', '桌面端才会真的摘除链接 / 删除外部目录');
+      return;
+    }
+    var isLink = r.entry.kind === 'foreign-link';
+    var rows = sortRows(filterRows(currentRows()));
+    var idx = rows.findIndex(function (x) { return x.key === r.key; });
+    var next = idx > -1 ? (rows[idx + 1] || rows[idx - 1] || null) : null;
+
+    var title = isLink ? '摘除这个外部链接？' : '卸载“' + r.display + '”？';
+    var text = isLink
+      ? '将从 ' + r.entry.toolLabel + ' 目录移除这个 junction 链接，agent 不再加载该 skill。' +
+        '链接真身（' + r.entry.path + '）与中央仓库都不受影响。'
+      : '将永久删除 ' + r.entry.path + '（' + r.entry.files + ' 个文件 / ' + fmtBytes(r.entry.bytes) +
+        '）。该目录由 agent 自己安装/管理，卸载后 agent 更新时可能会重新安装。' +
+        '此操作不可恢复、不进回收站。';
+
+    confirmModal(title, text, isLink ? '摘除链接' : '卸载', function () {
+      closeModal();
+      runProgress(500, function () {
+        SKB.uninstallUnique(r.key).then(function (res) {
+          state.selected = next ? next.key : null;
+          applyBootstrap(res);
+          var act = res.action || {};
+          toast('ok', isLink ? '链接已摘除' : '已卸载',
+            (isLink ? '移除链接 ' : '删除 ' + (act.files || 0) + ' 个文件 · ') + (act.path || ''));
+        }).catch(function (err) {
+          toast('bad', isLink ? '摘除失败' : '卸载失败', String(err && err.message || err));
+        });
+      });
+    }, { danger: true });
+  }
+
+  function resetKey(key) {
+    // 「还原」只清显示名 / 备注；归属文件夹保持不动（不再删整行）
+    var m = metaOf(key);
+    m.display = '';
+    m.note = '';
+    m.updated = 0;
+    delete dirtyKeys[key];
+    delete metaRetries[key];
+    saveMeta(key);
+    renderChrome();
+    renderContent(false);
+    renderInspector();
+    flashSaved();
+    toast('info', '已还原', '显示名与备注回到默认值，归属分类保持不变');
+  }
+
+  /* ---------------------------------------------------------- 文件夹动作 */
+  // 归属落库 / 本地保存 + 三处界面同步（侧栏计数、列表行、检查器 chip）
+  function assignSkill(key, folderId, silent) {
+    if (scopeOf(key) !== 'shared') return;
+    var m = metaOf(key);
+    var target = folderId || '';
+    var changed = (m.folder || '') !== target;
+    m.folder = target;
+    m.updated = Date.now();
+    saveMeta(key);
+    flashSaved();
+    renderChrome();
+    renderContent(false);
+    renderInspector();
+    if (changed && !silent) {
+      var f = folderById(target);
+      var label = (m.display || key);
+      toast('ok', '已移动', '「' + label + '」→ ' + (f ? '「' + f.name + '」' : '未归档'));
+    }
+  }
+
+  function openFolder(id) {
+    // 收起 ⋯ 菜单、chrome/内容/检查器刷新都在 setState 的 folder 分支
+    setState({ folder: id === 'all' ? null : id });
+  }
+
+  function setViewMode(mode) {
+    if (mode !== 'grid' && mode !== 'list') return;
+    if (viewOf(state.board) === mode) return;
+    prefs.views[state.board] = mode;
+    savePrefs();
+    renderChrome();
+    renderContent(false);
   }
 
   function setSort() {
     prefs.sort = prefs.sort === 'name' ? 'edited' : 'name';
     savePrefs();
     renderChrome();
-    renderList(false);
+    renderContent(false);
+  }
+
+  /* ---------------------------------------------------------- 文件夹 CRUD */
+  function folderModal(mode, folderId, assignKey) {
+    var f = folderId ? folderById(folderId) : null;
+    var color = f ? f.color : PALETTE[0];
+    var name = f ? f.name : '';
+    openModal(
+      '<div class="modal">' +
+      '<button class="modal-close" data-close="1" aria-label="关闭">' + icon('x') + '</button>' +
+      '<div class="modal-head"><span class="modal-eyebrow">' + (f ? 'RENAME FOLDER' : 'NEW FOLDER') + '</span>' +
+      '<h2>' + (f ? '重命名分类' : '新建分类文件夹') + '</h2></div>' +
+      '<div class="modal-body">' +
+      '<div class="field-label"><span>名称</span></div>' +
+      '<input class="name-input" id="fm-name" type="text" maxlength="12" placeholder="例如：自动化 / 写作 / 数据…" value="' + esc(name) + '" spellcheck="false">' +
+      '<div class="field-label" style="margin-top:12px"><span>颜色</span></div>' +
+      '<div class="palette" id="fm-palette">' +
+      PALETTE.map(function (c) {
+        return '<button data-color="' + c + '" class="' + (c === color ? 'on' : '') +
+          '" style="--pc:var(--' + (c === 'green' ? 'success' : c) + ')" aria-label="' + c + '"></button>';
+      }).join('') +
+      '</div>' +
+      '<p style="margin-top:10px;font-size:11px">' +
+      (f
+        ? '分类名与颜色只影响展示；其中 ' + skillsInFolder(f.id).length + ' 个 skill 的归属保持不变。'
+        : (assignKey
+          ? '创建后会把「' + esc((meta[assignKey] && meta[assignKey].display) || assignKey) + '」直接归入这个分类。'
+          : '创建后是一个空文件夹，把 skill 拖进来或用 ⋯ 菜单移动。')) +
+      '</p></div>' +
+      '<div class="modal-foot"><button class="btn" data-close="1">取消</button>' +
+      '<button class="btn btn-primary" id="fm-ok">' + (f ? '保存' : '创建') + '</button></div>' +
+      '</div>');
+    var picked = color;
+    document.getElementById('fm-palette').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-color]');
+      if (!b) return;
+      picked = b.getAttribute('data-color');
+      Array.prototype.forEach.call(this.querySelectorAll('button'), function (x) {
+        x.classList.toggle('on', x === b);
+      });
+    });
+    var input = document.getElementById('fm-name');
+    input.focus();
+    document.getElementById('fm-ok').addEventListener('click', function () {
+      var val = input.value.trim().slice(0, 12);
+      if (!val) { toast('warn', '名称不能为空', '给分类起个名字再保存'); return; }
+      if (input.disabled) return; // Enter 双触发兜底：document 级 keydown 也会点 OK
+      if (MODE === 'db' && SKB) {
+        input.disabled = true;
+        var p = f ? SKB.folderRename(f.id, val, picked) : SKB.folderCreate(val, picked);
+        p.then(function (res) {
+          closeModal();
+          applyBootstrap(res);
+          if (!f && assignKey && res.folder) assignSkill(assignKey, res.folder.id, true);
+          toast('ok', f ? '分类已更新' : '分类已创建', val);
+        }).catch(function (err) {
+          input.disabled = false;
+          toast('bad', f ? '保存失败' : '创建失败', String(err && err.message || err));
+        });
+        return;
+      }
+      if (f) {
+        f.name = val;
+        f.color = picked;
+        savePrefs();
+        closeModal();
+        renderAll(false);
+        toast('ok', '分类已更新', val);
+        return;
+      }
+      var id = 'f-' + Date.now().toString(36).slice(-6);
+      prefs.folders.push({ id: id, name: val, color: picked, position: prefs.folders.length });
+      FOLDERS = prefs.folders;
+      savePrefs();
+      closeModal();
+      if (assignKey) {
+        assignSkill(assignKey, id, true);
+        toast('ok', '分类已创建', val + ' · 「' + ((meta[assignKey] && meta[assignKey].display) || assignKey) + '」已归入');
+      } else {
+        renderAll(false);
+        toast('ok', '分类已创建', val + ' · 空文件夹');
+      }
+    });
+  }
+
+  function confirmDeleteFolder(f) {
+    if (!f) return;
+    var n = skillsInFolder(f.id).length;
+    confirmModal(
+      '删除分类「' + f.name + '」？',
+      '其中 ' + n + ' 个 skill 将回到未归档，skill 文件本身不受影响；此操作只删除分类，不删除任何 skill。' +
+        '也可以先把里面的 skill 拖到其他文件夹。',
+      '删除分类',
+      function () {
+        closeModal();
+        if (MODE === 'db' && SKB) {
+          SKB.folderDelete(f.id).then(function (res) {
+            if (state.folder === f.id) state.folder = null;
+            applyBootstrap(res);
+            toast('ok', '分类已删除', '「' + f.name + '」里的 ' +
+              ((res.action && res.action.moved) || 0) + ' 个 skill 已回到未归档');
+          }).catch(function (err) {
+            toast('bad', '删除失败', String(err && err.message || err));
+          });
+          return;
+        }
+        prefs.folders = prefs.folders.filter(function (x) { return x.id !== f.id; });
+        FOLDERS = prefs.folders;
+        Object.keys(meta).forEach(function (key) {
+          if (meta[key] && meta[key].folder === f.id) {
+            meta[key].folder = '';
+            meta[key].updated = Date.now();
+          }
+        });
+        saveMeta();
+        savePrefs();
+        if (state.folder === f.id) state.folder = null;
+        renderAll(false);
+        toast('ok', '分类已删除', '「' + f.name + '」里的 ' + n + ' 个 skill 已回到未归档');
+      },
+      { danger: true });
+  }
+
+  /* ---------------------------------------------------------- ⋯ 快捷菜单 */
+  // 菜单挂在 body 上：不能用 root 委托，点击处理统一放 document
+  var ctxEl = null;
+  var ctxSkill = null;
+
+  function closeCtx() {
+    if (ctxEl) { ctxEl.remove(); ctxEl = null; }
+  }
+
+  function openCtx(items, x, y) {
+    closeCtx();
+    ctxEl = document.createElement('div');
+    ctxEl.className = 'ctx-menu';
+    ctxEl.innerHTML = items.map(function (it) {
+      if (it === '-') return '<div class="ctx-sep"></div>';
+      if (it.label === '移动到…') return '<div class="ctx-label">移动到…</div>';
+      return '<button class="ctx-item' + (it.danger ? ' danger' : '') + (it.disabled ? ' current' : '') +
+        '" data-ctx="' + esc(it.act || '') + '"' + (it.arg ? ' data-arg="' + esc(it.arg) + '"' : '') + '>' +
+        (it.dot ? '<span class="catdot" style="--c:' + it.dot + '"></span>' : icon(it.ic || 'folder')) +
+        esc(it.label) + (it.badge ? '<b>' + esc(it.badge) + '</b>' : '') + '</button>';
+    }).join('');
+    document.body.appendChild(ctxEl);
+    var r = ctxEl.getBoundingClientRect();
+    ctxEl.style.left = Math.min(x, window.innerWidth - r.width - 10) + 'px';
+    ctxEl.style.top = Math.min(y, window.innerHeight - r.height - 10) + 'px';
+  }
+
+  function skillMenu(key, x, y) {
+    if (scopeOf(key) !== 'shared') return;
+    ctxSkill = key;
+    var cur = (meta[key] && meta[key].folder) || '';
+    var items = [{ label: '移动到…', ic: 'folder' }];
+    FOLDERS.forEach(function (f) {
+      items.push({
+        label: f.name, dot: COLORS[f.color][0], act: 'move', arg: f.id,
+        badge: cur === f.id ? '当前' : String(skillsInFolder(f.id).length),
+        disabled: cur === f.id
+      });
+    });
+    items.push('-');
+    items.push({ label: '移出分类（回到未归档）', ic: 'inbox', act: 'unfile', disabled: !cur });
+    openCtx(items, x, y);
+  }
+
+  function folderMenu(folderId, x, y) {
+    openCtx([
+      { label: '重命名', ic: 'pencil', act: 'rename', arg: folderId },
+      { label: '更改颜色', ic: 'folder', act: 'recolor', arg: folderId },
+      '-',
+      { label: '删除分类', ic: 'trash', danger: true, act: 'del', arg: folderId }
+    ], x, y);
+  }
+
+  /* ---------------------------------------------------------- 拖拽归档 */
+  // 行 / 文件卡 → 文件夹卡片或侧栏夹 = 归档；→ 面包屑「全部技能」= 移出。
+  // 只有 shared 行带 draggable；独有 / 智能体看板不出现文件夹元素。
+  function bindDragAndDrop() {
+    var dragSkill = null;
+    document.addEventListener('dragstart', function (e) {
+      var src = e.target.closest && e.target.closest('[data-key][draggable]');
+      if (!src) return;
+      var key = src.getAttribute('data-key');
+      if (scopeOf(key) !== 'shared') return;
+      dragSkill = key;
+      src.classList.add('is-dragging');
+      try {
+        e.dataTransfer.setData('text/plain', 'skill:' + dragSkill);
+        e.dataTransfer.effectAllowed = 'move';
+      } catch (err) {}
+    });
+    document.addEventListener('dragend', function () {
+      Array.prototype.forEach.call(
+        document.querySelectorAll('.is-dragging, .drop-hint'),
+        function (el) { el.classList.remove('is-dragging', 'drop-hint'); });
+      dragSkill = null;
+    });
+    function dropTarget(el) { return el.closest && el.closest('[data-drop-folder], [data-drop-unfile]'); }
+    document.addEventListener('dragover', function (e) {
+      var t = dropTarget(e.target);
+      if (!t || !dragSkill) return;
+      e.preventDefault();
+      t.classList.add('drop-hint');
+    });
+    document.addEventListener('dragleave', function (e) {
+      var t = dropTarget(e.target);
+      if (t) t.classList.remove('drop-hint');
+    });
+    document.addEventListener('drop', function (e) {
+      var t = dropTarget(e.target);
+      if (!t || !dragSkill) return;
+      e.preventDefault();
+      var data = '';
+      try { data = e.dataTransfer.getData('text/plain'); } catch (err) {}
+      var key = dragSkill || (data.indexOf('skill:') === 0 ? data.slice(6) : '');
+      t.classList.remove('drop-hint');
+      dragSkill = null;
+      if (!key || scopeOf(key) !== 'shared') return;
+      if (t.hasAttribute('data-drop-unfile')) assignSkill(key, '');
+      else assignSkill(key, t.getAttribute('data-drop-folder') || '');
+    });
   }
 
   function renderAll(animate) {
     renderChrome();
-    renderList(animate);
+    renderContent(animate);
     renderInspector();
   }
 
@@ -1786,7 +2531,7 @@
   // 同样用 screenX/screenY 绝对位移 + SetWindowPos，避免依赖 pywebview 的 drag-region。
   var moveState = null;
 
-  // 诊断：真实手拖出问题时，kit/ui-drag.log 能说清断在哪一步
+  // 诊断：真实手拖出问题时，kit/skillkit.log 能说清断在哪一步
   function uiLog(kind, payload) {
     if (MODE !== 'db' || !SKB || !SKB.logUi) return;
     try { SKB.logUi(kind, JSON.stringify(payload || {})); } catch (err) {}
@@ -1891,6 +2636,8 @@
 
   /* ---------------------------------------------------------- events */
   function bind() {
+    bindDragAndDrop();
+
     document.addEventListener('pointerdown', function (e) {
       var grip = e.target.closest && e.target.closest('[data-resize]');
       if (grip) { beginResize(e, grip); return; }
@@ -1982,6 +2729,36 @@
     document.addEventListener('click', function (e) {
       var t = e.target;
 
+      // ⋯ 快捷菜单：先于导航 / 行选中判断（按钮在行与卡片内部）
+      var moreF = t.closest('[data-more-folder]');
+      if (moreF) {
+        folderMenu(moreF.getAttribute('data-more-folder'), e.clientX, e.clientY);
+        return;
+      }
+      var moreS = t.closest('[data-more-skill]');
+      if (moreS) {
+        skillMenu(moreS.getAttribute('data-more-skill'), e.clientX, e.clientY);
+        return;
+      }
+      // 菜单开着时点别处：关闭菜单，但这次点击继续走正常逻辑（选中行等）
+      if (ctxEl) {
+        var ci = t.closest('[data-ctx]');
+        if (ci) {
+          var act = ci.getAttribute('data-ctx');
+          var arg = ci.getAttribute('data-arg');
+          var skillKey = ctxSkill;
+          closeCtx();
+          ctxSkill = null;
+          if (act === 'move' && arg && skillKey) assignSkill(skillKey, arg);
+          if (act === 'unfile' && skillKey) assignSkill(skillKey, '');
+          if (act === 'rename' && arg) folderModal('edit', arg);
+          if (act === 'recolor' && arg) folderModal('edit', arg);
+          if (act === 'del' && arg) confirmDeleteFolder(folderById(arg));
+          return;
+        }
+        if (!t.closest('.ctx-menu')) closeCtx();
+      }
+
       var boardEl = t.closest('[data-board]');
       if (boardEl) { setBoard(boardEl.getAttribute('data-board')); return; }
 
@@ -1993,8 +2770,7 @@
 
       var statusEl = t.closest('[data-agent-status]');
       if (statusEl) {
-        state.agentStatus = statusEl.getAttribute('data-agent-status');
-        renderList(false);
+        setState({ agentStatus: statusEl.getAttribute('data-agent-status') });
         return;
       }
 
@@ -2030,26 +2806,42 @@
         return;
       }
 
-      var catEl = t.closest('[data-cat]');
-      if (catEl) { setCat(catEl.getAttribute('data-cat')); return; }
+      // ---- 分类文件夹导航 / CRUD ----
+      var folderNav = t.closest('[data-folder-nav]');
+      if (folderNav) { openFolder(folderNav.getAttribute('data-folder-nav')); return; }
+      var folderCard = t.closest('[data-folder-card]');
+      if (folderCard) { openFolder(folderCard.getAttribute('data-folder-card')); return; }
+      if (t.closest('[data-crumb-root]')) { openFolder('all'); return; }
+      var jumpEl = t.closest('[data-jump-folder]');
+      if (jumpEl) { openFolder(jumpEl.getAttribute('data-jump-folder')); return; }
+
+      if (t.closest('#grid-new-folder') || t.closest('#side-add-folder')) { folderModal('create'); return; }
+      var newFor = t.closest('[data-new-folder-for]');
+      if (newFor) { folderModal('create', null, newFor.getAttribute('data-new-folder-for')); return; }
+      var renEl = t.closest('[data-rename-folder]');
+      if (renEl) { folderModal('edit', renEl.getAttribute('data-rename-folder')); return; }
+      var delEl = t.closest('[data-del-folder]');
+      if (delEl) { confirmDeleteFolder(folderById(delEl.getAttribute('data-del-folder'))); return; }
+
+      // 检查器归属 chip：单选即移动
+      var assign = t.closest('[data-assign]');
+      if (assign && state.selected) {
+        assignSkill(state.selected, assign.getAttribute('data-assign') || '');
+        return;
+      }
 
       if (t.closest('[data-delete]')) { requestDelete(); return; }
+      if (t.closest('[data-uninstall]')) { requestUninstall(); return; }
 
       if (t.closest('[data-close]')) { closeModal(); return; }
       if (t.closest('.modal-close')) { closeModal(); return; }
 
-      var row = t.closest('.row');
-      if (row) {
-        state.selected = row.getAttribute('data-key');
-        renderList(false);
-        renderInspector();
-        var ins = document.getElementById('ins-body');
-        if (ins) ins.scrollTop = 0;
+      // 行 / 文件卡选中（两者都带 data-key）
+      var row = t.closest('.row, .file-card');
+      if (row && row.getAttribute('data-key')) {
+        setState({ selected: row.getAttribute('data-key') }, { insTop: true });
         return;
       }
-
-      var toggle = t.closest('[data-toggle-cat]');
-      if (toggle && state.selected) { toggleCat(state.selected, toggle.getAttribute('data-toggle-cat')); return; }
 
       if (t.closest('[data-reset]') && state.selected) { resetKey(state.selected); return; }
 
@@ -2090,12 +2882,13 @@
         return;
       }
 
+      // 视图切换（顶栏分段）：prefs.view 持久化
+      var viewBtn = t.closest('#view-seg [data-view-mode]');
+      if (viewBtn) { setViewMode(viewBtn.getAttribute('data-view-mode')); return; }
+
       if (t.closest('#reset-filter-btn')) {
-        state.q = '';
-        state.cat = 'all';
-        state.agentStatus = 'all';
         document.getElementById('gsearch').value = '';
-        renderList(false);
+        setState({ q: '', agentStatus: 'all', folder: null });
         return;
       }
 
@@ -2105,17 +2898,11 @@
 
       if (t.closest('#density-btn')) {
         prefs.density = prefs.density === 'compact' ? 'comfortable' : 'compact';
-        savePrefs(); renderChrome(); renderList(false);
+        savePrefs(); renderChrome(); renderContent(false);
         return;
       }
 
       if (t.closest('#open-settings')) { openSettings(); return; }
-
-      if (t.closest('#cat-add-btn')) {
-        var input = document.getElementById('cat-add');
-        if (input && state.selected) { addCategory(state.selected, input.value); input.value = ''; }
-        return;
-      }
 
       if (t.closest('#theme-toggle')) {
         prefs.theme = prefs.theme === 'dark' ? 'light' : 'dark';
@@ -2157,8 +2944,9 @@
       var t = e.target;
 
       if (t.id === 'gsearch') {
-        state.q = t.value.trim();
-        renderList(false);
+        var nextQ = t.value.trim();
+        // 与原型一致：搜索时强制回根（文件夹内不做搜索过滤）
+        setState({ q: nextQ, folder: nextQ ? null : state.folder });
         return;
       }
 
@@ -2189,34 +2977,44 @@
         return;
       }
       if (e.key === 'Enter') {
-        if (e.target && e.target.id === 'cat-add' && state.selected) {
-          addCategory(state.selected, e.target.value);
-          e.target.value = '';
+        if (e.target && e.target.id === 'fm-name') {
+          var ok = document.getElementById('fm-ok');
+          if (ok) { e.preventDefault(); ok.click(); }
         }
         return;
       }
       if (e.key === 'Escape') {
+        // Esc 链：弹窗 → ⋯ 菜单 → 清搜索 → 退出文件夹
         if (document.getElementById('modal-root').firstElementChild) {
-          closeModal();
+          var onCancel = modalOnCancel;
+          closeModal(); // 先清回调再触发，避免回调里再开新弹窗被误判成同一层
+          if (onCancel) onCancel();
           return;
         }
+        if (ctxEl) { closeCtx(); return; }
         if (state.q) {
-          state.q = '';
           document.getElementById('gsearch').value = '';
-          renderList(false);
+          setState({ q: '' });
+          return;
         }
+        if (state.folder) openFolder('all');
+        return;
       }
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
-        var rows = Array.prototype.slice.call(document.querySelectorAll('.row'));
+        // 输入框和备注框里方向键是移动光标 / 选字的，不能抢去切行
+        // （renderInspector 会重建整个检查器，丢光标与 IME 组合状态）
+        var ae = document.activeElement;
+        if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
+        var rows = Array.prototype.slice.call(document.querySelectorAll('.row, .file-card'));
         if (!rows.length) return;
         var idx = rows.findIndex(function (r) { return r.classList.contains('is-selected'); });
         var next = e.key === 'ArrowDown' ? Math.min(rows.length - 1, idx + 1) : Math.max(0, idx - 1);
         e.preventDefault();
-        state.selected = rows[next].getAttribute('data-key');
-        renderList(false);
-        renderInspector();
-        rows[next].scrollIntoView({ block: 'nearest' });
+        setState({ selected: rows[next].getAttribute('data-key') });
+        // 重渲染后旧元素已 detached（直接 scrollIntoView 是 no-op，老实现因此
+        // 键盘导航从不跟滚）：按高亮类现查当前元素再滚
+        var el = document.querySelector('.row.is-selected, .file-card.is-selected');
+        if (el) el.scrollIntoView({ block: 'nearest' });
       }
     });
 
@@ -2232,6 +3030,288 @@
       tip.style.top = (box.bottom + 8) + 'px';
     });
   }
+
+  /* ---------------------------------------------------------- boot overlay */
+  /* 启动编排时钟（SPEC-boot-animation.md · 方案 A）。纯展示层：不改数据流，
+     只消费 hydrate 的 payload。编排时钟为主，真实 R（bootstrap 成功且 start()
+     首帧渲染完成）只负责提前收尾（剩余时间轴提速 ~1.2s 走完）或延后收尾
+     （停在 94% 等待）；8s 硬上限保证 overlay 在任何路径下都必然消失。 */
+  var BootFX = (function () {
+    var TOTAL = 4940;                      // 1× 满速时间轴总长（ms）
+    var OK_T = 4420;                       // 「就绪」相位；R 未到则停在前一相位等待
+    var AGENTS_T = 2960;                   // 探测 agent 分发相位（chips/parse 到此为止）
+    var CNT_FROM = 860, CNT_TO = 2960;     // 计数器 easeOutCubic 窗口
+    var HARD_CAP = 8000;                   // 桥卡死硬上限：到点强制走就绪 + reveal
+    var CHIP_MS = 118, CHIP_MAX = 14, PARSE_MS = 150, MARK_MS = 135;
+    var REVEAL_GAP = 520;                  // 就绪 → reveal（与 4420→4940 同距）
+    // chip 是纯装饰：颜色按 A→Z 序循环取（规格 §3.2 的六个分类色）
+    var CHIP_COLORS = ['--violet', '--accent', '--warning', '--rose', '--teal', '--slate'];
+
+    var el = null, winEl = null;
+    var phEl, cntEl, lineEl, fillEl, chipsEl, agentsEl;
+    var iv = 0, revealTimer = 0;
+    var disabled = false, reduce = false, fullSpeed = false;
+    var begun = false, rSeen = false, okFired = false, finished = false;
+    var vt = 0, lastWall = 0, scale = 1, beginWall = 0, idx = 0, okVt = 0;
+    var tgt = { n: 0, u: 0, m: 0, f: 0, py: '', store: '', size: '' };
+    var marks = [], chips = [], parseSeq = [];
+    var chipI = 0, nextChipVt = 0, parseI = 0, nextParseVt = 0, markI = 0, nextMarkVt = 0;
+    var cntCur = 0;
+
+    // 事件表：hold 相位（就绪）必须等真实 R 放行，慢机时停在 94% 等待
+    var PHASES = [
+      { t: 0, ph: '正在启动', pct: 6 },
+      { t: 460, ph: '打开中央仓库', pct: 14 },
+      { t: 860, ph: '扫描技能目录', pct: 30 },
+      { t: 2060, ph: '解析 SKILL.md', pct: 60 },
+      { t: AGENTS_T, ph: '探测 agent 分发', pct: 78 },
+      { t: 3960, ph: '载入分类与元数据', pct: 94 },
+      { t: OK_T, ph: '就绪', pct: 100, hold: true }
+    ];
+
+    function enabledTools(tools) {
+      return (tools || []).filter(function (t) { return t && t.enabled && t.mark; });
+    }
+
+    function applyData(d) {
+      var meta = (d && d.meta) || {};
+      var skills = (d && d.skills) || [];
+      var en = enabledTools(d && d.tools);
+      tgt = {
+        n: meta.sharedCount != null ? meta.sharedCount : skills.length,
+        u: meta.uniqueCount != null ? meta.uniqueCount : 0,
+        m: meta.agentCount != null ? meta.agentCount : en.length,
+        f: ((d && d.folders) || []).length,
+        py: meta.python || '',
+        store: meta.store || STORE,
+        size: meta.storeSize || ''
+      };
+      marks = en.map(function (t) {
+        return { key: t.key || '', mark: t.mark, dir: t.dir || '' };
+      });
+      // A→Z 取用；hash 后端只有 12 位，缺了用序号派生兜底
+      parseSeq = skills.map(function (s) {
+        return { name: s.label || s.name || '', hash: String(s.hash || '') };
+      }).sort(function (a, b) {
+        return a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1;
+      });
+    }
+
+    function marksKey(list) {
+      return list.map(function (m) { return m.mark; }).join(',');
+    }
+
+    function renderMarks() {
+      if (!agentsEl) return;
+      agentsEl.innerHTML = '';
+      for (var i = 0; i < marks.length; i++) {
+        var s = document.createElement('span');
+        s.className = 'boot-agent';
+        s.textContent = marks[i].mark;
+        agentsEl.appendChild(s);
+      }
+      markI = 0;
+    }
+
+    function setPhase(text) { if (phEl) phEl.textContent = text; }
+    function setLine(text) { if (lineEl) lineEl.textContent = text; }
+    function setPct(p) { if (fillEl) fillEl.style.width = p + '%'; }
+    function setCnt(n) { if (cntEl) cntEl.textContent = n + ' / ' + tgt.n; }
+
+    function kernelLine() {
+      return 'kernel ready' + (tgt.py ? ' · python ' + tgt.py : '');
+    }
+
+    function firePhase(p) {
+      setPhase(p.ph);
+      setPct(p.pct);
+      if (p.t === 0) setLine(kernelLine());
+      else if (p.t === 460) setLine(tgt.store + (tgt.size ? ' · ' + tgt.size : ''));
+      else if (p.t === 860) {
+        setLine('scan store … ' + tgt.n + ' skills · ' + tgt.u + ' unique');
+        nextChipVt = p.t;
+      } else if (p.t === 2060) {
+        nextParseVt = p.t;
+      } else if (p.t === AGENTS_T) {
+        if (chipsEl) chipsEl.innerHTML = '';
+        nextMarkVt = p.t;
+      } else if (p.t === 3960) {
+        // 字段口径按规格 §4 数据表：F=folders.length，M=meta.agentCount
+        setLine('folders ×' + tgt.f + ' · meta ×' + tgt.m + ' · prefs ok');
+      } else if (p.t === OK_T) {
+        okFired = true;
+        okVt = vt;
+        cntCur = tgt.n; // ok 后计数器锁定在精确终值，不再被追赶平滑改写
+        if (el) el.classList.add('ok');
+        setCnt(tgt.n);
+        setLine(tgt.n + ' 个技能就绪 · ' + tgt.m + ' 个 agent 已连接');
+      }
+    }
+
+    function addChip() {
+      var c = chips[chipI];
+      if (!c || !c.name || !chipsEl) return;
+      var color = CHIP_COLORS[chipI % CHIP_COLORS.length];
+      chipI++;
+      var s = document.createElement('span');
+      s.className = 'boot-chip';
+      s.innerHTML = '<b style="--c:var(' + color + ')">'
+        + esc(c.name.slice(0, 2).toUpperCase()) + '</b>' + esc(c.name);
+      chipsEl.appendChild(s);
+      // 只保留 14 个在显 chip：标记最老的「未退场」chip（firstElementChild 可能
+      // 已经是 .out 退场中的，续期无效果，可见数会悄悄爬过上限）
+      var visible = chipsEl.querySelectorAll('.boot-chip:not(.out)');
+      for (var v = 0; visible.length - v > CHIP_MAX; v++) {
+        (function (node) {
+          node.classList.add('out');
+          setTimeout(function () { if (node.parentNode) node.parentNode.removeChild(node); }, 240);
+        })(visible[v]);
+      }
+    }
+
+    // 计数器目标：860→2960 easeOutCubic；真实数据到手改目标后由追赶平滑过渡
+    function cntTarget() {
+      if (vt <= CNT_FROM) return 0;
+      var p = Math.min(1, (vt - CNT_FROM) / (CNT_TO - CNT_FROM));
+      return tgt.n * (1 - Math.pow(1 - p, 3));
+    }
+
+    function tick() {
+      if (finished || !el || !el.isConnected) { stop(); return; } // data.js 缺失时 overlay 已随 body 重建被移走
+      var w = Date.now();
+      vt += (w - lastWall) * scale; // 隐藏窗口定时器被节流也不丢时长：按墙钟差推进
+      lastWall = w;
+      if (!rSeen && w - beginWall > HARD_CAP) {
+        rSeen = true;
+        vt = Math.max(vt, OK_T);    // 强制走就绪：下一 tick 放行 hold 相位
+      }
+      var p;
+      while (idx < PHASES.length && (p = PHASES[idx]).t <= vt && (rSeen || !p.hold)) {
+        firePhase(p);
+        idx++;
+      }
+      if (chipsEl && vt >= CNT_FROM && vt < AGENTS_T) {
+        while (chipI < chips.length && vt >= nextChipVt) { addChip(); nextChipVt += CHIP_MS; }
+      }
+      if (vt > CNT_FROM && cntEl && !okFired) {
+        var want = cntTarget();
+        cntCur += (want - cntCur) * 0.35;
+        if (Math.abs(want - cntCur) < 0.6) cntCur = want;
+        setCnt(Math.round(cntCur));
+      }
+      if (lineEl && vt >= 2060 && vt < AGENTS_T && parseSeq.length) {
+        var row;
+        while (vt >= nextParseVt) {
+          row = parseSeq[parseI % parseSeq.length];
+          parseI++;
+          setLine('parse ' + row.name + '/SKILL.md → '
+            + (row.hash || ('000000000000' + ((parseI * 2654435761) >>> 0).toString(16)).slice(-12)));
+          nextParseVt += PARSE_MS;
+        }
+      }
+      if (agentsEl && vt >= AGENTS_T) {
+        while (markI < marks.length && vt >= nextMarkVt) {
+          if (agentsEl.children[markI]) agentsEl.children[markI].classList.add('on');
+          // vt 跳进（定时器合并/提速）可能已放行就绪相位：日志行让位给就绪文案
+          if (!okFired) setLine('link ' + marks[markI].key + ' → ' + marks[markI].dir + ' … ok');
+          markI++;
+          nextMarkVt += MARK_MS;
+        }
+      }
+      if (okFired && vt >= okVt + REVEAL_GAP) reveal();
+    }
+
+    function stop() {
+      if (iv) { clearInterval(iv); iv = 0; }
+    }
+
+    function reveal() {
+      if (finished) return;
+      finished = true;
+      stop();
+      if (revealTimer) { clearTimeout(revealTimer); revealTimer = 0; }
+      if (winEl) {
+        winEl.classList.remove('booting');
+        winEl.classList.add('ready');   // 触发 [data-boot-rv] 级联进场
+      }
+      if (el) {
+        el.classList.add('done');
+        setTimeout(function () { if (el) el.hidden = true; }, 320);
+      }
+    }
+
+    function reduceMotion() {
+      try {
+        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return true;
+      } catch (e) {}
+      return prefs.motion === false;
+    }
+
+    function begin() {
+      if (begun) return;
+      begun = true;
+      el = document.getElementById('boot');
+      winEl = document.getElementById('app-window');
+      if (!el || !winEl) { finished = true; return; }
+      if (/[?&]noboot=1/.test(location.search)) { disable(); return; }
+      reduce = reduceMotion();
+      if (reduce) return;   // 即时模式：静态层留到 R + 200ms，由 ready/fail 收尾
+      // file:// 原型（无 desktop=1）：满速 1× 编排（可展示），不加速。
+      // 判据不能用 !SKB —— bridge.js 在原型下也导出 SKILLKIT_BRIDGE（ready 为 null）
+      fullSpeed = !/[?&]desktop=1/.test(location.search);
+      phEl = el.querySelector('.boot-ph');
+      cntEl = el.querySelector('.boot-cnt');
+      lineEl = el.querySelector('.boot-line');
+      fillEl = el.querySelector('.boot-track i');
+      chipsEl = el.querySelector('.boot-chips');
+      agentsEl = el.querySelector('.boot-agents');
+      applyData(window.SKILLKIT_DATA || {});
+      chips = parseSeq;     // chip 流用快照预跑，真实数据到手后不回换（规格 §10.1）
+      renderMarks();
+      setCnt(0);
+      setLine(kernelLine());
+      beginWall = lastWall = Date.now();
+      el.classList.add('run');
+      iv = setInterval(tick, 40);
+    }
+
+    function data(d) {
+      if (disabled || finished || !d) return;
+      var before = marksKey(marks);
+      applyData(d);
+      if (!reduce && marksKey(marks) !== before) renderMarks();
+    }
+
+    function ready() {
+      if (disabled || finished || rSeen) return;
+      rSeen = true;
+      if (reduce) { revealTimer = setTimeout(reveal, 200); return; }
+      if (fullSpeed) return;  // 原型不加速：R 必然早到，让 1× 时间轴走满
+      // 常态（规格 §5）：剩余时间轴提速，总时长 ≈ max(R + 1.2s, 1.8s)；
+      // 下限分母是为 1.8s 地板服务的（R < 600ms 时把收尾托到 1.8s）
+      var remaining = TOTAL - vt;
+      var wallLeft = Math.max(1200, 1800 - (Date.now() - beginWall));
+      scale = Math.min(4, Math.max(1, remaining / wallLeft));
+    }
+
+    function disable() {
+      disabled = true;
+      finished = true;
+      stop();
+      if (revealTimer) { clearTimeout(revealTimer); revealTimer = 0; }
+      if (el) el.hidden = true;
+      // 不加 ready：主界面直接可见、零过渡，与 v0.2.0 行为完全一致
+      if (winEl) winEl.classList.remove('booting');
+    }
+
+    return {
+      begin: begin,
+      data: data,
+      ready: ready,
+      fail: ready,  // 降级路径等价就绪：overlay 同样立即收尾，绝不陪等
+      disable: disable
+    };
+  })();
 
   /* ---------------------------------------------------------- init */
   function loadLocalMeta() {
@@ -2250,21 +3330,27 @@
     seedIfNeeded();
     var rows = currentRows();
     if (!state.selected && rows.length) {
-      var pdf = rows.filter(function (r) { return r.name === 'pdf'; })[0];
-      state.selected = (pdf || rows[0]).key;
+      state.selected = rows[0].key;
     }
     bind();
     renderAll(true);
     document.documentElement.setAttribute('data-mode', MODE);
     window.__SK_MODE = MODE;
     window.__SK_READY = true;
-    // 启动留痕：ui-drag.log 里没有 boot 行 = 跑的还是旧进程/旧代码，先别怀疑拖动逻辑
+    // 启动留痕：skillkit.log 里没有 boot 行 = 跑的还是旧进程/旧代码，先别怀疑拖动逻辑
     uiLog('boot', { mode: MODE, vw: window.innerWidth, vh: window.innerHeight });
   }
 
   function applyBootstrap(res) {
     hydrate(res.data);
     setMetaMap(res.meta);
+    // 当前所在的文件夹若已被删除回根（共有=folder id，独有=agent key）；
+    // 选中行由 renderList 兜底回落
+    if (state.folder && state.folder !== 'none') {
+      if (state.board === 'unique' ? !agentByKey(state.folder) : !folderById(state.folder)) {
+        state.folder = null;
+      }
+    }
     var rows = currentRows();
     var keep = rows.filter(function (r) { return r.key === state.selected; })[0];
     if (!keep) state.selected = rows.length ? rows[0].key : null;
@@ -2281,21 +3367,32 @@
     hydrate(data);
     loadLocalMeta();
     start();
+    BootFX.ready(); // start() 返回即 R；file:// 原型由此放行 1× 满速时间轴
   }
 
   function boot() {
+    BootFX.begin(); // 编排时钟起点＝脚本执行（首帧前）；noboot / reduce-motion 在这里分叉
     if (!SKB) { bootLocal(window.SKILLKIT_DATA); return; }
     SKB.ready.then(function (api) {
-      if (!api) { bootLocal(window.SKILLKIT_DATA); return; }
+      if (!api) {
+        // 桌面壳里 pywebview 注入超时：与 bootstrap 失败路径同一待遇，给降级
+        // 提示 —— 否则用户以为在操作真库，其实只是只读原型
+        BootFX.fail();
+        bootLocal(window.SKILLKIT_DATA);
+        toast('warn', '桌面端未连接', 'pywebview 注入超时，已进入只读原型模式');
+        return;
+      }
       MODE = 'db';
       SKB.bootstrap().then(function (res) {
         document.body.classList.add('desktop');
         hydrate(res.data);
         setMetaMap(res.meta);
         start();
+        BootFX.ready(); // R = bootstrap 成功且 start() 首帧渲染完成
       }).catch(function (err) {
         MODE = 'local';
         toast('bad', '后端连接失败', String(err && err.message || err) + '，已退回内置快照');
+        BootFX.fail();
         bootLocal(window.SKILLKIT_DATA);
       });
     });

@@ -1,0 +1,1024 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>skillkit · 启动加载动画（方案 A · 徽章汇入）</title>
+<style>
+  /* 舞台：沿用 UI-SPEC §3.1 的深色网格 + 双径向渐变 */
+  body{margin:0; padding:28px 24px 44px; min-height:100vh; box-sizing:border-box;
+       display:flex; flex-direction:column; align-items:center;
+       background-color:#0b1017;
+       background-image:
+         radial-gradient(560px 320px at 22% 6%, rgba(61,123,255,.10), transparent 70%),
+         radial-gradient(520px 300px at 84% 94%, rgba(18,194,207,.08), transparent 70%),
+         linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px),
+         linear-gradient(90deg, rgba(255,255,255,.045) 1px, transparent 1px);
+       background-size:auto, auto, 28px 28px, 28px 28px;}
+  #sk-boot-mock{width:100%; max-width:1440px;}
+</style>
+</head>
+<body>
+
+<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M19 14.5A7.5 7.5 0 0 1 9.5 5a7.5 7.5 0 1 0 9.5 9.5Z"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+  <symbol id="i-maximize" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5M3 16.5l9 5 9-5"/></symbol>
+  <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8Z"/><path d="M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8Z"/></symbol>
+  <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="11" rx="3"/><path d="M12 8V5M11 3.6h2M8 12v2M16 12v2M3.5 11.5v4M20.5 11.5v4"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="8" cy="18" r="2"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14-4"/><path d="M4 13a8 8 0 0 0 14 4"/><path d="M4 4v4h4M20 20v-4h-4"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></symbol>
+  <symbol id="i-rows" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="6" rx="2"/><rect x="4" y="14" width="16" height="6" rx="2"/></symbol>
+  <symbol id="i-sort" viewBox="0 0 24 24"><path d="M7 4v16M4 17l3 3 3-3M14 4h6M14 10h5M14 16h3"/></symbol>
+  <symbol id="i-folder-open" viewBox="0 0 24 24"><path d="M6 14l1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5c0-1.1.9-2 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><path d="M21 8 12 3 3 8v8l9 5 9-5V8Z"/><path d="M3 8l9 5 9-5M12 13v8"/></symbol>
+  <symbol id="i-rotate-ccw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+</svg>
+
+<script>
+/* 独立导出用：lucide 替身 —— 把 data-lucide 占位替换为上面内联 sprite 的引用，零 CDN 依赖 */
+window.lucide = {
+  createIcons: function () {
+    var nodes = document.querySelectorAll('[data-lucide]');
+    for (var i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
+      var name = el.getAttribute('data-lucide');
+      var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('viewBox', '0 0 24 24');
+      svg.setAttribute('width', '16');
+      svg.setAttribute('height', '16');
+      svg.setAttribute('fill', 'none');
+      svg.setAttribute('stroke', 'currentColor');
+      svg.setAttribute('stroke-width', '1.8');
+      svg.setAttribute('stroke-linecap', 'round');
+      svg.setAttribute('stroke-linejoin', 'round');
+      svg.setAttribute('aria-hidden', 'true');
+      svg.innerHTML = '<use href="#i-' + name + '"></use>';
+      el.parentNode.replaceChild(svg, el);
+    }
+  }
+};
+</script>
+<div id="sk-boot-mock" aria-label="skillkit 启动加载动画方案" data-previous-label="上一个" data-next-label="下一个">
+
+  <style>
+    #sk-boot-mock{
+      --sk-font:"Segoe UI Variable Text","Segoe UI","Microsoft YaHei UI","Noto Sans SC",sans-serif;
+      --sk-display:"Bahnschrift","Segoe UI Variable Display","Segoe UI","Microsoft YaHei UI",sans-serif;
+      --sk-mono:"Cascadia Mono","Consolas","SFMono-Regular",monospace;
+      --sk-bg:light-dark(#f3f6fb,#080b12);
+      --sk-surface:light-dark(#ffffff,#111722);
+      --sk-surface-2:light-dark(#f7f9fd,#151d2a);
+      --sk-surface-3:light-dark(#edf1f8,#1d2635);
+      --sk-ink:light-dark(#0b1020,#ffffff);
+      --sk-ink-2:light-dark(rgba(11,16,32,.62),rgba(255,255,255,.64));
+      --sk-ink-3:light-dark(rgba(11,16,32,.42),rgba(255,255,255,.44));
+      --sk-line:light-dark(rgba(11,16,32,.09),rgba(255,255,255,.08));
+      --sk-accent:light-dark(#2e63f6,#7c9dff);
+      --sk-violet:light-dark(#6f56e3,#a78bfa);
+      --sk-rose:light-dark(#d2406f,#ff7aa6);
+      --sk-teal:light-dark(#0a8f96,#46d4d8);
+      --sk-slate:light-dark(#51607a,#9fb0c9);
+      --sk-success:light-dark(#0e9f6e,#3dd68c);
+      --sk-warning:light-dark(#c07a09,#f4b740);
+      --sk-ease:cubic-bezier(.2,0,0,1);
+      --sk-spring:cubic-bezier(.34,1.56,.64,1);
+      --sk-logo-grad:linear-gradient(135deg,#3d7bff,#2e63f6 55%,#12c2cf);
+      --sk-bar-grad:linear-gradient(90deg,light-dark(#2e63f6,#7c9dff),light-dark(#12c2cf,#46d4d8));
+      color-scheme:light dark;
+      width:100%;
+      font-family:var(--sk-font);
+      color:var(--sk-ink);
+      font-size:14px;
+      line-height:1.5;
+    }
+    #sk-boot-mock.sk-dark{ color-scheme:dark }
+    #sk-boot-mock *,#sk-boot-mock *::before,#sk-boot-mock *::after{ box-sizing:border-box }
+    #sk-boot-mock svg{ display:block }
+
+    /* ---------- variant stage / replay ---------- */
+    #sk-boot-mock > section{ padding:6px 0 10px }
+    #sk-boot-mock .sk-stage{ padding:14px 2px 0 }
+    #sk-boot-mock .sk-replay{ display:flex; justify-content:center; padding:12px 0 2px }
+
+    /* ---------- window ---------- */
+    #sk-boot-mock .sk-win{
+      position:relative; overflow:hidden; display:flex; flex-direction:column;
+      border-radius:16px; border:1px solid var(--sk-line);
+      background:var(--sk-bg); color:var(--sk-ink);
+      box-shadow:0 30px 80px light-dark(rgba(11,16,32,.16),rgba(0,0,0,.5)),
+                 0 6px 18px light-dark(rgba(11,16,32,.08),rgba(0,0,0,.35));
+    }
+
+    /* ---------- titlebar ---------- */
+    #sk-boot-mock .sk-tb{
+      height:46px; flex:0 0 auto; display:flex; align-items:center; gap:9px;
+      padding:0 6px 0 14px; background:var(--sk-surface); border-bottom:1px solid var(--sk-line);
+    }
+    #sk-boot-mock .sk-logo{ width:24px; height:24px; border-radius:7px; background:var(--sk-logo-grad); display:grid; place-items:center; flex:0 0 auto }
+    #sk-boot-mock .sk-wordmark{ font:600 15px/1 var(--sk-display); letter-spacing:-.01em }
+    #sk-boot-mock .sk-bdiv{ width:1px; height:16px; background:var(--sk-line) }
+    #sk-boot-mock .sk-bsub{ font:600 9.5px/1 var(--sk-font); letter-spacing:.14em; color:var(--sk-ink-3) }
+    #sk-boot-mock .sk-gsearch{
+      margin-left:12px; width:min(300px,32%); height:30px; border-radius:8px;
+      background:var(--sk-surface-2); border:1px solid var(--sk-line);
+      display:flex; align-items:center; gap:7px; padding:0 8px; color:var(--sk-ink-3);
+    }
+    #sk-boot-mock .sk-gsearch i{ color:var(--sk-ink-3); display:grid; place-items:center }
+    #sk-boot-mock .sk-gsearch em{ font-style:normal; font-size:11.5px; flex:1; white-space:nowrap; overflow:hidden }
+    #sk-boot-mock .sk-gsearch kbd{
+      font:400 9.5px/1 var(--sk-mono); padding:3px 5px; border-radius:4px;
+      background:var(--sk-surface); border:1px solid var(--sk-line); color:var(--sk-ink-3);
+    }
+    #sk-boot-mock .sk-tb-actions{ margin-left:auto; display:flex; align-items:center; gap:4px }
+    #sk-boot-mock .sk-pill{
+      height:20px; padding:0 8px; border-radius:20px; display:inline-flex; align-items:center; gap:5px;
+      background:color-mix(in srgb,var(--sk-success) 12%,transparent); color:var(--sk-success);
+      font:600 9px/1 var(--sk-mono); letter-spacing:.1em;
+    }
+    #sk-boot-mock .sk-pill i{ width:5px; height:5px; border-radius:50%; background:currentColor }
+    #sk-boot-mock .sk-tbtn{
+      width:30px; height:30px; border-radius:8px; display:grid; place-items:center; color:var(--sk-ink-2);
+    }
+    #sk-boot-mock .sk-tbtn.win{ width:42px; height:32px; border-radius:7px }
+    #sk-boot-mock .sk-tbtn.win.close:hover{ background:light-dark(#e81123,#c42b1c); color:#fff }
+
+    /* ---------- app body ---------- */
+    #sk-boot-mock .sk-app{ flex:1 0 auto; display:flex; height:560px; min-height:0 }
+
+    /* sidebar */
+    #sk-boot-mock .sk-side{
+      width:216px; flex:0 0 auto; border-right:1px solid var(--sk-line);
+      padding:12px 10px; display:flex; flex-direction:column; gap:10px; background:var(--sk-bg); overflow:hidden;
+    }
+    #sk-boot-mock .sk-store{ background:var(--sk-surface); border:1px solid var(--sk-line); border-radius:12px; padding:10px; box-shadow:0 1px 2px light-dark(rgba(11,16,32,.04),transparent) }
+    #sk-boot-mock .sk-store-top{ display:flex; align-items:center; justify-content:space-between }
+    #sk-boot-mock .sk-eyebrow{ font:600 9.5px/1 var(--sk-font); letter-spacing:.12em; color:var(--sk-ink-3) }
+    #sk-boot-mock .sk-live{
+      height:16px; padding:0 6px; border-radius:8px; display:inline-flex; align-items:center; gap:4px;
+      background:color-mix(in srgb,var(--sk-success) 13%,transparent); color:var(--sk-success);
+      font:600 8.5px/1 var(--sk-mono); letter-spacing:.08em;
+    }
+    #sk-boot-mock .sk-live i{ width:4px; height:4px; border-radius:50%; background:currentColor }
+    #sk-boot-mock .sk-store-path{ margin-top:7px; font:400 10.5px/1.2 var(--sk-mono); color:var(--sk-ink-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+    #sk-boot-mock .sk-store-meta{ margin-top:4px; font-size:11px; color:var(--sk-ink-3); display:flex; justify-content:space-between; align-items:baseline }
+    #sk-boot-mock .sk-store-meta b{ font:600 13px/1 var(--sk-display); color:var(--sk-ink); letter-spacing:-.02em }
+    #sk-boot-mock .sk-health{ margin-top:8px; height:4px; border-radius:2px; background:var(--sk-surface-3); overflow:hidden }
+    #sk-boot-mock .sk-health i{ display:block; height:100%; width:78%; border-radius:2px; background:linear-gradient(90deg,var(--sk-success),color-mix(in srgb,var(--sk-success) 55%,var(--sk-teal))) }
+    #sk-boot-mock .sk-navlabel{ font:600 10px/1 var(--sk-font); letter-spacing:.1em; color:var(--sk-ink-3); padding:0 4px }
+    #sk-boot-mock .sk-nav{ display:flex; flex-direction:column; gap:3px }
+    #sk-boot-mock .sk-navi{
+      height:36px; border-radius:9px; display:flex; align-items:center; gap:8px; padding:0 9px;
+      font:500 12.5px/1 var(--sk-font); color:var(--sk-ink-2); position:relative;
+    }
+    #sk-boot-mock .sk-navi i{ color:var(--sk-ink-3); display:grid; place-items:center }
+    #sk-boot-mock .sk-navi b{
+      margin-left:auto; font:600 10px/18px var(--sk-mono); min-width:18px; text-align:center;
+      background:var(--sk-surface-3); color:var(--sk-ink-2); border-radius:6px; padding:0 5px;
+    }
+    #sk-boot-mock .sk-navi.on{ background:color-mix(in srgb,var(--sk-accent) 10%,transparent); color:var(--sk-ink); box-shadow:inset 3px 0 0 0 var(--sk-accent) }
+    #sk-boot-mock .sk-navi.on i{ color:var(--sk-accent) }
+    #sk-boot-mock .sk-navi.on b{ background:color-mix(in srgb,var(--sk-accent) 16%,transparent); color:var(--sk-accent) }
+    #sk-boot-mock .sk-navi.teal.on{ background:color-mix(in srgb,var(--sk-teal) 10%,transparent); box-shadow:inset 3px 0 0 0 var(--sk-teal) }
+    #sk-boot-mock .sk-navi.teal i,#sk-boot-mock .sk-navi.teal b{ color:var(--sk-teal) }
+    #sk-boot-mock .sk-navi.teal b{ background:color-mix(in srgb,var(--sk-teal) 14%,transparent) }
+    #sk-boot-mock .sk-stat{ display:grid; grid-template-columns:1fr 1fr; gap:6px 10px; padding:2px 4px }
+    #sk-boot-mock .sk-stat div{ display:flex; align-items:baseline; gap:5px }
+    #sk-boot-mock .sk-stat b{ font:600 13px/1 var(--sk-display); letter-spacing:-.02em }
+    #sk-boot-mock .sk-stat span{ font-size:10px; color:var(--sk-ink-3) }
+    #sk-boot-mock .sk-folders{ display:flex; flex-direction:column; gap:2px }
+    #sk-boot-mock .sk-fold{ height:24px; display:flex; align-items:center; gap:7px; padding:0 5px; border-radius:6px; font-size:11.5px; color:var(--sk-ink-2) }
+    #sk-boot-mock .sk-fold i{ width:7px; height:7px; border-radius:2px; background:var(--fc,var(--sk-accent)) }
+    #sk-boot-mock .sk-fold b{ margin-left:auto; font:400 10px/1 var(--sk-mono); color:var(--sk-ink-3) }
+    #sk-boot-mock .sk-fold.more{ color:var(--sk-ink-3); font-size:10.5px }
+    #sk-boot-mock .sk-sidefoot{ margin-top:auto; display:flex; flex-direction:column; gap:8px }
+    #sk-boot-mock .sk-setbtn{
+      height:30px; border-radius:8px; border:1px solid var(--sk-line); background:var(--sk-surface);
+      display:flex; align-items:center; gap:7px; padding:0 10px; font:500 11.5px/1 var(--sk-font); color:var(--sk-ink-2);
+    }
+    #sk-boot-mock .sk-setbtn i{ color:var(--sk-ink-3); display:grid; place-items:center }
+    #sk-boot-mock .sk-ver{ font-size:10px; color:var(--sk-ink-3); padding:0 2px }
+
+    /* main */
+    #sk-boot-mock .sk-main{ flex:1; min-width:0; display:flex; flex-direction:column; background:var(--sk-bg) }
+    #sk-boot-mock .sk-top{
+      height:64px; flex:0 0 auto; display:flex; align-items:center; justify-content:space-between;
+      padding:0 18px; border-bottom:1px solid var(--sk-line);
+    }
+    #sk-boot-mock .sk-top h2{ font:600 20px/1.1 var(--sk-font); letter-spacing:-.02em }
+    #sk-boot-mock .sk-top p{ margin-top:4px; font-size:11px; color:var(--sk-ink-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+    #sk-boot-mock .sk-top-actions{ display:flex; align-items:center; gap:8px; flex:0 0 auto }
+    #sk-boot-mock .sk-seg{ display:flex; background:var(--sk-surface-3); border-radius:9px; padding:2px }
+    #sk-boot-mock .sk-seg span{
+      height:26px; padding:0 10px; border-radius:7px; display:inline-flex; align-items:center; gap:5px;
+      font:500 11.5px/1 var(--sk-font); color:var(--sk-ink-2);
+    }
+    #sk-boot-mock .sk-seg span.on{ background:var(--sk-surface); color:var(--sk-ink); box-shadow:0 1px 3px light-dark(rgba(11,16,32,.1),rgba(0,0,0,.3)) }
+    #sk-boot-mock .sk-seg i{ display:grid; place-items:center }
+    #sk-boot-mock .sk-sort{
+      height:28px; padding:0 10px; border-radius:8px; border:1px solid var(--sk-line); background:var(--sk-surface);
+      display:inline-flex; align-items:center; gap:6px; font:500 11.5px/1 var(--sk-font); color:var(--sk-ink-2);
+    }
+    #sk-boot-mock .sk-sort i{ display:grid; place-items:center }
+    #sk-boot-mock .sk-boards{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; padding:12px 18px 0 }
+    #sk-boot-mock .sk-board{
+      height:72px; border-radius:14px; background:var(--sk-surface); border:1px solid var(--sk-line);
+      display:flex; align-items:center; gap:11px; padding:0 12px; position:relative; overflow:hidden;
+      box-shadow:0 1px 2px light-dark(rgba(11,16,32,.04),transparent);
+    }
+    #sk-boot-mock .sk-bico{
+      width:38px; height:38px; border-radius:11px; display:grid; place-items:center;
+      background:var(--sk-surface-3); color:var(--sk-ink-2); flex:0 0 auto;
+    }
+    #sk-boot-mock .sk-board.on .sk-bico{ background:var(--sk-accent); color:#fff }
+    #sk-boot-mock .sk-board.on::before{ content:""; position:absolute; top:0; left:0; right:0; height:2px; background:var(--sk-logo-grad) }
+    #sk-boot-mock .sk-board.on b{ color:var(--sk-accent) }
+    #sk-boot-mock .sk-board.on em{ color:var(--sk-accent) }
+    #sk-boot-mock .sk-board .sk-bico.tealc{ background:color-mix(in srgb,var(--sk-teal) 14%,transparent); color:var(--sk-teal) }
+    #sk-boot-mock .sk-board > div{ min-width:0; flex:1 }
+    #sk-boot-mock .sk-board b{ display:block; font:600 13px/1.2 var(--sk-font) }
+    #sk-boot-mock .sk-board span{ display:block; margin-top:3px; font-size:10px; color:var(--sk-ink-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+    #sk-boot-mock .sk-board em{ font:600 22px/1 var(--sk-display); font-style:normal; letter-spacing:-.03em; color:var(--sk-ink-3) }
+    #sk-boot-mock .sk-grid{
+      flex:1; min-height:0; overflow:hidden; padding:12px 18px 14px;
+      display:grid; grid-template-columns:repeat(auto-fill,minmax(164px,1fr)); gap:10px; align-content:start;
+    }
+    #sk-boot-mock .sk-fcard,#sk-boot-mock .sk-scard{
+      display:flex; gap:10px; align-items:center; padding:11px 12px; border-radius:14px;
+      background:var(--sk-surface); border:1px solid var(--sk-line);
+      box-shadow:0 1px 2px light-dark(rgba(11,16,32,.04),transparent); min-width:0;
+    }
+    #sk-boot-mock .sk-fico{
+      width:36px; height:36px; border-radius:10px; display:grid; place-items:center; flex:0 0 auto;
+      color:var(--fc,var(--sk-accent)); background:color-mix(in srgb,var(--fc,var(--sk-accent)) 12%,transparent);
+    }
+    #sk-boot-mock .sk-fico.sm{ width:28px; height:28px; border-radius:8px }
+    #sk-boot-mock .sk-fcard > div,#sk-boot-mock .sk-scard > div{ min-width:0 }
+    #sk-boot-mock .sk-fcard b,#sk-boot-mock .sk-scard b{ display:block; font:600 12.5px/1.2 var(--sk-font); white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+    #sk-boot-mock .sk-fcard span,#sk-boot-mock .sk-scard span{ display:block; margin-top:3px; font:400 9.5px/1 var(--sk-mono); color:var(--sk-ink-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+
+    /* inspector */
+    #sk-boot-mock .sk-ins{ width:344px; flex:0 0 auto; border-left:1px solid var(--sk-line); background:var(--sk-surface); display:flex; flex-direction:column; overflow:hidden }
+    #sk-boot-mock .sk-inshead{ height:64px; flex:0 0 auto; display:flex; align-items:center; justify-content:space-between; padding:0 16px; border-bottom:1px solid var(--sk-line) }
+    #sk-boot-mock .sk-inshead b{ display:block; margin-top:5px; font:600 15px/1.1 var(--sk-mono) }
+    #sk-boot-mock .sk-saved{
+      height:21px; padding:0 8px; border-radius:11px; display:inline-flex; align-items:center; gap:4px;
+      background:color-mix(in srgb,var(--sk-success) 13%,transparent); color:var(--sk-success); font:500 10px/1 var(--sk-font);
+    }
+    #sk-boot-mock .sk-insbody{ padding:13px 16px; display:flex; flex-direction:column; gap:7px; overflow:hidden }
+    #sk-boot-mock .sk-lab{ font:600 10px/1 var(--sk-font); letter-spacing:.1em; color:var(--sk-ink-3); margin-top:5px }
+    #sk-boot-mock .sk-input{
+      height:38px; border-radius:9px; border:1px solid var(--sk-line); background:var(--sk-surface);
+      display:flex; align-items:center; padding:0 10px; font:600 13px/1 var(--sk-font);
+    }
+    #sk-boot-mock .sk-chipsrow{ display:flex; flex-wrap:wrap; gap:6px }
+    #sk-boot-mock .sk-fchip{
+      height:24px; padding:0 9px; border-radius:6px; border:1px solid var(--sk-line); background:var(--sk-surface-2);
+      display:inline-flex; align-items:center; gap:4px; font:500 10.5px/1 var(--sk-font); color:var(--sk-ink-2);
+    }
+    #sk-boot-mock .sk-fchip.on{ background:color-mix(in srgb,var(--sk-accent) 11%,transparent); border-color:color-mix(in srgb,var(--sk-accent) 38%,transparent); color:var(--sk-accent) }
+    #sk-boot-mock .sk-fchip.add{ padding:0 7px; color:var(--sk-ink-3) }
+    #sk-boot-mock .sk-note{
+      min-height:66px; border-radius:9px; background:var(--sk-surface-2); border:1px solid var(--sk-line);
+      padding:9px 10px; font-size:11.5px; line-height:1.6; color:var(--sk-ink-2);
+    }
+    #sk-boot-mock .sk-metas{ margin-top:6px; display:flex; flex-direction:column; gap:2px }
+    #sk-boot-mock .sk-metas > div{ display:flex; align-items:center; min-height:26px; gap:10px }
+    #sk-boot-mock .sk-metas span{ width:58px; flex:0 0 auto; font-size:10.5px; color:var(--sk-ink-3) }
+    #sk-boot-mock .sk-metas code{ font:400 10.5px/1.3 var(--sk-mono); color:var(--sk-ink-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+
+    /* statusbar */
+    #sk-boot-mock .sk-sb{
+      height:30px; flex:0 0 auto; display:flex; align-items:center; gap:10px; padding:0 14px;
+      border-top:1px solid var(--sk-line); background:var(--sk-surface); font-size:10.5px; color:var(--sk-ink-2);
+    }
+    #sk-boot-mock .sk-sb .dot{ width:7px; height:7px; border-radius:50%; background:var(--sk-success); box-shadow:0 0 0 3px color-mix(in srgb,var(--sk-success) 18%,transparent) }
+    #sk-boot-mock .sk-sb b{ font-weight:600; color:var(--sk-ink) }
+    #sk-boot-mock .sk-sb .sep{ width:1px; height:12px; background:var(--sk-line) }
+    #sk-boot-mock .sk-sb-r{ margin-left:auto; display:flex; align-items:center; gap:10px }
+
+    /* ---------- reveal cascade ---------- */
+    #sk-boot-mock .sk-win [data-rv]{
+      transition:opacity 220ms var(--sk-ease),transform 220ms var(--sk-ease);
+      transition-delay:calc(var(--rv,0) * 12ms);
+    }
+    #sk-boot-mock .sk-win.booting [data-rv]{ opacity:0; transform:translateY(3px); transition:none }
+
+    /* ---------- boot overlay shared ---------- */
+    #sk-boot-mock .sk-boot{
+      position:absolute; inset:0; z-index:6; display:flex; flex-direction:column; align-items:center; justify-content:center;
+      background:var(--sk-bg); opacity:1;
+    }
+    #sk-boot-mock .sk-boot::before{
+      content:""; position:absolute; inset:0; pointer-events:none;
+      background:radial-gradient(460px 260px at 26% 16%,color-mix(in srgb,var(--sk-accent) 7%,transparent),transparent 70%),
+                 radial-gradient(420px 240px at 76% 86%,color-mix(in srgb,var(--sk-teal) 6%,transparent),transparent 70%);
+    }
+    #sk-boot-mock .sk-boot > *{ position:relative }
+    #sk-boot-mock .sk-boot.done{
+      opacity:0; visibility:hidden; pointer-events:none;
+      transition:opacity calc(300ms * var(--k,1)) var(--sk-ease),visibility 0s linear calc(300ms * var(--k,1));
+    }
+
+    /* ---------- variant A · 徽章汇入 ---------- */
+    #sk-boot-mock .sk-blogo{
+      width:64px; height:64px; border-radius:14px; background:var(--sk-logo-grad);
+      display:grid; place-items:center; position:relative;
+      box-shadow:0 12px 32px light-dark(rgba(46,99,246,.32),rgba(46,99,246,.4));
+      opacity:0;
+    }
+    #sk-boot-mock .sk-boot.run .sk-blogo{ animation:skPop calc(480ms * var(--k,1)) var(--sk-spring) both }
+    #sk-boot-mock .sk-blogo::before{
+      content:""; position:absolute; inset:0; border-radius:14px;
+      background:linear-gradient(115deg,transparent 32%,rgba(255,255,255,.34) 50%,transparent 68%);
+      background-size:240% 100%; background-position:130% 0;
+    }
+    #sk-boot-mock .sk-boot.run .sk-blogo::before{ animation:skShine calc(2600ms * var(--k,1)) var(--sk-ease) infinite }
+    #sk-boot-mock .sk-blogo::after{
+      content:""; position:absolute; inset:-7px; border-radius:19px; border:1.5px solid color-mix(in srgb,var(--sk-accent) 45%,transparent);
+      opacity:0;
+    }
+    #sk-boot-mock .sk-boot.run .sk-blogo::after{ animation:skRing calc(2200ms * var(--k,1)) ease-out calc(600ms * var(--k,1)) infinite }
+    #sk-boot-mock .sk-boot.ok .sk-blogo::after{ border-color:color-mix(in srgb,var(--sk-success) 55%,transparent) }
+    #sk-boot-mock .sk-bword{ margin-top:15px; font:600 21px/1 var(--sk-display); letter-spacing:-.02em; opacity:0 }
+    #sk-boot-mock .sk-beyebrow{ margin-top:6px; font:600 9.5px/1 var(--sk-font); letter-spacing:.2em; color:var(--sk-ink-3); opacity:0 }
+    #sk-boot-mock .sk-boot.run .sk-bword,#sk-boot-mock .sk-boot.run .sk-beyebrow{ animation:skFadeUp calc(360ms * var(--k,1)) var(--sk-ease) both }
+    #sk-boot-mock .sk-boot.run .sk-beyebrow{ animation-delay:calc(80ms * var(--k,1)) }
+    #sk-boot-mock .sk-chips{
+      margin-top:22px; height:60px; width:min(520px,84%);
+      display:flex; flex-wrap:wrap; justify-content:center; align-content:flex-start; gap:6px;
+      overflow:hidden; opacity:0;
+      -webkit-mask-image:linear-gradient(180deg,#000 72%,transparent); mask-image:linear-gradient(180deg,#000 72%,transparent);
+    }
+    #sk-boot-mock .sk-boot.run .sk-chips{ animation:skFadeUp calc(360ms * var(--k,1)) var(--sk-ease) both; animation-delay:calc(120ms * var(--k,1)) }
+    #sk-boot-mock .sk-chip{
+      display:inline-flex; align-items:center; gap:6px; height:26px; padding:0 9px 0 3px; border-radius:7px;
+      background:var(--sk-surface); border:1px solid var(--sk-line); font:500 11px/1 var(--sk-font); color:var(--sk-ink-2);
+      box-shadow:0 1px 2px light-dark(rgba(11,16,32,.05),transparent); white-space:nowrap;
+    }
+    #sk-boot-mock .sk-chip b{
+      width:20px; height:20px; border-radius:6px; display:grid; place-items:center;
+      font:700 8.5px/1 var(--sk-mono); background:color-mix(in srgb,var(--c,var(--sk-accent)) 14%,transparent); color:var(--c,var(--sk-accent));
+    }
+    #sk-boot-mock .sk-boot.run .sk-chip{ animation:skChipIn calc(280ms * var(--k,1)) var(--sk-spring) both }
+    #sk-boot-mock .sk-chip.out{ animation:skChipOut calc(200ms * var(--k,1)) ease both }
+    #sk-boot-mock .sk-agents{ margin-top:16px; display:flex; gap:7px; opacity:0 }
+    #sk-boot-mock .sk-boot.run .sk-agents{ animation:skFadeUp calc(360ms * var(--k,1)) var(--sk-ease) both; animation-delay:calc(160ms * var(--k,1)) }
+    #sk-boot-mock .sk-agent{
+      width:26px; height:26px; border-radius:8px; display:grid; place-items:center;
+      font:600 9px/1 var(--sk-mono); color:var(--sk-ink-3);
+      background:var(--sk-surface-2); border:1px solid var(--sk-line);
+      transition:all 180ms var(--sk-ease);
+    }
+    #sk-boot-mock .sk-agent.on{
+      color:var(--sk-success); transform:translateY(-2px);
+      border-color:color-mix(in srgb,var(--sk-success) 45%,transparent);
+      background:color-mix(in srgb,var(--sk-success) 12%,transparent);
+    }
+    #sk-boot-mock .sk-bfoot{ margin-top:24px; width:min(340px,80%); opacity:0 }
+    #sk-boot-mock .sk-boot.run .sk-bfoot{ animation:skFadeUp calc(360ms * var(--k,1)) var(--sk-ease) both; animation-delay:calc(200ms * var(--k,1)) }
+    #sk-boot-mock .sk-bphase{ display:flex; justify-content:space-between; align-items:baseline }
+    #sk-boot-mock .sk-bphase .ph{ font:600 10.5px/1 var(--sk-font); letter-spacing:.14em; color:var(--sk-ink-2) }
+    #sk-boot-mock .sk-boot.ok .sk-bphase .ph{ color:var(--sk-success) }
+    #sk-boot-mock .sk-bphase .cnt{ font:400 10.5px/1 var(--sk-mono); color:var(--sk-ink-3); font-variant-numeric:tabular-nums }
+    #sk-boot-mock .sk-bline{
+      margin-top:8px; height:14px; font:400 10.5px/14px var(--sk-mono); color:var(--sk-ink-3);
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    #sk-boot-mock .sk-btrack{ margin-top:8px; height:3px; border-radius:2px; background:color-mix(in srgb,var(--sk-ink) 9%,transparent); overflow:hidden }
+    #sk-boot-mock .sk-btrack i{ display:block; height:100%; width:0; border-radius:2px; background:var(--sk-bar-grad); transition:width 280ms var(--sk-ease) }
+
+    /* ---------- variant B · 引导终端 ---------- */
+    #sk-boot-mock .sk-term{
+      width:min(500px,88%); border-radius:12px; padding:15px 18px 16px;
+      background:#0d131c; border:1px solid rgba(255,255,255,.09);
+      box-shadow:0 26px 70px rgba(0,0,0,.45);
+      font-family:var(--sk-mono); color:#c6d2e2; opacity:0;
+    }
+    #sk-boot-mock .sk-boot.run .sk-term{ animation:skTermIn calc(380ms * var(--k,1)) var(--sk-ease) both }
+    #sk-boot-mock .sk-boot.ok .sk-term{ border-color:rgba(61,214,140,.42) }
+    #sk-boot-mock .sk-term-head{ display:flex; align-items:center; gap:6px; color:#6f7f95; font-size:10px; letter-spacing:.16em }
+    #sk-boot-mock .sk-term-head .sk-term-logo{ width:18px; height:18px; border-radius:5px; background:var(--sk-logo-grad); display:grid; place-items:center; margin-right:2px }
+    #sk-boot-mock .sk-term-head .d{ width:9px; height:9px; border-radius:50%; background:rgba(255,255,255,.12) }
+    #sk-boot-mock .sk-term-head em{ font-style:normal; margin-left:6px }
+    #sk-boot-mock .sk-term-lines{ margin-top:13px; display:flex; flex-direction:column; gap:8px; min-height:172px }
+    #sk-boot-mock .tl{ display:flex; gap:12px; align-items:baseline; opacity:0; transform:translateY(3px); transition:opacity 240ms var(--sk-ease),transform 240ms var(--sk-ease) }
+    #sk-boot-mock .tl.on{ opacity:1; transform:none }
+    #sk-boot-mock .tl .k{ flex:0 0 58px; color:#6f7f95; font-size:10px; letter-spacing:.08em }
+    #sk-boot-mock .tl .v{ font-size:11.5px; color:#c6d2e2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+    #sk-boot-mock .tl .v.ok{ color:#3dd68c }
+    #sk-boot-mock .tl .v b{
+      font:600 10px/16px var(--sk-mono); font-weight:600; padding:0 5px; margin-right:4px; border-radius:4px;
+      color:#8fa1b8; border:1px solid rgba(255,255,255,.14); transition:all 160ms ease;
+    }
+    #sk-boot-mock .tl .v b.lit{ color:#3dd68c; border-color:rgba(61,214,140,.45); background:rgba(61,214,140,.08) }
+    #sk-boot-mock .tl.cur .v::after{ content:"▋"; margin-left:6px; color:#6f7f95; animation:skBlink 1s steps(1) infinite }
+    #sk-boot-mock .sk-term-bar{ margin-top:13px; height:6px; border-radius:3px; background:rgba(255,255,255,.08); overflow:hidden }
+    #sk-boot-mock .sk-term-bar i{ display:block; height:100%; width:0; border-radius:3px; background:linear-gradient(90deg,#2e63f6,#12c2cf); transition:width 240ms var(--sk-ease) }
+    #sk-boot-mock .sk-term-foot{ margin-top:9px; display:flex; justify-content:space-between; font-size:10.5px; color:#8fa1b8 }
+    #sk-boot-mock .sk-term-foot .pct{ font-variant-numeric:tabular-nums }
+    #sk-boot-mock .sk-term-foot .hint{ color:#6f7f95 }
+
+    /* ---------- variant C · 轻量横线 ---------- */
+    #sk-boot-mock .sk-c-row{ display:flex; align-items:center; gap:11px; opacity:0 }
+    #sk-boot-mock .sk-boot.run .sk-c-row{ animation:skFadeUp calc(320ms * var(--k,1)) var(--sk-ease) both }
+    #sk-boot-mock .sk-c-logo{
+      width:40px; height:40px; border-radius:10px; background:var(--sk-logo-grad); display:grid; place-items:center;
+      box-shadow:0 8px 22px light-dark(rgba(46,99,246,.3),rgba(46,99,246,.38)); position:relative;
+    }
+    #sk-boot-mock .sk-boot.run:not(.ok) .sk-c-logo{ animation:skBreathe calc(2400ms * var(--k,1)) ease-in-out calc(400ms * var(--k,1)) infinite }
+    #sk-boot-mock .sk-c-word{ font:600 17px/1 var(--sk-display); letter-spacing:-.01em }
+    #sk-boot-mock .sk-c-bar{
+      margin-top:20px; width:min(300px,72%); height:2px; position:relative; opacity:0;
+    }
+    #sk-boot-mock .sk-boot.run .sk-c-bar{ animation:skFadeUp calc(320ms * var(--k,1)) var(--sk-ease) both; animation-delay:calc(90ms * var(--k,1)) }
+    #sk-boot-mock .sk-c-track{
+      position:absolute; left:0; top:0; right:0; height:2px; border-radius:1px; overflow:hidden;
+      background:color-mix(in srgb,var(--sk-ink) 9%,transparent);
+    }
+    #sk-boot-mock .sk-c-track i{ display:block; height:100%; width:0; background:var(--sk-bar-grad); transition:width 300ms var(--sk-ease) }
+    #sk-boot-mock .sk-c-track::after{
+      content:""; position:absolute; left:0; top:-2px; bottom:-2px; width:64px;
+      background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--sk-accent) 45%,transparent),transparent);
+      animation:skSlide calc(1200ms * var(--k,1)) linear infinite;
+    }
+    #sk-boot-mock .sk-boot.ok .sk-c-track::after{ display:none }
+    #sk-boot-mock .sk-c-bar em{
+      position:absolute; left:calc(100% + 14px); top:50%; transform:translateY(-50%);
+      font:400 10px/1 var(--sk-mono); font-style:normal;
+      color:var(--sk-ink-3); white-space:nowrap; transition:opacity 120ms ease;
+    }
+    #sk-boot-mock .sk-c-bar em.sw{ opacity:0 }
+    #sk-boot-mock .sk-c-done{
+      margin-top:14px; font-size:12px; color:var(--sk-success); display:flex; align-items:center; gap:6px;
+      opacity:0; transform:translateY(4px); transition:opacity 240ms var(--sk-ease),transform 240ms var(--sk-spring);
+    }
+    #sk-boot-mock .sk-c-done.on{ opacity:1; transform:none }
+
+    /* ---------- keyframes ---------- */
+    @keyframes skPop{ from{ opacity:0; transform:scale(.7) translateY(6px) } to{ opacity:1; transform:none } }
+    @keyframes skFadeUp{ from{ opacity:0; transform:translateY(8px) } to{ opacity:1; transform:none } }
+    @keyframes skTermIn{ from{ opacity:0; transform:scale(.96) translateY(6px) } to{ opacity:1; transform:none } }
+    @keyframes skRing{ 0%{ transform:scale(.86); opacity:.55 } 70%{ transform:scale(1.26); opacity:0 } 100%{ transform:scale(1.26); opacity:0 } }
+    @keyframes skShine{ 0%{ background-position:130% 0 } 55%,100%{ background-position:-130% 0 } }
+    @keyframes skChipIn{ from{ opacity:0; transform:translateY(8px) scale(.7) } to{ opacity:1; transform:none } }
+    @keyframes skChipOut{ to{ opacity:0; transform:scale(.8) } }
+    @keyframes skBlink{ 50%{ opacity:0 } }
+    @keyframes skBreathe{ 0%,100%{ transform:scale(1) } 50%{ transform:scale(1.05) } }
+    @keyframes skSlide{ from{ transform:translateX(-70px) } to{ transform:translateX(270px) } }
+
+    /* ---------- responsive ---------- */
+    @media (max-width:1150px){ #sk-boot-mock .sk-ins{ display:none } }
+    @media (max-width:920px){
+      #sk-boot-mock .sk-side{ display:none }
+      #sk-boot-mock .sk-gsearch{ display:none }
+      #sk-boot-mock .sk-app{ height:520px }
+    }
+    @media (max-width:640px){
+      #sk-boot-mock .sk-board span,#sk-boot-mock .sk-sort em{ display:none }
+      #sk-boot-mock .sk-c-bar em{ display:none }
+      #sk-boot-mock .sk-sort{ width:28px; padding:0; justify-content:center }
+      #sk-boot-mock .sk-sb .sk-sb-r,#sk-boot-mock .sk-sb .sb-edit{ display:none }
+      #sk-boot-mock .sk-boards{ gap:6px; padding:10px 12px 0 }
+      #sk-boot-mock .sk-board{ height:60px; padding:0 9px; gap:8px }
+      #sk-boot-mock .sk-grid{ padding:10px 12px 12px; grid-template-columns:repeat(auto-fill,minmax(138px,1fr)) }
+      #sk-boot-mock .sk-top{ padding:0 12px }
+      #sk-boot-mock .sk-wordmark,#sk-boot-mock .sk-bdiv,#sk-boot-mock .sk-bsub{ display:none }
+      #sk-boot-mock .sk-app{ height:480px }
+    }
+
+    /* ---------- reduced motion ---------- */
+    @media (prefers-reduced-motion: reduce){
+      #sk-boot-mock *,#sk-boot-mock *::before,#sk-boot-mock *::after{
+        animation-duration:.001ms !important; animation-iteration-count:1 !important;
+        transition-duration:.001ms !important; transition-delay:0ms !important;
+      }
+    }
+  </style>
+
+  <!-- ============ 共享窗口骨架（注入三个方案） ============ -->
+  <template id="sk-shell-tpl">
+    <header class="sk-tb" data-rv style="--rv:0">
+      <span class="sk-logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+          <rect x="4" y="4" width="6.5" height="6.5" rx="2" fill="#fff" fill-opacity=".92"></rect>
+          <rect x="13.5" y="4" width="6.5" height="6.5" rx="2" fill="#fff" fill-opacity=".54"></rect>
+          <rect x="8.75" y="13.5" width="6.5" height="6.5" rx="2" fill="#fff" fill-opacity=".76"></rect>
+          <path d="M10.4 8.6 12 12.1" stroke="#fff" stroke-width="1.4" stroke-opacity=".8" fill="none"></path>
+        </svg>
+      </span>
+      <span class="sk-wordmark">skillkit</span>
+      <span class="sk-bdiv"></span>
+      <span class="sk-bsub">SKILL LIBRARY</span>
+      <span class="sk-gsearch"><i data-lucide="search" aria-hidden="true"></i><em>搜索名称、备注、分类</em><kbd>Ctrl K</kbd></span>
+      <span class="sk-tb-actions">
+        <span class="sk-pill"><i></i>LOCAL</span>
+        <span class="sk-tbtn"><i data-lucide="moon" aria-hidden="true"></i></span>
+        <span class="sk-tbtn win"><i data-lucide="minus" aria-hidden="true"></i></span>
+        <span class="sk-tbtn win"><i data-lucide="square" aria-hidden="true"></i></span>
+        <span class="sk-tbtn win close"><i data-lucide="x" aria-hidden="true"></i></span>
+      </span>
+    </header>
+    <div class="sk-app">
+      <aside class="sk-side" data-rv style="--rv:1">
+        <div class="sk-store">
+          <div class="sk-store-top"><span class="sk-eyebrow">CENTRAL STORE</span><span class="sk-live"><i></i>LIVE</span></div>
+          <div class="sk-store-path">D:\skillkit\store</div>
+          <div class="sk-store-meta"><span><b>51</b> skills</span><span>54.4 MB</span></div>
+          <div class="sk-health"><i></i></div>
+        </div>
+        <div class="sk-navlabel">看板</div>
+        <nav class="sk-nav">
+          <span class="sk-navi on"><i data-lucide="layers" aria-hidden="true"></i><span>共有技能</span><b>51</b></span>
+          <span class="sk-navi"><i data-lucide="sparkles" aria-hidden="true"></i><span>独有技能</span><b>2</b></span>
+          <span class="sk-navi teal"><i data-lucide="bot" aria-hidden="true"></i><span>智能体</span><b>7</b></span>
+        </nav>
+        <div class="sk-stat">
+          <div><b>7</b><span>agents</span></div>
+          <div><b>0</b><span>已编辑</span></div>
+          <div><b>7</b><span>分类夹</span></div>
+          <div><b>6</b><span>未归档</span></div>
+        </div>
+        <div class="sk-navlabel">分类文件夹</div>
+        <div class="sk-folders">
+          <span class="sk-fold"><i style="--fc:var(--sk-violet)"></i>设计<b>12</b></span>
+          <span class="sk-fold"><i style="--fc:var(--sk-warning)"></i>文档<b>8</b></span>
+          <span class="sk-fold"><i style="--fc:var(--sk-slate)"></i>工程<b>9</b></span>
+          <span class="sk-fold"><i style="--fc:var(--sk-rose)"></i>视频<b>5</b></span>
+          <span class="sk-fold"><i style="--fc:var(--sk-teal)"></i>记忆<b>3</b></span>
+          <span class="sk-fold more">＋ 工程 / 前端 等 2 个…</span>
+        </div>
+        <div class="sk-sidefoot">
+          <span class="sk-setbtn"><i data-lucide="settings" aria-hidden="true"></i>设置与数据</span>
+          <span class="sk-ver">v0.2.0 · 快照 22:16</span>
+        </div>
+      </aside>
+      <main class="sk-main">
+        <div class="sk-top" data-rv style="--rv:2">
+          <div style="min-width:0">
+            <h2>共有技能</h2>
+            <p>51 个 skill 同时存在于 7 个 agent · 全部指向中央仓库</p>
+          </div>
+          <div class="sk-top-actions">
+            <span class="sk-seg"><span class="on"><i data-lucide="layout-grid" aria-hidden="true"></i>网格</span><span><i data-lucide="list" aria-hidden="true"></i>列表</span></span>
+            <span class="sk-tbtn" style="border:1px solid var(--sk-line); background:var(--sk-surface)"><i data-lucide="refresh-cw" aria-hidden="true"></i></span>
+            <span class="sk-sort"><i data-lucide="arrow-up-down" aria-hidden="true"></i><em style="font-style:normal">名称 A→Z</em></span>
+          </div>
+        </div>
+        <div class="sk-boards" data-rv style="--rv:3">
+          <div class="sk-board on">
+            <span class="sk-bico"><i data-lucide="layers" aria-hidden="true"></i></span>
+            <div><b>共有技能</b><span>手动建夹 · 拖拽归档 · 像资源管理器一样管理</span></div>
+            <em>51</em>
+          </div>
+          <div class="sk-board">
+            <span class="sk-bico"><i data-lucide="sparkles" aria-hidden="true"></i></span>
+            <div><b>独有技能</b><span>只存在于某个 agent · 中央仓库没有或内容不同</span></div>
+            <em>2</em>
+          </div>
+          <div class="sk-board">
+            <span class="sk-bico tealc"><i data-lucide="bot" aria-hidden="true"></i></span>
+            <div><b>智能体</b><span>本机 agent 与 skills 目录的链接开关</span></div>
+            <em>7</em>
+          </div>
+        </div>
+        <div class="sk-grid">
+          <div class="sk-fcard" data-rv style="--rv:4;--fc:var(--sk-violet)">
+            <span class="sk-fico"><i data-lucide="folder-open" aria-hidden="true"></i></span>
+            <div><b>设计</b><span>12 skills · 34.1 MB</span></div>
+          </div>
+          <div class="sk-fcard" data-rv style="--rv:5;--fc:var(--sk-warning)">
+            <span class="sk-fico"><i data-lucide="folder-open" aria-hidden="true"></i></span>
+            <div><b>文档</b><span>8 skills · 6.8 MB</span></div>
+          </div>
+          <div class="sk-fcard" data-rv style="--rv:6;--fc:var(--sk-slate)">
+            <span class="sk-fico"><i data-lucide="folder-open" aria-hidden="true"></i></span>
+            <div><b>工程</b><span>9 skills · 7.2 MB</span></div>
+          </div>
+          <div class="sk-fcard" data-rv style="--rv:7;--fc:var(--sk-rose)">
+            <span class="sk-fico"><i data-lucide="folder-open" aria-hidden="true"></i></span>
+            <div><b>视频</b><span>5 skills · 4.6 MB</span></div>
+          </div>
+          <div class="sk-fcard" data-rv style="--rv:8;--fc:var(--sk-teal)">
+            <span class="sk-fico"><i data-lucide="folder-open" aria-hidden="true"></i></span>
+            <div><b>记忆</b><span>3 skills · 1.1 MB</span></div>
+          </div>
+          <div class="sk-fcard" data-rv style="--rv:9;--fc:var(--sk-accent)">
+            <span class="sk-fico"><i data-lucide="folder-open" aria-hidden="true"></i></span>
+            <div><b>检索</b><span>2 skills · 0.3 MB</span></div>
+          </div>
+          <div class="sk-fcard" data-rv style="--rv:10;--fc:var(--sk-teal)">
+            <span class="sk-fico"><i data-lucide="folder-open" aria-hidden="true"></i></span>
+            <div><b>前端</b><span>6 skills · 0.9 MB</span></div>
+          </div>
+          <div class="sk-scard" data-rv style="--rv:11;--fc:var(--sk-slate)">
+            <span class="sk-fico sm"><i data-lucide="box" aria-hidden="true"></i></span>
+            <div><b>aihot</b><span>7 agent · 24 KB</span></div>
+          </div>
+          <div class="sk-scard" data-rv style="--rv:12;--fc:var(--sk-violet)">
+            <span class="sk-fico sm"><i data-lucide="box" aria-hidden="true"></i></span>
+            <div><b>brandkit</b><span>7 agent · 118 KB</span></div>
+          </div>
+          <div class="sk-scard" data-rv style="--rv:13;--fc:var(--sk-slate)">
+            <span class="sk-fico sm"><i data-lucide="box" aria-hidden="true"></i></span>
+            <div><b>browser-use</b><span>7 agent · 52 KB</span></div>
+          </div>
+          <div class="sk-scard" data-rv style="--rv:14;--fc:var(--sk-slate)">
+            <span class="sk-fico sm"><i data-lucide="box" aria-hidden="true"></i></span>
+            <div><b>pdf</b><span>7 agent · 1.2 MB</span></div>
+          </div>
+        </div>
+      </main>
+      <aside class="sk-ins" data-rv style="--rv:15">
+        <div class="sk-inshead">
+          <div><span class="sk-eyebrow">SKILL DETAIL</span><b>pdf</b></div>
+          <span class="sk-saved"><i data-lucide="check" aria-hidden="true"></i>已保存</span>
+        </div>
+        <div class="sk-insbody">
+          <span class="sk-lab">显示名称</span>
+          <div class="sk-input">pdf</div>
+          <span class="sk-lab">归属分类</span>
+          <div class="sk-chipsrow">
+            <span class="sk-fchip on"><i data-lucide="check" aria-hidden="true"></i>文档</span>
+            <span class="sk-fchip">视频</span>
+            <span class="sk-fchip">工程</span>
+            <span class="sk-fchip add"><i data-lucide="plus" aria-hidden="true"></i></span>
+          </div>
+          <span class="sk-lab">备注</span>
+          <div class="sk-note">处理 PDF 的读取、拆分与合并；大文件先抽页再走 OCR。</div>
+          <div class="sk-metas">
+            <div><span>路径</span><code>D:\skillkit\store\pdf</code></div>
+            <div><span>大小</span><code>1.2 MB · 18 files</code></div>
+            <div><span>指纹</span><code>9f21c4a77b03</code></div>
+            <div><span>分发</span><code>7 / 7 agent 已链接</code></div>
+          </div>
+        </div>
+      </aside>
+    </div>
+    <footer class="sk-sb" data-rv style="--rv:16">
+      <span style="display:inline-flex;align-items:center;gap:7px"><i class="dot"></i><b>51 共有 · 2 独有</b></span>
+      <span class="sep"></span>
+      <span>D:\skillkit\store</span>
+      <span class="sep"></span>
+      <span class="sb-edit">已编辑 <b>0</b> 条</span>
+      <span class="sk-sb-r">
+        <span>SQLite WAL</span><span class="sep"></span><span>扫描 22:16</span><span class="sep"></span><span>v0.2.0</span>
+      </span>
+    </footer>
+  </template>
+
+  <!-- ============ 方案 A · 徽章汇入 ============ -->
+  <section data-variant="徽章汇入" aria-label="方案 A：徽章汇入" class="sk-variant">
+    <div class="sk-stage">
+      <div class="sk-win booting">
+        <div class="sk-app-slot"></div>
+        <div class="sk-boot" data-kind="A" role="status" aria-label="正在加载技能库">
+          <div class="sk-blogo" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true">
+              <rect x="4" y="4" width="6.5" height="6.5" rx="2" fill="#fff" fill-opacity=".92"></rect>
+              <rect x="13.5" y="4" width="6.5" height="6.5" rx="2" fill="#fff" fill-opacity=".54"></rect>
+              <rect x="8.75" y="13.5" width="6.5" height="6.5" rx="2" fill="#fff" fill-opacity=".76"></rect>
+              <path d="M10.4 8.6 12 12.1" stroke="#fff" stroke-width="1.4" stroke-opacity=".8" fill="none"></path>
+            </svg>
+          </div>
+          <div class="sk-bword">skillkit</div>
+          <div class="sk-beyebrow">SKILL LIBRARY · V0.2.0</div>
+          <div class="sk-chips" aria-hidden="true"></div>
+          <div class="sk-agents" aria-hidden="true">
+            <span class="sk-agent">CC</span><span class="sk-agent">CX</span><span class="sk-agent">DS</span>
+            <span class="sk-agent">QD</span><span class="sk-agent">TR</span><span class="sk-agent">WB</span><span class="sk-agent">ZC</span>
+          </div>
+          <div class="sk-bfoot">
+            <div class="sk-bphase"><span class="ph">正在启动</span><span class="cnt">0 / 51</span></div>
+            <div class="sk-bline">kernel ready · python 3.12.6</div>
+            <div class="sk-btrack"><i></i></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="sk-replay">
+      <button class="btn" type="button" data-replay><i data-lucide="rotate-ccw" aria-hidden="true"></i><span>重播动画</span></button>
+    </div>
+  </section>
+
+  <!-- ============ 方案 B · 引导终端 ============ -->
+  
+
+  <!-- ============ 方案 C · 轻量横线 ============ -->
+  
+
+  <script>
+  (function () {
+    var root = document.getElementById('sk-boot-mock');
+    if (!root) return;
+    var reduce = false;
+    try { reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
+
+    /* ---------- 预览状态（深色 / 速度），经 Tweak 修改并持久化 ---------- */
+    var state = { dark: false, speed: 1 };
+    try {
+      var saved = window.zcode && window.zcode.widgetState && window.zcode.widgetState.privateContent;
+      if (saved && typeof saved === 'object') {
+        if (typeof saved.dark === 'boolean') state.dark = saved.dark;
+        if (typeof saved.speed === 'number' && saved.speed > 0) state.speed = saved.speed;
+      }
+    } catch (e) {}
+    function applyState() {
+      root.classList.toggle('sk-dark', state.dark);
+      root.style.setProperty('--k', String(Math.round((1 / state.speed) * 1000) / 1000));
+    }
+    function persist() {
+      try {
+        if (window.zcode && window.zcode.setWidgetState) {
+          window.zcode.setWidgetState({ privateContent: { dark: state.dark, speed: state.speed } });
+        }
+      } catch (e) {}
+    }
+    applyState();
+    document.addEventListener('zcode:set_globals', function (ev) {
+      try {
+        var g = ev.detail && ev.detail.globals;
+        var pc = g && g.widgetState && g.widgetState.privateContent;
+        if (pc && typeof pc === 'object') {
+          if (typeof pc.dark === 'boolean') state.dark = pc.dark;
+          if (typeof pc.speed === 'number' && pc.speed > 0) state.speed = pc.speed;
+          applyState();
+        }
+      } catch (e) {}
+    });
+
+    /* ---------- 数据（真实库快照中的代表技能与 7 个 agent） ---------- */
+    var CAT = {
+      eng: '--sk-slate', design: '--sk-violet', doc: '--sk-accent',
+      video: '--sk-rose', mem: '--sk-teal', search: '--sk-warning'
+    };
+    var CHIPS = [
+      ['aihot', 'search'], ['brandkit', 'design'], ['pdf', 'doc'], ['browser-use', 'eng'],
+      ['remotion-create', 'video'], ['mnemosyne-os-memory', 'mem'], ['skill-creator', 'eng'],
+      ['frontend-design', 'design'], ['pptx', 'doc'], ['webapp-testing', 'eng'],
+      ['ui-design-system', 'design'], ['prompt-optimizer-zh', 'eng'],
+      ['github-pages-auto-deploy', 'eng'], ['imagegen-frontend-web', 'design'],
+      ['ci-compile-guard', 'eng'], ['design-taste-frontend', 'design'], ['xlsx', 'doc'],
+      ['video-shotcraft', 'video'], ['dev-expert', 'eng'], ['find-skills', 'eng']
+    ];
+    var AGD = [
+      ['claude_code', '.claude/skills'], ['codex', '.codex/skills'],
+      ['deepseek_harness', '.dsh/skills'], ['qoder', '.qoder/skills'],
+      ['trae_cn', '.trae-cn/skills'], ['workbuddy', '.workbuddy/skills'], ['zcode', '.zcode/skills']
+    ];
+    function hash10(i) {
+      var h = (((i + 1) * 2654435761) >>> 0);
+      return ('000000000' + h.toString(16)).slice(-10);
+    }
+
+    /* ---------- 注入窗口骨架 ---------- */
+    var tpl = document.getElementById('sk-shell-tpl');
+    if (tpl) {
+      var slots = root.querySelectorAll('.sk-app-slot');
+      for (var si = 0; si < slots.length; si++) {
+        slots[si].appendChild(tpl.content.cloneNode(true));
+      }
+    }
+    try { if (window.lucide && window.lucide.createIcons) window.lucide.createIcons({ attrs: { width: 16, height: 16 } }); } catch (e) {}
+
+    /* ---------- 启动动画引擎 ---------- */
+    function bootSection(section) {
+      var win = section.querySelector('.sk-win');
+      var bootEl = section.querySelector('.sk-boot');
+      if (!win || !bootEl) return;
+      if (section._cancel) section._cancel();
+      if (reduce) {
+        win.classList.remove('booting');
+        win.classList.add('ready');
+        bootEl.classList.add('run', 'ok', 'done');
+        return;
+      }
+      var timers = [], ivs = [], dead = false;
+      function t(fn, ms) { if (dead) return; timers.push(setTimeout(fn, Math.max(0, ms) / state.speed)); }
+      function every(fn, ms) {
+        if (dead) return null;
+        var id = setInterval(fn, ms / state.speed);
+        ivs.push(id);
+        return id;
+      }
+      section._cancel = function () {
+        dead = true;
+        timers.forEach(clearTimeout);
+        ivs.forEach(clearInterval);
+      };
+
+      win.classList.add('booting');
+      win.classList.remove('ready');
+      bootEl.classList.remove('done', 'ok', 'run');
+      void bootEl.offsetWidth;
+      bootEl.classList.add('run');
+
+      var kind = bootEl.getAttribute('data-kind');
+      if (kind === 'A') bootA(t, every, bootEl, win, timers);
+      else if (kind === 'B') bootB(t, every, bootEl, win);
+      else bootC(t, bootEl, win);
+    }
+
+    /* --- A · 徽章汇入 --- */
+    function bootA(t, every, bootEl, win, timers) {
+      var chips = bootEl.querySelector('.sk-chips');
+      var agents = bootEl.querySelectorAll('.sk-agent');
+      var ph = bootEl.querySelector('.sk-bphase .ph');
+      var cnt = bootEl.querySelector('.sk-bphase .cnt');
+      var line = bootEl.querySelector('.sk-bline');
+      var fill = bootEl.querySelector('.sk-btrack i');
+      chips.innerHTML = '';
+      for (var i = 0; i < agents.length; i++) agents[i].classList.remove('on');
+      cnt.textContent = '0 / 51';
+      fill.style.width = '0%';
+      ph.textContent = '正在启动';
+      line.textContent = 'kernel ready · python 3.12.6';
+
+      function setC(n) { cnt.textContent = n + ' / 51'; }
+      function addChip() {
+        if (ci >= CHIPS.length) return;
+        var c = CHIPS[ci];
+        var el = document.createElement('span');
+        el.className = 'sk-chip';
+        el.innerHTML = '<b style="--c:var(' + CAT[c[1]] + ')">' + c[0].slice(0, 2).toUpperCase() + '</b>' + c[0];
+        chips.appendChild(el);
+        ci++;
+        if (chips.children.length > 14) {
+          var f = chips.firstElementChild;
+          if (f) {
+            f.classList.add('out');
+            timers.push(setTimeout(function () { if (f.parentNode) f.parentNode.removeChild(f); }, 240 / state.speed));
+          }
+        }
+      }
+      var ci = 0, pi = 0, ai = 0;
+      var chipIv = null, cntIv = null, parseIv = null;
+
+      t(function () { ph.textContent = '打开中央仓库'; line.textContent = 'D:\\skillkit\\store · 54.4 MB'; fill.style.width = '14%'; }, 460);
+      t(function () {
+        ph.textContent = '扫描技能目录';
+        line.textContent = 'scan store … 51 skills · 2 unique';
+        fill.style.width = '30%';
+        chipIv = every(function () {
+          if (ci >= CHIPS.length) { clearInterval(chipIv); return; }
+          addChip();
+        }, 118);
+        var t0 = Date.now();
+        cntIv = every(function () {
+          var p = Math.min(1, (Date.now() - t0) / 2100);
+          setC(Math.round(51 * (1 - Math.pow(1 - p, 3))));
+          if (p >= 1) clearInterval(cntIv);
+        }, 40);
+      }, 860);
+      t(function () {
+        ph.textContent = '解析 SKILL.md';
+        fill.style.width = '60%';
+        parseIv = every(function () {
+          var c = CHIPS[pi % CHIPS.length];
+          pi++;
+          line.textContent = 'parse ' + c[0] + '/SKILL.md → ' + hash10(pi);
+        }, 150);
+      }, 2060);
+      t(function () {
+        if (chipIv) clearInterval(chipIv);
+        if (cntIv) clearInterval(cntIv);
+        if (parseIv) clearInterval(parseIv);
+        ph.textContent = '探测 agent 分发';
+        fill.style.width = '78%';
+        chips.innerHTML = '';
+        every(function () {
+          if (ai >= AGD.length) return;
+          agents[ai].classList.add('on');
+          line.textContent = 'link ' + AGD[ai][0] + ' → ' + AGD[ai][1] + ' … ok';
+          ai++;
+        }, 135);
+      }, 2960);
+      t(function () {
+        ph.textContent = '载入分类与元数据';
+        line.textContent = 'folders ×7 · meta ×51 · prefs ok';
+        fill.style.width = '94%';
+      }, 3960);
+      t(function () {
+        ph.textContent = '就绪';
+        setC(51);
+        fill.style.width = '100%';
+        line.textContent = '51 个技能就绪 · 7 个 agent 已连接';
+        bootEl.classList.add('ok');
+      }, 4420);
+      t(function () {
+        bootEl.classList.add('done');
+        win.classList.remove('booting');
+        win.classList.add('ready');
+      }, 4940);
+    }
+
+    /* --- B · 引导终端 --- */
+    function bootB(t, every, bootEl, win) {
+      var tls = bootEl.querySelectorAll('.tl');
+      var avs = bootEl.querySelectorAll('.tl .v b');
+      var fill = bootEl.querySelector('.sk-term-bar i');
+      var pctEl = bootEl.querySelector('.sk-term-foot .pct');
+      var hint = bootEl.querySelector('.sk-term-foot .hint');
+      function set(v) { fill.style.width = v + '%'; pctEl.textContent = v + '%'; }
+      function on(i) {
+        for (var j = 0; j < tls.length; j++) tls[j].classList.remove('cur');
+        if (tls[i]) { tls[i].classList.add('on'); tls[i].classList.add('cur'); }
+      }
+      for (var j = 0; j < tls.length; j++) tls[j].classList.remove('on', 'cur');
+      for (var k = 0; k < avs.length; k++) avs[k].classList.remove('lit');
+      set(0);
+      hint.textContent = 'booting…';
+
+      t(function () { on(0); }, 240);
+      t(function () { on(1); set(12); }, 640);
+      t(function () { on(2); set(34); }, 1120);
+      t(function () { on(3); set(54); }, 1580);
+      t(function () {
+        on(4);
+        var ai = 0;
+        var id = every(function () {
+          if (ai >= avs.length) { clearInterval(id); return; }
+          avs[ai].classList.add('lit');
+          set(60 + ai * 4);
+          ai++;
+        }, 140);
+      }, 2020);
+      t(function () { on(5); set(90); }, 3120);
+      t(function () { on(6); set(100); hint.textContent = 'ready · 4.2 s'; bootEl.classList.add('ok'); }, 3560);
+      t(function () {
+        bootEl.classList.add('done');
+        win.classList.remove('booting');
+        win.classList.add('ready');
+      }, 4080);
+    }
+
+    /* --- C · 轻量横线 --- */
+    function bootC(t, bootEl, win) {
+      var fill = bootEl.querySelector('.sk-c-track i');
+      var lab = bootEl.querySelector('.sk-c-bar em');
+      var doneEl = bootEl.querySelector('.sk-c-done');
+      fill.style.width = '0%';
+      lab.textContent = '正在启动';
+      lab.classList.remove('sw');
+      doneEl.classList.remove('on');
+      function swap(s) {
+        lab.classList.add('sw');
+        t(function () { lab.textContent = s; lab.classList.remove('sw'); }, 120);
+      }
+      t(function () { swap('扫描 51 个 skill'); fill.style.width = '46%'; }, 420);
+      t(function () { swap('探测 7 个 agent'); fill.style.width = '78%'; }, 1280);
+      t(function () {
+        lab.classList.remove('sw');
+        lab.textContent = '就绪';
+        fill.style.width = '100%';
+        bootEl.classList.add('ok');
+        doneEl.classList.add('on');
+      }, 1900);
+      t(function () {
+        bootEl.classList.add('done');
+        win.classList.remove('booting');
+        win.classList.add('ready');
+      }, 2480);
+    }
+
+    /* ---------- 首次可见自动播放一次 + 重播 ---------- */
+    var sections = [];
+    var secEls = root.querySelectorAll('section[data-variant]');
+    for (var x = 0; x < secEls.length; x++) sections.push(secEls[x]);
+    sections.forEach(function (s, i) {
+      if (i === 0) {
+        s._played = true;
+        setTimeout(function () { bootSection(s); }, 420);
+      } else {
+        var mo = new MutationObserver(function () {
+          if (!s.hasAttribute('hidden') && !s._played) {
+            s._played = true;
+            setTimeout(function () { bootSection(s); }, 300);
+          }
+        });
+        mo.observe(s, { attributes: true, attributeFilter: ['hidden'] });
+      }
+      var rb = s.querySelector('[data-replay]');
+      if (rb) rb.addEventListener('click', function () { s._played = true; bootSection(s); });
+    });
+
+    /* ---------- 设计控制 ---------- */
+    try {
+      if (globalThis.Tweak) {
+        var tweak = new Tweak({ container: root, onChange: function () { applyState(); persist(); } });
+        tweak.addToggle(state, 'dark', { label: '深色主题' });
+        tweak.addSlider(state, 'speed', { label: '播放速度', min: 0.5, max: 2, step: 0.25, unit: '×' });
+      }
+    } catch (e) {}
+  })();
+  </script>
+</div>
+
+</body>
+</html>
