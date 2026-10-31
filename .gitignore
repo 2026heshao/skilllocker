@@ -4,7 +4,10 @@ __pycache__/
 
 # 运行时数据
 kit/desktop_profile/
-kit/skillkit.db
+kit/skillkit.db*
+kit/config.json
+kit/skillkit.log
+kit/skillkit.log.*
 kit/launch.log
 kit/ui-drag.log
 

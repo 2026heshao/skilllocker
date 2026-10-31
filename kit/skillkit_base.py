@@ -31,7 +31,10 @@ ADAPTERS_FILE = os.path.join(KIT, "adapters.json")
 DB_FILE = os.path.join(KIT, "skillkit.db")
 HOME = os.path.expanduser("~")
 IGNORE_NAMES = {".git", ".DS_Store", "Thumbs.db", ".gitignore"}
-DEFAULT_STORE = "D:/skillkit/store"
+# 默认中央仓库跟随安装目录（kit/ 的上一级）。不写死盘符：无 D: 盘的机器
+# 首启也能解析出正确路径；开发机 D:\skillkit 下推导值与旧硬编码一致，零迁移。
+DEFAULT_STORE = os.path.normpath(
+    os.path.join(os.path.dirname(KIT), "store")).replace(os.sep, "/")
 APP_VERSION = "0.2.1"
 
 # UI 上的两字母标记；不在表里的工具用 label 首字母推导
@@ -63,7 +66,13 @@ def load_config():
         except (OSError, ValueError) as exc:
             cfg["_load_error"] = "config.json 解析失败，已退回默认配置: %s" % exc
     cfg["store"] = os.path.normpath(cfg["store"]).replace(os.sep, "/")
-    os.makedirs(cfg["store"], exist_ok=True)
+    try:
+        os.makedirs(cfg["store"], exist_ok=True)
+    except OSError as exc:
+        # 盘符不存在 / 权限拒绝不该让启动链路第一步就崩：留痕继续走，
+        # rescan 会抛「中央仓库目录不存在」，由前端错误页如实展示
+        cfg["_load_error"] = ("中央仓库目录不可创建: %s（%s）；"
+                              "请检查磁盘或修改 config.json 的 store" % (cfg["store"], exc))
     return cfg
 
 
