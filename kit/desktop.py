@@ -486,6 +486,14 @@ class Api:
             if cfg.get("_load_error"):
                 skillkit.log_event(con, "warn", cfg["_load_error"])
                 con.commit()
+            # 首屏探测：幂等、毫秒级（读 adapters.json + 每工具一次 isdir）。
+            # 必须在 seed_meta 之前：seed 的独有播种依赖 tools 表
+            skillkit.sync_tools_from_adapters(con, cfg)
+            # 全新数据库：中央仓库内容从未登记过，自动扫一次（仅 skills 表为空时，
+            # 避免每次启动都全量哈希 store）。store 不可读时 rescan 抛错 →
+            # _guard 返回 ok:false → 前端启动错误页如实展示，不给演示数据
+            if not con.execute("select 1 from skills limit 1").fetchone():
+                skillkit.rescan(con, cfg)
             skillkit.migrate_folders(con, cfg)
             skillkit.seed_meta(con, cfg)
             return _boards_payload(con, cfg)
