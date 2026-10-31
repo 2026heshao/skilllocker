@@ -27,11 +27,16 @@ def sync_tools_from_adapters(con, cfg):
             adapters = json.load(fh)
     except (OSError, ValueError) as exc:
         # adapters.json 损坏不该让 rescan 全盘失败：沿用库内工具表继续跑
-        log_event(con, "warn", "adapters.json 解析失败，沿用库内工具表: %s" % exc)
-        con.commit()
-        return [(r["key"], r["label"], r["skills_dir"], r["detect_dir"], 1)
+        rows = [(r["key"], r["label"], r["skills_dir"], r["detect_dir"], 1)
                 for r in con.execute(
                     "select key,label,skills_dir,detect_dir from tools where detected=1")]
+        if not rows:
+            # 全新机器 + adapters.json 不可读 = 无从探测，静默返回空表会让用户
+            # 困在「永远 0 agent」里；宁可让本轮失败并如实报错（→ 启动错误页）
+            raise RuntimeError("adapters.json 缺失或损坏，且工具表为空，无法探测任何 agent: %s" % exc)
+        log_event(con, "warn", "adapters.json 解析失败，沿用库内工具表: %s" % exc)
+        con.commit()
+        return rows
     rows = []
     for a in adapters:
         skills_dir = os.path.join(HOME, *a["skills_dir"].split("/"))

@@ -25,7 +25,12 @@ import sys
 import time
 from logging.handlers import RotatingFileHandler
 
-import webview
+try:
+    import webview
+except ImportError:
+    # 缺 pywebview 不能在顶层崩：pythonw 无控制台、此时日志还没装配，
+    # 进程会静默死亡。置 None，main() 装配完日志后给弹窗 + 日志 + 退出码 2
+    webview = None
 
 import skillkit
 
@@ -921,6 +926,11 @@ def main():
     _setup_logging()
     _LOG.info("launch debug=%s selftest=%s py=%s",
               args.debug, args.selftest, sys.version.split()[0])
+
+    if webview is None:
+        _report("缺少依赖：pywebview 未安装。请在当前 Python 环境执行 "
+                "pip install pywebview 后重试")
+        return 2
 
     if not os.path.isfile(INDEX):
         _report("找不到界面文件：%s" % INDEX)
