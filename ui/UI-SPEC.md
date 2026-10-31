@@ -266,6 +266,7 @@ window: 设计稿 1440 × 900（桌面默认 1200 × 760，min 1180 × 720），
 | 复制路径 | 路径盒按钮 → `navigator.clipboard` + Toast「路径已复制」 |
 | 设置 | `Ctrl+,` 或侧栏入口；主题、密度、动效、显示停用 agent、导出 JSON、清空我的编辑、复制仓库路径、重新探测 |
 | 空态 | 无匹配时隐藏列表体，显示图标 + 「没有匹配的 skill」 + 「清除筛选」 |
+| 启动错误页 | 桌面端 `bootstrap()` 返回 `ok:false`（或桥调用 reject）时进入 `MODE='error'`：全屏 `#boot-error` 覆盖层（z-index 300），含标题「后端启动失败」、错误详情（`err.message`）、指向 `kit\skillkit.log` 的提示与【重试】按钮（`location.reload()`）；**绝不退回内置演示快照冒充真实数据**。仅 `file://` 原型保留只读快照降级 + toast。错误态下 `refresh` 等入口禁用 |
 | Esc | 依次关闭弹窗 → ⋯ 菜单 → 清空搜索 → 退出文件夹 |
 | 保存态胶囊 | 隐藏 → 输入中显示「已保存」（`success-soft`），`dirty` 态为 accent |
 
@@ -283,6 +284,20 @@ design|taste|stitch|minimalist|brutalist|brandkit|imagegen|image-to-code|redesig
 > 升级迁移把旧 `categories` JSON 首元素回填为 `folder_id`（仅首次加列那一刻跑一次，
 > 之后用户「移出到未归档」不会被反复撤销）；预置归属**不计入「已编辑」**——
 > 已编辑只统计显示名 / 备注（前端 `editedCount()` 与后端 `_edited_count()` 同口径）。
+
+### 4.1 启动错误页（后端 bootstrap 失败）
+
+桌面壳已连上（`SKB.isDesktop()` 为真）而 `bootstrap()` 失败（`ok:false` / 桥 reject）时，
+`boot()` 的 catch 进入 `MODE='error'` 并渲染 `renderBootError(err)`：
+
+| 项 | 规格 |
+|---|---|
+| 容器 | `body > #boot-error`，`position:fixed; inset:0; z-index:300`（盖过 toasts 200），背景 `var(--bg)`，主题 token 自动跟随深色 |
+| 卡片 | 520 宽居中：红色 `!` 图标 → 标题「后端启动失败」→ 副标题 → `<pre>` 错误详情（`err.message`，可滚动，`danger-soft` 底）→ 提示行「详细原因见安装目录 kit\skillkit.log」→【重试】主色按钮 |
+| 重试 | `location.reload()` 重跑整条 boot 链路（后端恢复后自然成功） |
+| 数据 | **不调用 `hydrate`、不渲染任何演示快照数据**；`window.__SK_MODE = 'error'`、`data-mode=error`；`applyBootstrap()` 顶部守卫直接 return（刷新入口禁用） |
+| 降级边界 | 仅「桌面壳已连上但后端失败」走错误页；`file://` 原型与 pywebview 注入超时仍走只读快照 + toast（原有行为） |
+| 启动动画 | 进入错误页前先 `BootFX.fail()` 收尾编排时钟，overlay 不会卡在加载态 |
 
 ---
 

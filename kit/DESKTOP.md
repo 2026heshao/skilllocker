@@ -26,6 +26,7 @@
 
 开关语义：
 
+- **首次入库默认关闭**：`sync_tools_from_adapters` 探测到的新 agent 一律 `enabled=0`（状态「已关闭」）——探测到 ≠ 授权分发。用户打开开关时才经 `set_agent → do_sync` 建 junction。首次启动即自动探测（`bootstrap()` 内置，无需手动「重新探测」），老库已有行的 enabled 不受影响。
 - **开**：`do_sync(only_tools=[key], apply_changes=True)`，按中央仓库补齐链接，不覆盖冲突目录。
 - **关**：二次确认后 `unlink_tool()` —— 只删除本工具建立的 junction、以及内容与中央一致的拷贝；**中央仓库的 skill 实体一个不动**。冲突副本会保留，并在 toast 里报告保留数量。
 - **事件入口只认 `change`**：开关的 `<input>` 是透明覆盖层（`position:absolute; inset:0; z-index:2`），点 `label` 或装饰 `i` 时 Chromium 还会把点击转发给 `input`，一次按下会派发 **两个 `click`**；且 `click` 冒到 `document` 时 `checked` **已经是翻转后的值**。因此 `click` 里读 `!box.checked` 再取反正好反了——点「开」着的开关反而又发一次 open（界面表现为「关不掉链接」）。现在 `click` 只负责拦下（不触发行选中），真正动作在 `document` 的 `change` 里按 `box.checked`（= 目标状态）走 `requestAgent(key, checked)`，一次按下只产生一个 change。
@@ -75,7 +76,7 @@
 | 项 | 实际值 | 说明 |
 |---|---|---|
 | Python | `D:\develop\python\3.12\python.exe`（3.12.6） | 只用标准库 + `pywebview` |
-| pywebview | 6.2.1（`pip install pywebview`） | 唯一的第三方依赖，用来开窗口 |
+| pywebview | 6.2.1（`pip install pywebview`） | 唯一的第三方依赖，用来开窗口；缺失时启动弹窗提示（写日志、退出码 2），不再静默退出 |
 | WebView2 Runtime | 156.0.4314.50（已在本机） | 由 Edge 提供；缺失则需要装 Evergreen Runtime |
 | 屏幕 | 1920 × 1080，工作区 1920 × 1020，缩放 125%（120 DPI） | 影响窗口尺寸计算，见 §6 |
 | 数据库 | `kit\skillkit.db`（SQLite，WAL） | 与 CLI 共用同一个库 |
@@ -128,7 +129,7 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 
 | 方法 | 入参 | 返回 | 前端触发点 |
 |---|---|---|---|
-| `bootstrap()` | — | `{ok, data: 看板快照, meta: 全部元数据}` | 启动首屏（含 `seed_meta` 播种与 `prune_meta` 清理）；`data.agents[].external[]` 是 agent 自己读取的外部技能目录统计（方案 A 只检测展示） |
+| `bootstrap()` | — | `{ok, data: 看板快照, meta: 全部元数据}` | 启动首屏：先 `sync_tools_from_adapters` 首屏探测 agent，skills 表为空（全新库）时自动 `rescan` 登记中央仓库，再 `migrate_folders + seed_meta` 播种、`prune_meta` 清理；失败返回 `ok:false` → 前端启动错误页（绝不退回演示快照）。`data.agents[].external[]` 是 agent 自己读取的外部技能目录统计（方案 A 只检测展示） |
 | `save_meta(scope, key, payload)` | `scope`: `shared`/`unique`；`payload`: `{tool, display, note, cats}` | `{ok, row}` | 改名 / 备注 / 分类修改（即时调用，无去抖） |
 | `clear_meta(scope, key)` | 同上 | `{ok}` | 详情栏「还原」 |
 | `delete_skill(scope, key)` | `scope`: `shared`/`unique` | `{ok, data, meta, action}` | 详情栏「彻底删除 skill / 删除本地副本」；`shared` 删中央实体 + 所有链接，`unique` 只删该 agent 的副本 |
@@ -249,6 +250,7 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 
 | 现象 | 原因 | 处理 |
 |---|---|---|
+| 界面显示「后端启动失败」错误页（含错误详情与重试按钮） | 后端 `bootstrap()` 抛错：常见为 store 指向不存在的盘符 / 目录、adapters.json 损坏且工具表为空 | 看错误详情与 `kit\skillkit.log`；修好 `config.json` 的 `store` 或 `kit\adapters.json` 后点【重试】。这是明确失败，界面**不会**拿内置演示快照冒充真实数据 |
 | 界面显示「LOCAL」胶囊、编辑没写进数据库 | `bridge.js` 没等到 `window.pywebview` | 确认是用 `desktop.py` 打开（URL 必须带 `?desktop=1`）；`--debug` 看控制台错误 |
 | 窗口跑到屏幕外 / 右侧被切 | 进程未声明 DPI 感知，或尺寸没按工作区收口 | 确认 `desktop.py` 的 `_make_dpi_aware()`、`_centered_rect()`、`_nc_css()` 未被改动；建窗即居中，`on_start()` 只兜底最小化还原 |
 | 改了 `app.js` / `styles.css`，界面还是旧样子 | WebView2 缓存了 `file://` 资源 | 确认 `desktop.py` 的 `_asset_version()` 仍在 URL 上带 `&v=`，且 `index.html` 用版本号加载资源；必要时重启进程 |
@@ -262,3 +264,24 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 | 打开/重连 agent 时黑窗口连闪（关掉→重连最明显） | `make_junction()` 每次都用 `cmd /c mklink` 建链接；`pythonw` 无控制台，每个控制台子进程都会新分配一个黑窗口，49 个 skill 就是 49 次闪窗 | `_quiet_kwargs()` 已给子进程加 `CREATE_NO_WINDOW` + `SW_HIDE`；实测子进程 `GetConsoleWindow()` 由 `1051536` 变 `0`。另：`cmd` 输出是 ANSI，**不能**用 `text=True`（会 `UnicodeDecodeError`），统一走 `_decode()` |
 | 自检卡住 | 异常抛出后窗口未销毁 | `selftest()` 已用 `try/finally` 保证打印并 `destroy()` |
 | 关闭某个 agent 后（skillkit 显示「已关闭」、目录也空了），**新开会话仍能调用它的 skill** | 该 agent 还有第二条读取路径：Trae CN 除 `~/.trae-cn/skills` 外还读 `~/.agents/skills`（ClawHub / GitHub 安装的真身，见 `~/.agents/.skill-lock.json`）。本工具只管 `skills_dir`，删链接不影响那里 | 看智能体行是否标了「外部 N」、详情栏是否列出 `.agents/skills` 与「N 个内容一致」——有就是如实检测，不是开关失效。要真正失效可以在独有看板对那条 skill 点「卸载」（v0.2 起支持，`uninstall_unique` 永久删除该目录或只摘 foreign-link 链接；agent 更新时可能重新安装） |
+
+---
+
+## 10. 分发与安装（打包清单）
+
+把本目录 zip 发给别人 / 拷到别的机器时，按此清单打包。**store 默认跟随安装目录**：
+`config.json` 缺失时中央仓库解析为 `<安装目录>\store`（`kit\skillkit_base.py` 的
+`DEFAULT_STORE` 推导，不写死盘符）；想放到别处就带上自己的 `config.json`
+（`{"store": "<路径>"}`），它不入库、随安装分发。
+
+| 处理 | 内容 |
+|---|---|
+| 必含 | `kit\*.py`、`kit\adapters.json`、`kit\assets\`、`ui\`（index.html / app.js / bridge.js / data.js / styles.css）、`启动 skillkit.bat` |
+| 必排除 | `kit\config.json`、`kit\skillkit.db*`、`kit\skillkit.log*`、`kit\desktop_profile\`、`kit\ui-drag.log`、`kit\launch.log`、`store\`、`__pycache__\`（以上均已在 `.gitignore`） |
+| 环境要求 | Windows 10+；Python 3.12（`pythonw.exe` 可用）且已装 pywebview（`pip install pywebview`）+ Edge WebView2 Runtime |
+
+首次启动行为（干净机器：无 `skillkit.db`、无 `config.json`）：`bootstrap()` 自动探测
+本机已装 agent（状态「已关闭」，开关 off）并登记中央仓库 skill 列表；打开任一 agent
+开关即在其 skills 目录建指向 `<安装目录>\store\<skill>` 的 junction。失败路径都有明确
+出口：缺 pywebview → 系统弹窗 + 退出码 2；store 不可用 / adapters.json 损坏 → 界面
+启动错误页（错误详情 + 重试），不会拿演示数据冒充真实数据。
