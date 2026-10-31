@@ -882,7 +882,8 @@ def run(window):
     results = []
     errors_repr = ""
     try:
-        if not _wait_ready(window):
+        # 20s：首启 bootstrap 含全量哈希（~4s 级），默认 8s 在冷机/负载下会偶发超时
+        if not _wait_ready(window, timeout=20.0):
             raise RuntimeError("页面未就绪（__SK_READY 未置位）")
         time.sleep(0.5)
         _selftest_body(window, results)

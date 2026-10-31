@@ -48,8 +48,9 @@ with sync_playwright() as p:
     line = page.text_content(".boot-line").strip()
     check("就绪相位文案", ph == "就绪" and "51 个技能就绪" in line and "7 个 agent" in line,
           "%s | %s" % (ph, line))
-    # reveal：done + ready，随后 hidden；file:// 满速 → done 应在 ~4.94s 出现
-    page.wait_for_selector("#boot.done", timeout=8000)
+    # reveal：done + ready，随后 hidden；file:// 满速 → done 应在 ~4.94s 出现。
+    # state=attached：done 后 320ms overlay 即转 hidden，快机器上等 visible 会错过窗口
+    page.wait_for_selector("#boot.done", state="attached", timeout=8000)
     t_done = time.time() - t0
     ready_cls = page.evaluate("document.getElementById('app-window').classList.contains('ready')")
     check("reveal 级联 done+ready", ready_cls, "t=%.2fs" % t_done)
@@ -86,6 +87,38 @@ with sync_playwright() as p:
     check("noboot: 主界面行为不变", rows2 > 0 and rows2 == rows, "cards/rows=%d (normal page=%d)" % (rows2, rows))
     check("noboot: 0 条 JS 错误", not errors2, "; ".join(errors2[:3]))
     page2.close()
+
+    # ---------- 3) 桌面壳 bootstrap 失败 → 启动错误页（FIRST-RUN-FIX-PLAN FIX-04）----------
+    # file:// + ?desktop=1，注入假 pywebview api（bootstrap 永远 reject）：
+    # 必须渲染错误页，绝不退回内置演示快照
+    page3 = browser.new_page(viewport={"width": 1200, "height": 760})
+    errors3 = []
+    page3.on("pageerror", lambda e: errors3.append(str(e)))
+    page3.add_init_script("""
+      window.pywebview = { api: {
+        bootstrap: function () {
+          return Promise.reject(
+            new Error('RuntimeError: 中央仓库目录不存在：Q:/skillkit/store'));
+        }
+      } };
+    """)
+    page3.goto(URL + "?desktop=1")
+    page3.wait_for_selector("#boot-error", timeout=8000)
+    check("错误页出现", page3.is_visible("#boot-error"))
+    title = page3.text_content("#boot-error h1").strip()
+    detail = page3.text_content(".boot-error-detail").strip()
+    check("错误页标题与详情", title == "后端启动失败" and "中央仓库目录不存在" in detail,
+          "%s | %s" % (title, detail[:40]))
+    check("重试按钮存在", page3.is_visible("#boot-error-retry"))
+    hint = page3.text_content(".boot-error-hint")
+    check("日志提示行", "skillkit.log" in hint, hint.strip()[:50])
+    mode = page3.evaluate("window.__SK_MODE")
+    snap_rows = page3.eval_on_selector_all(".row, .file-card, .folder-card:not(.ghost)",
+                                           "els => els.length")
+    check("进入 error 模式且无演示数据", mode == "error" and snap_rows == 0,
+          "mode=%s rows=%d" % (mode, snap_rows))
+    check("错误页 0 条 JS 错误", not errors3, "; ".join(errors3[:3]))
+    page3.close()
     browser.close()
 
 fails = [r for r in results if not r[1]]
