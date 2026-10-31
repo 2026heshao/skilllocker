@@ -2172,3 +2172,100 @@ body.dark { color-scheme: dark; }
   from { transform: translateX(-70px); }
   to { transform: translateX(270px); }
 }
+
+/* ============================================================
+   启动错误页（v0.2.1 · 后端 bootstrap 失败）
+   桌面壳已连上但后端报错：全屏覆盖明确失败，绝不退回演示快照。
+   z-index 300 盖过 toasts(200) 与一切主界面层级；主题 token 自动跟随深色。
+   ============================================================ */
+#boot-error {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: var(--bg);
+  animation: fadeIn 180ms var(--ease) both;
+}
+
+.boot-error-card {
+  width: min(520px, 92vw);
+  padding: 30px 32px 26px;
+  border-radius: 16px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  text-align: center;
+}
+
+.boot-error-icon {
+  width: 46px;
+  height: 46px;
+  margin: 0 auto 14px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  font-size: 24px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--danger);
+  box-shadow: 0 10px 26px color-mix(in srgb, var(--danger) 32%, transparent);
+}
+
+.boot-error-card h1 {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.boot-error-sub {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
+.boot-error-detail {
+  margin: 16px 0 0;
+  padding: 12px 14px;
+  max-height: 132px;
+  overflow: auto;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--danger-soft);
+  font-family: var(--mono, ui-monospace, Consolas, monospace);
+  font-size: 11.5px;
+  line-height: 1.55;
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: color-mix(in srgb, var(--danger) 78%, var(--ink));
+}
+
+.boot-error-hint {
+  margin: 12px 0 0;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+.boot-error-hint b { color: var(--ink-2); font-weight: 600; }
+
+#boot-error-retry {
+  margin-top: 18px;
+  padding: 9px 34px;
+  border: 0;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  cursor: pointer;
+  transition: filter 120ms var(--ease), transform 120ms var(--ease);
+}
+
+#boot-error-retry:hover { filter: brightness(1.08); }
+#boot-error-retry:active { transform: translateY(1px); }

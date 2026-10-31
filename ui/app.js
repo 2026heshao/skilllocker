@@ -3342,6 +3342,7 @@
   }
 
   function applyBootstrap(res) {
+    if (MODE === 'error') return; // 启动错误页：任何刷新入口都不再往空界面上渲染
     hydrate(res.data);
     setMetaMap(res.meta);
     // 当前所在的文件夹若已被删除回根（共有=folder id，独有=agent key）；
@@ -3370,6 +3371,30 @@
     BootFX.ready(); // start() 返回即 R；file:// 原型由此放行 1× 满速时间轴
   }
 
+  /* 启动错误页（桌面壳已连上、后端 bootstrap 失败）：全屏覆盖，明确失败原因，
+     绝不退回内置演示快照冒充真实数据。重试 = 重跑 boot 链路。 */
+  function renderBootError(err) {
+    var detail = String(err && err.message || err || '未知错误');
+    document.documentElement.setAttribute('data-mode', 'error');
+    window.__SK_MODE = 'error';
+    var box = document.createElement('div');
+    box.id = 'boot-error';
+    box.innerHTML =
+      '<div class="boot-error-card">' +
+        '<div class="boot-error-icon">!</div>' +
+        '<h1>后端启动失败</h1>' +
+        '<p class="boot-error-sub">skillkit 后端在初始化时出错，界面无法连接真实数据库。</p>' +
+        '<pre class="boot-error-detail">' + esc(detail) + '</pre>' +
+        '<p class="boot-error-hint">详细原因见安装目录 <b>kit\\skillkit.log</b>；' +
+        '排除后点「重试」重新加载。</p>' +
+        '<button id="boot-error-retry" type="button">重试</button>' +
+      '</div>';
+    document.body.appendChild(box);
+    box.querySelector('#boot-error-retry').addEventListener('click', function () {
+      location.reload();
+    });
+  }
+
   function boot() {
     BootFX.begin(); // 编排时钟起点＝脚本执行（首帧前）；noboot / reduce-motion 在这里分叉
     if (!SKB) { bootLocal(window.SKILLKIT_DATA); return; }
@@ -3390,9 +3415,15 @@
         start();
         BootFX.ready(); // R = bootstrap 成功且 start() 首帧渲染完成
       }).catch(function (err) {
+        BootFX.fail();
+        if (SKB.isDesktop()) {  // 桌面壳已连上但后端报错：明确失败，绝不给演示数据
+          MODE = 'error';
+          renderBootError(err);
+          return;
+        }
+        // 非桌面原型（file:// 直开）：保留只读快照降级 + toast
         MODE = 'local';
         toast('bad', '后端连接失败', String(err && err.message || err) + '，已退回内置快照');
-        BootFX.fail();
         bootLocal(window.SKILLKIT_DATA);
       });
     });
