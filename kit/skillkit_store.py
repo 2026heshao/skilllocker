@@ -45,10 +45,13 @@ def sync_tools_from_adapters(con, cfg):
             con.execute("update tools set label=?, skills_dir=?, detect_dir=?, detected=? where key=?",
                         (label, sd, dd, detected, key))
         else:
-            # 首次入库：检测到的工具默认开启分发，没检测到的默认关
+            # 首次入库一律默认关闭分发（enabled=0）：探测到 ≠ 用户授权分发，
+            # 链接由用户打开开关时经 set_agent → do_sync 显式建立。
+            # 否则首屏全是「已连接」却 0 链接，且开关已 on 无法补链（no-op 死区）。
+            # 老机器升级不受影响：update 分支不碰 enabled。
             con.execute("insert into tools(key,label,skills_dir,detect_dir,detected,enabled,mode) "
                         "values(?,?,?,?,?,?, 'junction')",
-                        (key, label, sd, dd, detected, detected))
+                        (key, label, sd, dd, detected, 0))
     con.commit()
     return [r for r in rows if r[4]]
 
