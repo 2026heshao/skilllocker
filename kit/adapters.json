@@ -1,0 +1,349 @@
+[
+  {
+    "key": "cursor",
+    "enum": "Cursor",
+    "label": "Cursor",
+    "skills_dir": ".cursor/skills",
+    "detect_dir": ".cursor"
+  },
+  {
+    "key": "claude_code",
+    "enum": "ClaudeCode",
+    "label": "Claude Code",
+    "skills_dir": ".claude/skills",
+    "detect_dir": ".claude"
+  },
+  {
+    "key": "codex",
+    "enum": "Codex",
+    "label": "Codex",
+    "skills_dir": ".codex/skills",
+    "detect_dir": ".codex"
+  },
+  {
+    "key": "deepseek_harness",
+    "enum": "DeepSeekHarness",
+    "label": "DeepSeek Harness",
+    "skills_dir": ".dsh/skills",
+    "detect_dir": ".dsh",
+    "_extra_note": "DSH 的独立技能在两处：灵枢记忆插件包（@furongjun1999/dsh-memory）自带 7 个 lingshu-* 技能；应用安装目录 resources/runtime/office-skills 内置 7 个 office 文档技能。只检测展示，不删除。",
+    "extra_dirs": [".dsh/profiles/desktop/node_modules/@furongjun1999/dsh-memory/skills/skills",
+                   "D:/Deepseek Harness/resources/runtime/office-skills"]
+  },
+  {
+    "key": "zcode",
+    "enum": "ZCode",
+    "label": "ZCode",
+    "skills_dir": ".zcode/skills",
+    "detect_dir": ".zcode",
+    "_extra_note": "ZCode 的技能还来自：~/.agents/skills（npx skills add / ClawHub 真身）、官方插件缓存 ~/.zcode/cli/plugins/cache（<插件>/<版本>/skills/，只认最新装的）、安装目录 D:/Zcode/resources/glm/packages 的内置包源（缓存里没有的包从这里直接加载，如 dynamic-workflows）。只检测展示，不分发、不删除。",
+    "extra_dirs": [".agents/skills", ".zcode/cli/plugins/cache/**", "D:/Zcode/resources/glm/packages/**"]
+  },
+  {
+    "key": "opencode",
+    "enum": "OpenCode",
+    "label": "OpenCode",
+    "skills_dir": ".config/opencode/skills",
+    "detect_dir": ".config/opencode"
+  },
+  {
+    "key": "antigravity",
+    "enum": "Antigravity",
+    "label": "Antigravity",
+    "skills_dir": ".gemini/config/skills",
+    "detect_dir": ".gemini/config"
+  },
+  {
+    "key": "amp",
+    "enum": "Amp",
+    "label": "Amp",
+    "skills_dir": ".config/agents/skills",
+    "detect_dir": ".config/agents"
+  },
+  {
+    "key": "kimi_cli",
+    "enum": "KimiCli",
+    "label": "Kimi Code CLI",
+    "skills_dir": ".kimi-code/skills",
+    "detect_dir": ".kimi-code"
+  },
+  {
+    "key": "augment",
+    "enum": "Augment",
+    "label": "Augment",
+    "skills_dir": ".augment/skills",
+    "detect_dir": ".augment"
+  },
+  {
+    "key": "openclaw",
+    "enum": "OpenClaw",
+    "label": "OpenClaw",
+    "skills_dir": ".openclaw/skills",
+    "detect_dir": ".openclaw"
+  },
+  {
+    "key": "copaw",
+    "enum": "Copaw",
+    "label": "Copaw",
+    "skills_dir": ".copaw/skill_pool",
+    "detect_dir": ".copaw"
+  },
+  {
+    "key": "cline",
+    "enum": "Cline",
+    "label": "Cline",
+    "skills_dir": ".cline/skills",
+    "detect_dir": ".cline"
+  },
+  {
+    "key": "codebuddy",
+    "enum": "CodeBuddy",
+    "label": "CodeBuddy",
+    "skills_dir": ".codebuddy/skills",
+    "detect_dir": ".codebuddy"
+  },
+  {
+    "key": "codewhale",
+    "enum": "CodeWhale",
+    "label": "CodeWhale",
+    "skills_dir": ".codewhale/skills",
+    "detect_dir": ".codewhale"
+  },
+  {
+    "key": "workbuddy",
+    "enum": "WorkBuddy",
+    "label": "WorkBuddy",
+    "skills_dir": ".workbuddy/skills",
+    "detect_dir": ".workbuddy",
+    "_extra_note": "WorkBuddy 应用自带内置技能（安装目录 resources/plugins/workbuddy-builtin 下 skills/ 与 builtin-plugins/*/skills/，共 40+ 个 buddy-* / 内置插件技能）。只检测展示，不删除。应用商店（buddy-skill-store / connectors-marketplace，2300+ 条）是源池不由本工具展示。",
+    "extra_dirs": ["D:/workbuddy/resources/app.asar.unpacked/resources/plugins/workbuddy-builtin/**"]
+  },
+  {
+    "key": "command_code",
+    "enum": "CommandCode",
+    "label": "Command Code",
+    "skills_dir": ".commandcode/skills",
+    "detect_dir": ".commandcode"
+  },
+  {
+    "key": "continue",
+    "enum": "Continue",
+    "label": "Continue",
+    "skills_dir": ".continue/skills",
+    "detect_dir": ".continue"
+  },
+  {
+    "key": "crush",
+    "enum": "Crush",
+    "label": "Crush",
+    "skills_dir": ".config/crush/skills",
+    "detect_dir": ".config/crush"
+  },
+  {
+    "key": "junie",
+    "enum": "Junie",
+    "label": "Junie",
+    "skills_dir": ".junie/skills",
+    "detect_dir": ".junie"
+  },
+  {
+    "key": "iflow_cli",
+    "enum": "IflowCli",
+    "label": "iFlow CLI",
+    "skills_dir": ".iflow/skills",
+    "detect_dir": ".iflow"
+  },
+  {
+    "key": "kiro_cli",
+    "enum": "KiroCli",
+    "label": "Kiro CLI",
+    "skills_dir": ".kiro/skills",
+    "detect_dir": ".kiro"
+  },
+  {
+    "key": "kode",
+    "enum": "Kode",
+    "label": "Kode",
+    "skills_dir": ".kode/skills",
+    "detect_dir": ".kode"
+  },
+  {
+    "key": "mcpjam",
+    "enum": "McpJam",
+    "label": "MCPJam",
+    "skills_dir": ".mcpjam/skills",
+    "detect_dir": ".mcpjam"
+  },
+  {
+    "key": "mistral_vibe",
+    "enum": "MistralVibe",
+    "label": "Mistral Vibe",
+    "skills_dir": ".vibe/skills",
+    "detect_dir": ".vibe"
+  },
+  {
+    "key": "mux",
+    "enum": "Mux",
+    "label": "Mux",
+    "skills_dir": ".mux/skills",
+    "detect_dir": ".mux"
+  },
+  {
+    "key": "openclaude",
+    "enum": "OpenClaude",
+    "label": "OpenClaude IDE",
+    "skills_dir": ".openclaude/skills",
+    "detect_dir": ".openclaude"
+  },
+  {
+    "key": "openhands",
+    "enum": "OpenHands",
+    "label": "OpenHands",
+    "skills_dir": ".openhands/skills",
+    "detect_dir": ".openhands"
+  },
+  {
+    "key": "pi",
+    "enum": "Pi",
+    "label": "Pi",
+    "skills_dir": ".pi/agent/skills",
+    "detect_dir": ".pi"
+  },
+  {
+    "key": "qoder",
+    "enum": "Qoder",
+    "label": "Qoder",
+    "skills_dir": ".qoder/skills",
+    "detect_dir": ".qoder",
+    "_extra_note": "Qoder 的技能还来自：插件缓存 ~/.qoder/plugins/cache、tmp/kbstage/skills/_自定义（用户自建暂存）、安装目录 D:/Qoder/.qoder-versions（<版本>/resources 下的扩展技能 canvas/qmind/sites-* 等，新旧版本并存时只认最新的）。只检测展示，不删除。",
+    "extra_dirs": [".qoder/plugins/cache/**", ".qoder/tmp/kbstage/skills/_自定义", "D:/Qoder/.qoder-versions/**"]
+  },
+  {
+    "key": "qoderwork",
+    "enum": "QoderWork",
+    "label": "QoderWork",
+    "skills_dir": ".qoderwork/skills",
+    "detect_dir": ".qoderwork"
+  },
+  {
+    "key": "qwen_code",
+    "enum": "QwenCode",
+    "label": "Qwen Code",
+    "skills_dir": ".qwen/skills",
+    "detect_dir": ".qwen"
+  },
+  {
+    "key": "trae",
+    "enum": "Trae",
+    "label": "Trae",
+    "skills_dir": ".trae/skills",
+    "detect_dir": ".trae"
+  },
+  {
+    "key": "trae_cn",
+    "enum": "TraeCn",
+    "label": "Trae CN",
+    "skills_dir": ".trae-cn/skills",
+    "detect_dir": ".trae-cn",
+    "_extra_note": "Trae CN 还会读 ~/.agents/skills（ClawHub/GitHub 安装的真身），以及自己的内置技能：~/.trae-cn/builtin/baseline/global/skills（skill-config.json 的 builtinSkillStatus 在管这些技能的开关）和 ~/.trae-cn/builtin_skills（TRAE-code-review 等 4 个）。本工具只检测展示，不分发、不删除这里。",
+    "extra_dirs": [".agents/skills", ".trae-cn/builtin/baseline/global/skills", ".trae-cn/builtin_skills"]
+  },
+  {
+    "key": "zencoder",
+    "enum": "Zencoder",
+    "label": "Zencoder",
+    "skills_dir": ".zencoder/skills",
+    "detect_dir": ".zencoder"
+  },
+  {
+    "key": "neovate",
+    "enum": "Neovate",
+    "label": "Neovate",
+    "skills_dir": ".neovate/skills",
+    "detect_dir": ".neovate"
+  },
+  {
+    "key": "pochi",
+    "enum": "Pochi",
+    "label": "Pochi",
+    "skills_dir": ".pochi/skills",
+    "detect_dir": ".pochi"
+  },
+  {
+    "key": "adal",
+    "enum": "AdaL",
+    "label": "AdaL",
+    "skills_dir": ".adal/skills",
+    "detect_dir": ".adal"
+  },
+  {
+    "key": "kilo_code",
+    "enum": "KiloCode",
+    "label": "Kilo Code",
+    "skills_dir": ".kilocode/skills",
+    "detect_dir": ".kilocode"
+  },
+  {
+    "key": "roo_code",
+    "enum": "RooCode",
+    "label": "Roo Code",
+    "skills_dir": ".roo/skills",
+    "detect_dir": ".roo"
+  },
+  {
+    "key": "goose",
+    "enum": "Goose",
+    "label": "Goose",
+    "skills_dir": ".config/goose/skills",
+    "detect_dir": ".config/goose"
+  },
+  {
+    "key": "gemini_cli",
+    "enum": "GeminiCli",
+    "label": "Gemini CLI",
+    "skills_dir": ".gemini/skills",
+    "detect_dir": ".gemini"
+  },
+  {
+    "key": "github_copilot",
+    "enum": "GithubCopilot",
+    "label": "GitHub Copilot",
+    "skills_dir": ".copilot/skills",
+    "detect_dir": ".copilot"
+  },
+  {
+    "key": "clawdbot",
+    "enum": "Clawdbot",
+    "label": "Clawdbot",
+    "skills_dir": ".clawdbot/skills",
+    "detect_dir": ".clawdbot"
+  },
+  {
+    "key": "droid",
+    "enum": "Droid",
+    "label": "Droid",
+    "skills_dir": ".factory/skills",
+    "detect_dir": ".factory"
+  },
+  {
+    "key": "windsurf",
+    "enum": "Windsurf",
+    "label": "Windsurf",
+    "skills_dir": ".codeium/windsurf/skills",
+    "detect_dir": ".codeium/windsurf"
+  },
+  {
+    "key": "moltbot",
+    "enum": "Moltbot",
+    "label": "MoltBot",
+    "skills_dir": ".moltbot/skills",
+    "detect_dir": ".moltbot"
+  },
+  {
+    "key": "hermes_agent",
+    "enum": "HermesAgent",
+    "label": "Hermes Agent",
+    "skills_dir": ".hermes/skills",
+    "detect_dir": ".hermes"
+  }
+]

@@ -1,0 +1,261 @@
+# skillkit 桌面端 · 使用与实现说明
+
+> 版本 v0.1.0　最后更新：2026-10-31
+> 代码位置：`D:\skillkit\kit\desktop.py`（外壳） + `D:\skillkit\kit\skillkit.py`（数据层）
+> 界面位置：`D:\skillkit\ui\`（`index.html` / `styles.css` / `app.js` / `bridge.js` / `data.js`）
+
+---
+
+## 1. 它是什么 / 不是什么
+
+**是**：一个无边框的本地窗口（pywebview + Edge WebView2），直接把 `skillkit.db` 里的真实数据渲染成「共有 / 独有 / 智能体」三个看板；改名、备注、分类即时写进 SQLite。
+
+**不是**：不是一个独立发布的桌面应用——**没有**安装包、托盘、开机自启、单实例锁；**没有** HTTP/REST 服务；**没有**任何 mock 数据（界面上的每一行都来自扫描真实仓库与磁盘）。
+
+关掉窗口 = 结束进程。
+
+### 1.1 智能体看板（本版新增）
+
+左侧第三个看板列出本机已知 agent，状态全部由 `skillkit.list_boards()` 现算，不信任开关本身：
+
+| 状态 | 判定 | 界面 |
+|---|---|---|
+| 已连接(N) | `detected=1` 且 `enabled=1` | N = 磁盘上实际指向中央仓库的 junction/拷贝数；开关打开 |
+| 已关闭(0) | `detected=1` 但 `enabled=0` | 开关关闭，目录里没有本工具建立的链接 |
+| 未安装 | `detect_dir` 不存在 | 开关禁用，提示安装后「重新探测」 |
+
+开关语义：
+
+- **开**：`do_sync(only_tools=[key], apply_changes=True)`，按中央仓库补齐链接，不覆盖冲突目录。
+- **关**：二次确认后 `unlink_tool()` —— 只删除本工具建立的 junction、以及内容与中央一致的拷贝；**中央仓库的 skill 实体一个不动**。冲突副本会保留，并在 toast 里报告保留数量。
+- **事件入口只认 `change`**：开关的 `<input>` 是透明覆盖层（`position:absolute; inset:0; z-index:2`），点 `label` 或装饰 `i` 时 Chromium 还会把点击转发给 `input`，一次按下会派发 **两个 `click`**；且 `click` 冒到 `document` 时 `checked` **已经是翻转后的值**。因此 `click` 里读 `!box.checked` 再取反正好反了——点「开」着的开关反而又发一次 open（界面表现为「关不掉链接」）。现在 `click` 只负责拦下（不触发行选中），真正动作在 `document` 的 `change` 里按 `box.checked`（= 目标状态）走 `requestAgent(key, checked)`，一次按下只产生一个 change。
+- 取消/失败回滚：`requestAgent(key, on, onAbort)` 的 `onAbort` 会把开关恢复到数据模型的值（`confirmModal` 支持 `opts.onCancel`，取消、右上角关闭、点遮罩都会触发）。
+
+**外部来源（只检测、不分发）**：有些 agent 除 `skills_dir` 还会读自己的额外目录。典型是 Trae CN：`~/.trae-cn/skills` 之外还读 `~/.agents/skills`（ClawHub / GitHub 安装的**真身**，安装记录在 `~/.agents/.skill-lock.json`）。这类目录由 `adapters.json` 的 `extra_dirs` 声明（本机现在 Trae CN 和 ZCode 都声明了它——ZCode 会话同样从这个目录加载技能），`list_boards()` 只统计其中**与中央仓库同名**的实体，输出 `agents[].external[]`（`rel` / `path` / `count` / `same` / `diff` / `names`）：界面在行标题上标「外部 N」，详情栏列出来源目录并说明「本工具不分发、不删除这里，开关关闭后它们仍会被加载」。**不同名**的实体归独有看板，见 §1.2。
+
+> 实机例子：Trae CN 关闭后 `~/.trae-cn/skills` 为 0 项，但 `~/.agents/skills` 仍有 15 个与仓库同名的实体（15 个内容一致、0 个不同），所以**新开对话照样能调用**——这是如实展示，不是开关失效。本工具刻意不删这些实体（它们是 ClawHub 装的资产）。
+
+### 1.2 独有看板（检测口径，2026-10-31 修订）
+
+「独有」= **agent 能加载、但中央仓库没有（或同名但内容不同）的 skill**，由 `skillkit.unique_entries()` 现扫磁盘得出。修订单口径只扫「已启用 agent 的主 skills 目录」，现在覆盖四类来源，行的 `src` 字段标注：
+
+| src | 来源 | 例子 | 可删副本 |
+|---|---|---|---|
+| `main` | agent 主 skills 目录下的实体目录 | `~/.codex/skills/...` | 是 |
+| `extra` | `adapters.json` 的 `extra_dirs` 外部目录（支持 `~` 相对、HOME 相对与**盘符绝对路径**三种写法） | `~/.agents/skills` 里的 wbexpert / clawhub 系列；`~/.trae-cn` 的 12 个 Trae 内置技能；`~/.dsh/.../dsh-memory` 灵枢插件的 7 个 lingshu-*；`D:/Deepseek Harness/resources/runtime/office-skills` 的 7 个 office 文档技能 | 否（agent 自己管理） |
+| `extra`（`/**` 扫描） | `extra_dirs` 写 `根/**` 时递归扫插件缓存 / 应用内置目录树 | `~/.zcode/cli/plugins/cache/**`（23 个官方插件技能）+ `D:/Zcode/resources/glm/packages/**`（包源，缓存没有的如 dynamic-workflows 从这里出）；`~/.qoder/plugins/cache/**`、`~/.qoder/tmp/kbstage/skills/_自定义`（5 个自建）、`D:/Qoder/.qoder-versions/**`（扩展技能 canvas/qmind/sites-* 等）；`D:/workbuddy/.../workbuddy-builtin/**`（50 个内置与内置插件技能，含 workbuddy-docx 套件的 8 个子技能） | 否 |
+| `foreign-link`（`kind`） | 指向中央仓库**以外**的 junction | `~/.agents/skills/tabbit` → Tabbit 应用目录 | 否（真身在别处） |
+| 容器展开 | 顶层无 `SKILL.md` 但子目录是 skill 的容器，钻一层 | `~/.codex/skills/.system/` → 5 个 codex 系统 skill，名记 `.system/<子目录>` | 否 |
+
+`/**` 扫描的规则：只认「父目录叫 `skills` 且自己含 SKILL.md」的目录，技能名取 SKILL.md 的 `name` 字段（fallback 目录名）。同名条目两步去重：**先做版本折叠** —— 把路径里的版本号段（`0.2.2`、`0.5.1` 这类）去掉得到变体键，同键只留 mtime 最新的（缓存/版本目录里新旧并存而 agent 只加载最新装的）；**剩下的真变体都保留**，名字加「（首次分歧的路径段）」区分（Qoder 的 computer-use 有 Windows/macOS/Linux 三个 OS 变体，就出三行）。同一 agent 的多个来源再按 `extra_dirs` 声明顺序做同名去重（先声明的赢：zcode 的插件缓存赢过安装目录包源）。链接不跟进，防止 node_modules 式依赖链接把扫描带飞。
+
+**刻意不收的外部技能源**（避免看板被目录/暂存噪音淹没，需要时往对应 agent 的 `extra_dirs` 里加一条即可）：
+
+- `~/.claude/plugins/marketplaces/**`：只是插件市场目录的 git 克隆（本机没装任何 Claude 插件），不是可用技能。
+- `~/.workbuddy/buddy-skill-store`、`buddy-snapshots`、`connectors-marketplace`：WorkBuddy 应用商店的源与快照（2300+ 条），是否激活由 WorkBuddy 内部管理。**应用内置**的 50 个（`workbuddy-builtin`）已收。
+- `~/.codex/.tmp/**`：插件市场的临时解包目录。
+- `~/.trae-cn/builtin/baseline/code/<模型变体>/skills`：与已收录的 `global` 同一套内置技能按模型分 variant 重复存放。
+- `~/.trae-cn/design_libraries`：设计素材库（带 SKILL.md 但无证据表明被技能运行时加载）。
+
+规则：
+
+- **口径与中央仓库一致**：目录必须含 `SKILL.md` / `skill.md` 才算 skill；随机数据目录、断链、非 skill 容器不再误报（修订前 `codex/.system` 被当成 1 条独有，里面真正的 5 个 skill 反而看不见）。
+- **分发开关关闭的 agent 也扫**：开关只管本工具建立的链接，agent 自装的 skill 关了开关仍会被加载，不能从看板上消失。
+- **同名且内容与中央一致的实体一律不算独有**（无论来源）；同名不同内容记 `overridden`（同名覆盖，详情栏可看差异——`trae_cn/skill-creator` 就是这么来的：Trae 内置版与中央版同名不同内容）。
+- **共享目录去重归属**：多个 agent 声明同一个 `extra_dirs`（如 `~/.agents/skills`）时按路径去重，行归 `adapters.json` 里**先声明**它的 agent（固定归属，本机 = ZCode；不跟 `ordered_tools` 的 enabled 排序走，否则切换 agent 开关会让行键漂移、把行上已写的 meta 清掉），其余读取者放 `sharedWith`；行上带「外部」徽标，agent 徽标 hover 提示共读者，详情栏有「共读 agent」「来源目录」行。
+- **删除防线**：`deletable=false` 的行详情栏不渲染删除按钮；即便绕过 UI 直调 `delete_skill`，后端也按 `find_unique_row()` 现查行并拒绝（提示「外部来源，由 agent 自己管理」）；`open_dir` 同样走现查路径，不再假设主目录直拼。
+- `seed_meta()` 改为幂等补种：磁盘上新增的独有条目下次启动自动补预置分类，已有的 meta 不动。
+
+
+---
+
+## 2. 依赖与环境
+
+| 项 | 实际值 | 说明 |
+|---|---|---|
+| Python | `D:\develop\python\3.12\python.exe`（3.12.6） | 只用标准库 + `pywebview` |
+| pywebview | 6.2.1（`pip install pywebview`） | 唯一的第三方依赖，用来开窗口 |
+| WebView2 Runtime | 156.0.4314.50（已在本机） | 由 Edge 提供；缺失则需要装 Evergreen Runtime |
+| 屏幕 | 1920 × 1080，工作区 1920 × 1020，缩放 125%（120 DPI） | 影响窗口尺寸计算，见 §6 |
+| 数据库 | `kit\skillkit.db`（SQLite，WAL） | 与 CLI 共用同一个库 |
+
+---
+
+## 3. 启动方式
+
+**双击启动（推荐）**：`D:\skillkit\启动 skillkit.bat`
+
+- 用 `pythonw.exe` 启动，**没有控制台黑框**；窗口出现的第一帧就已经是 1200 × 760、位于工作区正中——不再先出现在别处再跳过去（建窗时即传入居中的 `x/y`，见 §6）。
+- 启动失败不会静默：错误写进 `kit\launch.log`，并弹出系统提示框。
+- 传参数：在命令行里跑 `"启动 skillkit.bat" --debug` 即可透传给 `desktop.py`。
+- **任务栏行为**：按钮图标取自 `kit\assets\skillkit.ico`（不是 Python 的图标）；窗口在前台时点一下 = 最小化，再点 = 恢复；窗口被别的窗口挡住时第一下是切到前台（Windows 习惯），第二下才最小化。实现见 §6 的「窗口图标 / 最小化位」。
+- **任务栏名称**：用 `D:\skillkit\skillkit.lnk`（或开始菜单里它的副本）启动时显示 `skillkit`（Windows 按快捷方式文件名生成 AppUserModelID）；直接双击 `启动 skillkit.bat` 或跑 `pythonw desktop.py` 时显示 `Python`（AUMID 就是 `pythonw.exe`，名称取自它自己的 FileDescription）。显式设 AUMID 反而会把快捷方式那条「skillkit」弄丢，所以**不要**加显式 AUMID。
+
+**命令行启动**：
+
+```powershell
+cd D:\skillkit\kit
+D:\develop\python\3.12\python.exe desktop.py            # 正常启动（带控制台，便于看日志）
+D:\develop\python\3.12\python.exe desktop.py --debug    # 打开 WebView2 调试面板
+D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完自动退出（见 §7）
+```
+
+也可以直接双击 `ui\index.html` 用浏览器打开——那是**原型模式**（`data.js` 快照 + localStorage），不碰数据库，适合只改样式时预览。
+
+两种模式靠 URL 上的 `?desktop=1` 区分（桌面壳会自动加上），前端据此决定数据来源。
+
+`启动 skillkit.bat` 里写死了解释器路径 `D:\develop\python\3.12\pythonw.exe`（不依赖 PATH）；换机器/换 Python 目录时改这一行即可。找不到解释器或缺少 `ui\index.html`、`kit\desktop.py` 时会直接弹框说明缺什么。
+
+---
+
+## 4. 文件分工
+
+| 文件 | 职责 | 关键点 |
+|---|---|---|
+| `kit\desktop.py` | 窗口外壳 + `js_api` | 只做「开窗（建窗即定位）/ 转发调用」，业务全在 `skillkit.py` |
+| `kit\skillkit.py` | 扫描、分发、元数据、看板快照 | 本版新增 `skill_meta` 表与 `list_boards / get_meta / set_meta / ...` |
+| `ui\bridge.js` | 前端唯一与 Python 通信的层 | `?desktop=1` 才等 `pywebviewready`，否则立即返回 `null` |
+| `ui\app.js` | 渲染与交互 | `MODE='db'` 时写库，`'local'` 时写 localStorage |
+| `ui\styles.css` | 样式 | `body.desktop` 下窗口铺满、去圆角与投影 |
+| `ui\data.js` | 原型快照 | 桌面模式不使用，但保留以便对比与回退 |
+
+---
+
+## 5. API 契约
+
+所有方法都返回 `{ok:true, ...}` 或 `{ok:false, error}`；前端 `bridge.js` 把 `ok:false` 统一转成 `Promise.reject`，由 `app.js` 弹 toast。
+
+| 方法 | 入参 | 返回 | 前端触发点 |
+|---|---|---|---|
+| `bootstrap()` | — | `{ok, data: 看板快照, meta: 全部元数据}` | 启动首屏（含 `seed_meta` 播种与 `prune_meta` 清理）；`data.agents[].external[]` 是 agent 自己读取的外部技能目录统计（方案 A 只检测展示） |
+| `save_meta(scope, key, payload)` | `scope`: `shared`/`unique`；`payload`: `{tool, display, note, cats}` | `{ok, row}` | 改名 / 备注 / 分类修改（即时调用，无去抖） |
+| `clear_meta(scope, key)` | 同上 | `{ok}` | 详情栏「还原」 |
+| `delete_skill(scope, key)` | `scope`: `shared`/`unique` | `{ok, data, meta, action}` | 详情栏「彻底删除 skill / 删除本地副本」；`shared` 删中央实体 + 所有链接，`unique` 只删该 agent 的副本 |
+| `reseed_meta()` | — | `{ok, data, meta}` | 设置 →「清空我的编辑」 |
+| `diff(scope, key)` | — | `{ok, conflict: {skill, central, local, diff}}` | 「查看文件差异」 |
+| `rescan()` | — | `{ok, data, meta, scanned}` | 设置 →「重新探测本机 agent」 |
+| `export_json(name, payload)` | 文件名 + 前端组装内容 | `{ok, path}`（取消则 `path=''`） | 设置 →「导出 JSON」 |
+| `copy_path(text)` | 文本（≤2000 字） | `{ok, text}` | 详情栏「复制路径」 |
+| `open_dir(scope, key)` | `scope`: `shared`/`unique`/`agent`，只接受 scope+key | `{ok, path}` | 详情栏「打开目录」（路径由后端现算，防任意路径） |
+| `set_agent(key, on)` | agent key + 开关目标值 | `{ok, data, meta, action}` | 智能体看板的开关；开=补链接，关=撤链接 |
+| `win_min / win_max / win_close` | — | `{ok}` | 标题栏三键 |
+| `win_bounds()` | — | `{ok, bounds:{x,y,w,h}, maximized}` | 标题栏拖动 / 四边四角 grip 按下时取基准外框（CSS 像素） |
+| `win_set_bounds(x, y, w, h)` | CSS 像素矩形 | `{ok, bounds}` | 标题栏拖动与 grip 拖动中按位移算出的目标矩形，后端 `SetWindowPos` 落窗 |
+| `win_restore()` | — | `{ok, bounds, maximized:false}` | 最大化态下开始拖标题栏：先还原，再按还原后的外框继续拖 |
+| `log_ui(kind, detail)` | 事件名 + JSON 字符串 | `{ok}` | 前端拖动诊断落盘 `kit/ui-drag.log`（加锁追加，超 48KB 只留最近 200 行） |
+
+`set_agent` 的 `action` 字段：开 → `{on:true, changed, conflicts, skipped}`；关 → `{on:false, removed, kept}`。`kept` 是撤链接后仍留在 agent 目录里的冲突副本，界面会如实提示。
+
+约束：`display_name ≤ 48`、`note ≤ 400`、`categories ≤ 12` 项，超长由 `set_meta` 截断。
+
+---
+
+## 6. 窗口与 DPI
+
+- 默认外框 **1200 × 760**（CSS 像素），最小 1180 × 720（`min_size` 同样以 CSS 像素传入）。
+- 建窗即定位：`build_window()` 先按工作区算居中左上角（`_centered_rect()`：`(work_w - w) / 2`、`(work_h - h) / 2`），把 `x/y` 直接传给 `create_window`，**首帧就在目标位置**，不再移动窗口。
+- 窗口图标 / 最小化位（`on_start()` 负责，见「启动时序」）：`on_start` 先 `window.events.shown.wait(10)` 等窗口真正出现，再轮询 `_hwnd_by_title(visible_only=False)` 拿句柄，然后 `_refresh_window_chrome()` 一次做两件事——按系统 DPI 从多尺寸 ico 里取 16/20/24… 中最合适的一帧 `WM_SETICON`（`ICON_SMALL` / `ICON_BIG`），以及补回 `WS_MINIMIZEBOX`。最后仍兜底 `pythonw` 的最小化态（`IsIconic` → `SW_RESTORE`）。
+- 启动时序（这是「图标不显示 / 点了不最小化」的老根因）：`webview.start(func)` **先起 func 线程、后执行 `guilib.create_window()`**，所以 `on_start` 里立刻查句柄只会拿到 `None`。必须等 `shown` 事件，否则图标与最小化位一次都不会生效。
+- 最小化位会被 WinForms 抹掉：`FormBorderStyle=None` 的窗口本身没有 `WS_MINIMIZEBOX`（任务栏按钮点了只会切前台），手工 `SetWindowLong(GWL_STYLE)` 补上后，WinForms 在最小化/最大化/还原时还会重算样式把这一位去掉。因此 `on_start` 往 `window.events.minimized / maximized / restored` 挂了 `_keep_window_chrome()`（分 0 / 0.15 / 0.5 秒重试三次），状态一变就补回。
+- `WM_SETICON` 的坑：**不要**给 `ICON_SMALL2`（slot 2）设小图。Win11 上实测这一发会把 `ICON_BIG` 一起改成那张小图（`WM_GETICON(1)` 回读到小图句柄），Alt-Tab 的大图标立刻变糊；而 slot 2 不设本来就会回退到 `ICON_SMALL`。现在只设 slot 0 / 1。
+- 本机实测（125%，为 DPI 感知进程）：窗口 `WM_GETICON` 三档分别是「20px 帧 / 40px 帧 / 同小图」；任务栏按钮图标与 `skillkit.ico` 的帧逐像素一致（截图核对过），窗口样式 `0x16030000` 含 `WS_MINIMIZEBOX`；点任务栏按钮两次 = 最小化 → 恢复，且 `WS_MINIMIZEBOX` 一直在。
+- 尺寸补偿：WinForms 会在 `FormBorderStyle=None` 时裁掉标题栏与边框，`create_window` 的宽高是「裁之前」的 Size。`_nc_css()` 用 `SM_CXSIZEFRAME / SM_CYCAPTION / SM_CXPADDEDBORDER` 算出差额（本机 125%：左右 18、上下 47 物理像素），向上取整后加回请求尺寸，首帧外框才正好等于目标值。
+- 本机实测：工作区 1920 × 1020（物理），缩放 1.25，外框 **1500 × 950 物理 = 1200 × 760 CSS**，左上角 (210, 35) 物理 = (168, 28) CSS，中心偏移 0 / 0；启动轨迹只有一条记录，没有二次跳位。
+- 拖动：**整条标题栏**可拖（`.brand`、标题栏空白都可），由前端 `pointerdown` 自己实现，不依赖 pywebview 的 `drag-region`；输入框、按钮、窗口三键、`LOCAL` 胶囊不参与拖动。双击标题栏空白 = 最大化 / 还原（Windows 习惯），双击这些交互控件不会触发。
+  > 窗口最上方约 5px（四角 13px）是缩放手柄（`g-n` 等），按在那里只会缩放不会移动；`beginResize()` 现在会写一条 `resize.down {edge, x, y}` 到 `kit/ui-drag.log`，避免这种「按在热区上」被误判成「事件没收到」。标题栏 `touch-action:none`，触控板按住时不会被当成滚动手势而 `pointercancel`。
+  > 拖动链路全程写 `kit/ui-drag.log`（`boot` / `move.down` / `move.begin` / `move.first` / `move.end` / `move.fail` / `move.skip` / `move.nobounds` / `move.restore` / `resize.down`），真实手拖出问题先看这个文件：没有 `boot` = 跑的还是旧进程/旧代码；有 `boot` 没有 `move.down` = 按下点没落到 `.titlebar`；`move.skip why=control` = 命中交互控件；`move.fail` = 后端拒绝，看错误文本。
+- 拖动的健壮性：`beginMove()` 先记下按下点，`pointermove` **始终**记录最新光标位置；基准外框（`win_bounds()` 是跨线程异步）即使晚于松手才回来，也会在回来时补发一次终值，不会丢掉整段位移。拖动中 `body.moving` 禁止选中文字。
+- 缩放：无边框窗口自己实现 8 个贴边手柄（`#app-window > .grips > [data-resize]`，仅 `body.desktop` 显示，5px 边 / 13px 角）。拖动逻辑在前端：`pointerdown` 调 `win_bounds()` 取基准矩形，`pointermove` 用 `screenX/screenY` 的**绝对位移**算目标矩形（`≥1180×720`），节流后调 `win_set_bounds()`，由后端 `SetWindowPos(SWP_NOZORDER|SWP_NOACTIVATE)` 落窗；`pointerup` 补发终值。
+  > 曾试过把按下事件交给系统原生缩放（`ReleaseCapture()` + `SendMessage(WM_NCLBUTTONDOWN, HT*)`），但 WebView2 持有鼠标捕获，`ReleaseCapture` 只对调用线程生效（pywebview 的 API 跑在别的线程），实测拖完外框 delta 恒为 0，故改为自算矩形。
+  > 另有一处坑：**不能**给全局 `ctypes.windll.user32.SetWindowPos` 设 `argtypes`——pywebview 的 `BrowserForm.move()` 会传 `None` 当宽高，全局声明会让它抛 `ArgumentError`，标题栏拖动直接失效。`desktop.py` 因此改用独立的 `ctypes.WinDLL("user32")` 实例 `_spos` 承载签名。
+- 缩放坐标系：前端 `screenX/innerWidth` 是 CSS 像素，后端 `GetWindowRect` 是物理像素，`window_bounds()` / `set_window_bounds()` 统一按系统缩放（1.25）折算，读写两侧才闭合。最大化态（`IsZoomed`）下：**拖标题栏会先 `win_restore()` 还原、再按还原后的外框继续拖**（Windows 习惯），`win_set_bounds()` 在最大化态直接返回 `False` 不落窗；grip 缩放遇到最大化则直接放弃（要先还原再改尺寸）。
+- 进程在建窗前声明 DPI 感知（`SetProcessDpiAwareness(1)`），否则 Windows 会把坐标再虚拟化一次，导致窗口跑到屏幕外。
+- 缓存：`desktop.py` 以 `ui` 五个资源文件的 mtime 合成 `?v=` 挂在 URL 上；`index.html` 再把同一个版本号带到 `styles.css` / `bridge.js` / `data.js` / `app.js`，避免 WebView2 继续使用旧的缓存脚本。
+
+
+---
+
+## 7. 自检与验收
+
+### 7.1 桌面端自检（`--selftest`，离屏窗口，当前 67 项）
+
+**期望值一律现算，不写死库内数据**：共有/独有行数、独有行键集合、序号范围、已编辑条数、已连接 agent 数、store 路径全部取自 `skillkit.list_boards()` / `get_meta()` / `load_config()`；分类数 = app.js 的 7 个内置分类 + 本机 prefs 里的自建分类（从 WebView2 的 localStorage 读）。库内增删 skill、冲突收口之后重跑自检仍然成立。
+
+覆盖：模式=db、0 条 JS 错误、共有行数与侧栏计数、独有行数 / 行键集合与后端一致（含 extra / 容器展开 / 外部链接来源，见 §1.2）、独有序号连续 1..N、已编辑条数与 meta 一致、分类数、已连接 agent 数、路径来自 `config.json`、选中 `pdf`、列表上方筛选行已移除、**序号列（首行=1、共有序号连续 1..N、第 10 行两位数仍 26×26 不溢出）**、详情栏删除按钮存在、**差异入口按冲突数据分支**（`boards.conflict` 来自独有板的同名覆盖行；共有板差异分支只在 `find_conflict_tool()` 现查到实体冲突时才测，否则核对「共有板无差异按钮」；独有板按 `scope=unique` 核对表头 `CONFLICT · tool / skill` 与弹窗出现——当前库覆盖 `trae_cn/skill-creator` 内置版与中央版同名不同内容的场景）、改名写库（**目标选一条当前没有人工改名/备注的共有 skill，结束后把该行元数据原样恢复，不再清 pdf 的 meta**）、已编辑计数 ±1、搜索（只校验「命中 pdf + 列表收窄」，不写死命中条数）与清筛选、非法删除被拒、从 UI 详情栏点击「彻底删除」并确认（临时 skill 的磁盘目录与列表行都消失、自动选中下一条）、设置弹窗文案、深色主题、智能体看板（10 行 / 侧栏 10 / tab 已连接数现算 / 4 个状态筛 / 每行开关 / 未安装开关禁用；没有未安装行时跳过「未安装调 API 被拒」）、**开关方向回归（点「开」着的开关必须先弹「关闭 … 分发？」确认框、一次点击只弹一个框、取消后开关回到开）**、**外部来源（agent 自己安装的目录如 `~/.agents/skills`：行标题出现「外部 N」标记且 N 与后端 `external[0].count` 一致、详情栏出现「外部来源」行；本机没有外部同名实体时整组跳过）**、**原生窗口（5 项：`WS_MINIMIZEBOX` 在、窗口小图标=ico 帧、窗口大图标=ico 帧、`ICON_SMALL2` 回退到小图标、最小化位被抹掉后能自动补回）**、8 个缩放手柄、窗口外框 API 可读（本机回读 1200 × 760 @ 168,28）、**标题栏拖动窗口（合成 pointerdown/move/up，外框应位移 dx=60,dy=40）**、**最大化态拖动先还原再位移**、启动尺寸 1180~1200 × 720~760、底部设置按钮与版本号完整可见、详情栏右边界 ≤ 窗口宽、1180 宽无横向溢出、外框写入 `1240×780` 回读一致、写入 `900×500` 被兜底成 `1180×720`。
+
+结果：**67/67 PASS，`ERRORS: []`**（本机当前库：49 共有 / 152 独有 / 7 已连接 / 无共有实体冲突；独有 152 覆盖 6 个 agent —— codex 5（`.system` 容器展开）+ DSH 14（灵枢插件 7 + 安装目录 office-skills 7）+ Qoder 31（插件缓存 + 自建 5 + 安装目录扩展技能，computer-use 三个 OS 变体并存）+ Trae CN 12（内置）+ WorkBuddy 50（应用内置，含 workbuddy-docx 套件的 8 个子技能）+ ZCode 40（`~/.agents/skills` 16 + 插件缓存 23 + 包源 dynamic-workflows）；`~/.agents/skills` 归属 ZCode、Trae CN 共读）。Claude Code / WorkBuddy 商店 / codex `.tmp` 等其余技能源见 §1.2 的「刻意不收」清单。原生窗口那 5 项同时也在一台真实可见窗口（快捷方式启动的实例）上单独核对过：`WM_GETICON` 三档 = 20px 帧 / 40px 帧 / 同小图，样式 `0x16030000`，点任务栏按钮 = 最小化 ↔ 恢复，`WS_MINIMIZEBOX` 全程未丢。
+
+> 旧版自检写死了 `独有 2 行`、`workbuddy/pdf` 的 19 行差异、`分类 7`、`agent 7`、`搜索 pdf 行数=1`，`workbuddy/pdf` 冲突收口成 junction 后这些项必 FAIL；现在已按上面的「现算」方式改写。
+
+删除能力另用**临时数据库 + 临时目录**做过一次性集成验证（脚本属临时探针，已随 `.scratch` 清理）：`remove_skill` 删中央实体 + 2 处 agent 链接 + `skill_meta` 行；`remove_unique` 只删 agent 副本、中央同名实体不动；`..` / `../store` / `a/b` 等非法名全部被拒。
+
+开关本身（建/删 junction）另用**临时数据库 + 临时目录**做了集成验证：开 → 中央仓库有多少个实体就补多少个 junction；关 → 全部撤掉、目录清空、中央实体一个未动；对未安装 agent 调 `set_agent` 返回 `ok:false`。
+
+### 7.2 原型模式回归（Playwright + 系统 Edge，`file://`，13 项）
+
+结果：**13/13 PASS**（模式=local、快照 51/2 行、编辑器写 localStorage、刷新保留、快照差异 19 行、清理后回到 0 条、0 条 JS 错误）。注意原型读的是 `ui\data.js` 冻结快照（51 + 2），桌面端读的是真实仓库（当前 49 + 2），两者行数不同属正常。
+
+字号调整后另做了一轮布局复查（同样 Playwright + 系统 Edge）：`body` 13px、标题栏 46、顶栏 66、状态栏 30、行 60、检查器名输入 14px / 40 高；1200 与 1180 宽均无横向溢出（`scrollWidth == innerWidth`），导航 / 看板 tab / agent chip 无纵向裁切，设置弹窗 560 宽，0 条 JS 错误。
+
+### 7.3 截图
+
+`D:\skillkit\.screenshots\desktop-shared.png`（共有看板）、`desktop-unique.png`（独有看板）、`desktop-agents.png`（智能体看板）、`desktop-diff.png`（差异弹窗）；同名 `-preview.png` 是 1200 宽缩略图。截图按物理像素 `GetWindowRect` + `ImageGrab` 抓取，与本机 1500 × 950 窗口一致。
+
+放回可重复执行的方式：`--selftest` 自带断言；截图脚本属一次性工具，已从 `kit` 目录移除，需要时可重写（要点：`SetProcessDPIAware` → 按物理像素 `GetWindowRect` → 抓屏）。
+
+### 7.4 启动脚本实测
+
+`启动 skillkit.bat` 双击等价流程实测：窗口**第一帧**即为 **1500 × 950 物理像素（1200 × 760 CSS）、(168, 28) CSS（物理 (210, 35)）、中心偏移 0 / 0**，启动期间外框轨迹只有一条记录（没有「先出现在别处再跳到中间」的闪烁），随后 30 秒逐秒轮询窗口始终存活、位置尺寸稳定；画面内容为真实数据库的共有看板（侧栏 49 / 2 / 7、详情栏完整、底部状态栏可见）。
+
+### 7.5 拖拽缩放手测（真实鼠标 + 合成指针事件）
+
+窗口 1200 × 760、左上 (168, 28) 起，外框读数（CSS 像素）：
+
+| 操作 | 结果 |
+|---|---|
+| 拖 `.brand` 中心 +80 / +50 | d=(80, 50)，尺寸保持 1200 × 760 |
+| 拖标题栏空白 +70 / +45 | d=(70, 45) |
+| 拖 `.local-pill` / 搜索框 | d=(0, 0)（交互控件不参与拖动） |
+| 双击标题栏空白 | `IsZoomed=True`，外框 1536 × 864（frameless 最大化覆盖整屏，属既有行为） |
+| 右边缘向右 120 | 1320 × 760，x 不变（合成事件与真实鼠标各测一次，均 `delta=(120,0)`） |
+| 左边缘向右 100 | x 168→268，宽 1320→1220 |
+| 右下角 +80 / +60 | 1300 × 820（真实鼠标 +90 / +70 → 1290 × 830） |
+| 右边缘向左 600（越界） | 夹到最小 **1180 × 820** |
+| 最大化后拖标题栏 | 先还原成 1200 × 760，再按还原后的外框继续位移（`win_restore()` → `moveFrom()`） |
+| 拖完松开 | `body.moving` / `body.resizing` 均已移除，选中行仍为 `pdf`，`__SK_ERRORS` 为空 |
+
+标题栏拖动是在「每 10ms 轮询外框」的压力下验证的：即使 `win_bounds()` 的基准矩形晚于鼠标松手才返回，补发终值的逻辑仍能让外框精确位移，不会出现「拖了但没动」。
+
+---
+
+## 8. 边界与已知问题
+
+1. **未做**：托盘、开机自启、单实例、安装包、自动更新；`--selftest` 会在隐藏窗口跑（Chromium 会节流 `setTimeout`，所以桌面端写库刻意不走去抖）。
+2. **独有看板的外部行只展示不管理**：`extra` / `foreign-link` / 容器展开来源的行一律 `deletable=false`——UI 不渲染删除按钮，直调 `delete_skill` 也被后端拒绝。这些真身由 agent（ClawHub / codex / Tabbit 等）自己装、自己升级，本工具删了会被装回来或直接弄坏 agent。要把某个外部 skill 收进中央仓库，用 CLI `import <目录>`。
+3. **`workbuddy/pdf` 冲突已收口成 junction**：`store\pdf` 现在是 WorkBuddy 1.0.1 的那份内容（含 `_skillhub_meta.json`），`C:\Users\LENOVO\.workbuddy\skills\pdf` 是指回中央的 junction，所以「独有」里不再有它。改动前的中央目录整份备份在 `D:\skillkit\.scratch\pdf-backup-20261030-222737\`（`central` / `local` 两份，尚未清理）。`suppressed` 表已空，`skillkit.py verify` 不应再报这条冲突。
+4. **设计稿 1440 × 900 只用于原型**：桌面窗口默认 1200 × 760，`≤1340` 断点会收起看板副标题与 tab 小字，列表与详情栏仍完整；最小 1180 × 720 已实测无横向溢出。
+5. **`zoomable=False`、`easy_drag=False`**：缩放内容与 pywebview 自带的拖动区都被刻意关掉。拖动改由前端实现——整条标题栏（含 `.brand`、空白处）`pointerdown` 记起点，`pointermove` 按 `screenX/screenY` 绝对位移调 `win_set_bounds`，`pointerup` 补发终值；搜索框 / 按钮 / LOCAL 胶囊 / 窗口三键不触发。双击标题栏空白切换最大化。改变窗口大小走 8 个 grip。
+6. **数据库是单文件**：界面开着时另跑 `skillkit.py scan/remove` 也能工作（WAL），但改完建议在界面里点「重新探测」刷新。
+7. **`pythonw` 下窗口可能以最小化状态出现**：Windows 建窗时给的是 (-32000, -32000)，`on_start()` 先补图标/最小化位，再兜底——检测 `IsIconic` 后 `ShowWindow(SW_RESTORE)`，位置与尺寸在建窗时已正确，不再二次摆位。若手改这段代码，注意别把还原步骤删掉，否则窗口会"看不见但其实在跑"。
+8. **同前缀的 WebView2 工具窗**：枚举窗口时会看到一个 `Chrome_WidgetWin_1`（标题带 `-联想浏览器`）。`_hwnd_by_title()` 只认 `WindowsForms10.*` 主窗口，改选择逻辑时别只看标题。
+9. **缩放是自算矩形，不是系统原生缩放**：8 个 grip 只在 `body.desktop` 下存在；拖动依赖 `setPointerCapture` 在窗口外继续收 `pointermove`，光标离开窗口太远或系统抢走捕获时会提前结束。最大化态（`IsZoomed`）下：grip 缩放直接放弃（需先还原）；标题栏拖动会先 `win_restore()` 还原再位移。坐标折算按**系统级 DPI**（`GetDpiForSystem`）写死，跨不同缩放比例的副屏拖动未验证。
+
+---
+
+## 9. 排障
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| 界面显示「LOCAL」胶囊、编辑没写进数据库 | `bridge.js` 没等到 `window.pywebview` | 确认是用 `desktop.py` 打开（URL 必须带 `?desktop=1`）；`--debug` 看控制台错误 |
+| 窗口跑到屏幕外 / 右侧被切 | 进程未声明 DPI 感知，或尺寸没按工作区收口 | 确认 `desktop.py` 的 `_make_dpi_aware()`、`_centered_rect()`、`_nc_css()` 未被改动；建窗即居中，`on_start()` 只兜底最小化还原 |
+| 改了 `app.js` / `styles.css`，界面还是旧样子 | WebView2 缓存了 `file://` 资源 | 确认 `desktop.py` 的 `_asset_version()` 仍在 URL 上带 `&v=`，且 `index.html` 用版本号加载资源；必要时重启进程 |
+| 白屏 | 找不到 `ui\index.html` | 启动时会校验并报「找不到界面文件」；确认 `ui` 与 `kit` 同级 |
+| 改名后「已编辑」不刷新 | 旧版本用了 300ms 去抖 | 本版已改为即时 `flushMeta()` + 同步 `renderChrome()` |
+| 点「开」着的分发开关，却提示「已连接 … 建立/刷新 0 处链接」（关不掉） | 旧实现用 `click` + `!box.checked`：`click` 冒到 `document` 时 `checked` 已翻转（一次按下还有两个 `click`，`label` 会把点击转发给 `input`） | 本版开关只认 `change`，按 `box.checked` 作为目标状态走 `requestAgent()`；`click` 只拦下、不动作。改回 `click` 前请先跑 `--selftest` 的「开关点开→先问关闭」三项 |
+| 标题栏拖不动 | 见 §6：按在顶部 5px 缩放热区（`resize.down` 日志）／界面跑的是旧进程（`ui-drag.log` 无 `boot`）／`SetWindowPos` 签名污染了全局 `windll` | 先看 `kit/ui-drag.log` 最后几行，再按对应分支处理 |
+| 任务栏图标还是 Python 图标 / Alt-Tab 图标糊 | ① `on_start()` 早于 `guilib.create_window()`，直接查句柄拿到 `None`，`_apply_window_icon()` 从未执行；② 给 `ICON_SMALL2` 设小图会把 `ICON_BIG` 一起改掉 | 确认 `on_start()` 里先 `window.events.shown.wait(10)` 再轮询句柄；`WM_GETICON(0/1)` 应分别是 20px 帧与 40px 帧（125% 缩放）。别把 `WM_SETICON(2, small)` 加回来（见 §6） |
+| 点任务栏按钮只切前台、不最小化 | 无边框 WinForms 窗口没有 `WS_MINIMIZEBOX` | 看 `GetWindowLong(GWL_STYLE)` 是否有 `0x00020000`；`_ensure_minimize_box()` 会补位，`minimized/maximized/restored` 事件上挂了 `_keep_window_chrome()` 兜底重补 |
+| 弹「启动失败：TypeError: create_window() got an unexpected keyword argument 'icon'」 | 旧版 `main()` 把 `icon=ICON` 传给 `webview.start()`，有的 pywebview 版本会把该参数透传给 `create_window()` | 本版已不再传 `icon`（Windows 图标由 `on_start()` → `_apply_window_icon()` 走 `WM_SETICON`）；不要把 `icon` 加回 `webview.start()` |
+| 打开/重连 agent 时黑窗口连闪（关掉→重连最明显） | `make_junction()` 每次都用 `cmd /c mklink` 建链接；`pythonw` 无控制台，每个控制台子进程都会新分配一个黑窗口，49 个 skill 就是 49 次闪窗 | `_quiet_kwargs()` 已给子进程加 `CREATE_NO_WINDOW` + `SW_HIDE`；实测子进程 `GetConsoleWindow()` 由 `1051536` 变 `0`。另：`cmd` 输出是 ANSI，**不能**用 `text=True`（会 `UnicodeDecodeError`），统一走 `_decode()` |
+| 自检卡住 | 异常抛出后窗口未销毁 | `selftest()` 已用 `try/finally` 保证打印并 `destroy()` |
+| 关闭某个 agent 后（skillkit 显示「已关闭」、目录也空了），**新开会话仍能调用它的 skill** | 该 agent 还有第二条读取路径：Trae CN 除 `~/.trae-cn/skills` 外还读 `~/.agents/skills`（ClawHub / GitHub 安装的真身，见 `~/.agents/.skill-lock.json`）。本工具只管 `skills_dir`，删链接不影响那里 | 看智能体行是否标了「外部 N」、详情栏是否列出 `.agents/skills` 与「N 个内容一致」——有就是如实检测，不是开关失效。要真正失效只能在该 agent 侧卸载（`clawhub` 移除/重装）；本工具刻意不删外部实体（那是第三方装的资产） |

@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>skillkit · Skill Library</title>
+<script>
+/* 桌面端 URL 会带 v=<资源 mtime>：样式和脚本都带上同一版本号，
+   否则 WebView2 会继续使用缓存里的旧 app.js / styles.css。file:// 原型没有 v，按原路径加载。 */
+(function () {
+  var m = /[?&]v=([^&?]+)/.exec(location.search);
+  var v = m ? '?v=' + m[1] : '';
+  document.write('<link rel="stylesheet" href="styles.css' + v + '">');
+})();
+</script>
+</head>
+<body data-view="shared">
+
+<div class="stage">
+  <div class="window" id="app-window">
+    <div class="grips" aria-hidden="true">
+      <span class="grip g-n" data-resize="n"></span>
+      <span class="grip g-s" data-resize="s"></span>
+      <span class="grip g-e" data-resize="e"></span>
+      <span class="grip g-w" data-resize="w"></span>
+      <span class="grip g-ne" data-resize="ne"></span>
+      <span class="grip g-nw" data-resize="nw"></span>
+      <span class="grip g-se" data-resize="se"></span>
+      <span class="grip g-sw" data-resize="sw"></span>
+    </div>
+
+    <!-- ==================================================== titlebar -->
+    <header class="titlebar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24">
+            <rect x="4" y="4" width="6.5" height="6.5" rx="2" fill="#fff" fill-opacity=".92"></rect>
+            <rect x="13.5" y="4" width="6.5" height="6.5" rx="2" fill="#fff" fill-opacity=".54"></rect>
+            <rect x="8.75" y="13.5" width="6.5" height="6.5" rx="2" fill="#fff" fill-opacity=".76"></rect>
+            <path d="M10.4 8.6 12 12.1" stroke="#fff" stroke-width="1.4" stroke-opacity=".8"></path>
+          </svg>
+        </div>
+        <span class="wordmark">skillkit</span>
+        <span class="brand-divider"></span>
+        <span class="brand-sub">SKILL LIBRARY</span>
+      </div>
+
+      <div class="gsearch">
+        <svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg>
+        <input id="gsearch" type="text" placeholder="搜索名称、备注、分类" autocomplete="off" spellcheck="false" aria-label="搜索 skill">
+        <span class="kbd">Ctrl K</span>
+      </div>
+
+      <div class="title-actions">
+        <span class="local-pill"><i></i>LOCAL</span>
+        <button class="icon-btn" id="theme-toggle" title="切换深色模式" aria-label="切换深色模式">
+          <svg class="icon" aria-hidden="true"><use href="#i-moon"></use></svg>
+        </button>
+        <div class="win-controls">
+          <button class="win-btn" id="win-min" title="最小化" aria-label="最小化">
+            <svg class="icon" aria-hidden="true"><use href="#i-minus"></use></svg>
+          </button>
+          <button class="win-btn" id="win-max" title="最大化" aria-label="最大化">
+            <svg class="icon" aria-hidden="true"><use href="#i-maximize"></use></svg>
+          </button>
+          <button class="win-btn close" id="win-close" title="关闭" aria-label="关闭">
+            <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <div class="progress" id="progress"><i></i></div>
+
+    <!-- ==================================================== body -->
+    <div class="app-body">
+
+      <!-- ------------------------------------------------ sidebar -->
+      <aside class="sidebar">
+        <div class="store-card">
+          <div class="store-top">
+            <span class="eyebrow">Central Store</span>
+            <span class="live"><i></i>LIVE</span>
+          </div>
+          <div class="store-path" id="store-path" title="D:\skillkit\store">D:\skillkit\store</div>
+          <div class="store-meta">
+            <span><b id="store-count">51</b> skills</span>
+            <span id="store-size">54.4 MB</span>
+          </div>
+          <div class="health-track"><span id="store-health"></span></div>
+        </div>
+
+        <div>
+          <div class="nav-label">看板</div>
+          <nav class="nav" aria-label="看板切换">
+            <button class="nav-item active" data-board="shared">
+              <svg class="icon" aria-hidden="true"><use href="#i-layers"></use></svg>
+              <span>共有技能</span>
+              <span class="nav-badge" id="nav-shared">51</span>
+            </button>
+            <button class="nav-item" data-board="unique">
+              <svg class="icon" aria-hidden="true"><use href="#i-sparkle"></use></svg>
+              <span>独有技能</span>
+              <span class="nav-badge" id="nav-unique">2</span>
+            </button>
+            <button class="nav-item" data-board="agents">
+              <svg class="icon" aria-hidden="true"><use href="#i-bot"></use></svg>
+              <span>智能体</span>
+              <span class="nav-badge" id="nav-agents">7</span>
+            </button>
+          </nav>
+        </div>
+
+        <div class="side-stat" aria-label="库概览">
+          <div><b id="stat-agents">7</b><span>agents</span></div>
+          <div><b id="stat-edited">0</b><span>已编辑</span></div>
+          <div><b id="stat-cats">7</b><span>分类</span></div>
+          <div><b id="stat-unique">2</b><span>独有</span></div>
+        </div>
+
+        <div class="nav-label" style="margin-top:2px" id="side-cat-label">分类</div>
+        <nav class="nav" id="side-cats" aria-label="分类筛选"></nav>
+
+        <div class="sidebar-foot">
+          <button class="settings-btn" id="open-settings">
+            <svg class="icon" aria-hidden="true"><use href="#i-settings"></use></svg>
+            <span>设置与数据</span>
+            <kbd>⌘,</kbd>
+          </button>
+          <div class="version">v0.1.0 · 快照 <span id="ver-scan">22:16</span></div>
+        </div>
+      </aside>
+
+      <!-- ------------------------------------------------ workspace -->
+      <main class="workspace">
+        <header class="topbar">
+          <div class="topbar-title">
+            <h1 id="page-title">共有技能</h1>
+            <p id="page-sub">51 个 skill 同时存在于 7 个 agent · 全部指向中央仓库</p>
+          </div>
+          <div class="topbar-actions">
+            <button class="icon-btn" id="refresh-btn" title="刷新：重新扫描中央仓库与 agent" aria-label="刷新数据">
+              <svg class="icon" aria-hidden="true"><use href="#i-refresh"></use></svg>
+            </button>
+            <button class="sort-btn" id="sort-btn" title="切换排序">
+              <svg class="icon" aria-hidden="true"><use href="#i-sort"></use></svg>
+              <span id="sort-label">名称 A→Z</span>
+            </button>
+            <button class="icon-btn" id="density-btn" title="切换信息密度" aria-label="切换信息密度">
+              <svg class="icon" aria-hidden="true"><use href="#i-rows"></use></svg>
+            </button>
+          </div>
+        </header>
+
+        <div class="content">
+
+          <div class="boards" role="tablist" aria-label="技能看板">
+            <button class="board-tab active" data-board="shared" role="tab" aria-selected="true">
+              <span class="tab-icon"><svg class="icon" aria-hidden="true"><use href="#i-layers"></use></svg></span>
+              <span class="tab-main">
+                <span class="tab-title"><b>共有技能</b><em id="tab-shared-em">7 / 7 agents</em></span>
+                <span class="tab-sub">所有本地 agent 都能用 · 由中央仓库统一分发</span>
+              </span>
+              <span class="tab-num" id="tab-shared-num">51</span>
+            </button>
+            <button class="board-tab" data-board="unique" role="tab" aria-selected="false">
+              <span class="tab-icon"><svg class="icon" aria-hidden="true"><use href="#i-sparkle"></use></svg></span>
+              <span class="tab-main">
+                <span class="tab-title"><b>独有技能</b><em id="tab-unique-em">1 + 1 同名覆盖</em></span>
+                <span class="tab-sub">只存在于某个 agent · 中央仓库没有或内容不同</span>
+              </span>
+              <span class="tab-num" id="tab-unique-num">2</span>
+            </button>
+            <button class="board-tab" data-board="agents" role="tab" aria-selected="false">
+              <span class="tab-icon"><svg class="icon" aria-hidden="true"><use href="#i-bot"></use></svg></span>
+              <span class="tab-main">
+                <span class="tab-title"><b>智能体</b><em id="tab-agents-em">7 已连接</em></span>
+                <span class="tab-sub">本机 agent 与 skills 目录的链接开关</span>
+              </span>
+              <span class="tab-num" id="tab-agents-num">7</span>
+            </button>
+          </div>
+
+          <div class="list-card">
+            <div class="list-head" id="list-head">
+              <span></span>
+              <span id="col-name">SKILL</span>
+              <span id="col-mid">分类</span>
+              <span id="col-right">备注</span>
+              <span id="col-cover">分发覆盖</span>
+              <span id="col-state"></span>
+            </div>
+            <div class="list-body" id="list-body"></div>
+            <div class="empty" id="list-empty" hidden>
+              <div class="empty-icon"><svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg></div>
+              <b id="empty-title">没有匹配的 skill</b>
+              <span id="empty-sub">换个关键词，或把筛选切回“全部”</span>
+              <button class="btn btn-sm" id="reset-filter-btn">清除筛选</button>
+            </div>
+            <div class="list-foot">
+              <span class="hint">
+                <svg class="icon" aria-hidden="true"><use href="#i-info"></use></svg>
+                <span id="list-foot-hint">点任意一行，在右侧改显示名、分类与备注</span>
+              </span>
+              <span id="list-foot-count">51 条</span>
+            </div>
+          </div>
+
+        </div>
+      </main>
+
+      <!-- ------------------------------------------------ inspector -->
+      <aside class="inspector" aria-label="Skill 编辑面板">
+        <div class="ins-head">
+          <div class="ins-head-main">
+            <span class="eyebrow">Skill Detail</span>
+            <h2 id="ins-raw-name">—</h2>
+          </div>
+          <span class="save-state" id="save-state" hidden>
+            <svg class="icon" aria-hidden="true"><use href="#i-check"></use></svg>
+            <span>已保存</span>
+          </span>
+        </div>
+        <div class="ins-body" id="ins-body"></div>
+      </aside>
+
+    </div>
+
+    <!-- ==================================================== statusbar -->
+    <footer class="statusbar">
+      <span class="status-health"><i></i><b id="sb-health">51 共有 · 2 独有</b></span>
+      <span class="status-sep"></span>
+      <span class="status-path" id="sb-path">D:\skillkit\store</span>
+      <span class="status-sep"></span>
+      <span>已编辑 <b id="sb-edited">0</b> 条</span>
+      <div class="status-right">
+        <span>SQLite <b>WAL</b></span>
+        <span class="status-sep"></span>
+        <span>扫描 <b id="sb-scan">22:16</b></span>
+        <span class="status-sep"></span>
+        <span>v0.1.0</span>
+      </div>
+    </footer>
+
+  </div>
+</div>
+
+<!-- ==================================================== modal / toast / tooltip -->
+<div id="modal-root"></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<div class="tooltip" id="tooltip" role="tooltip"></div>
+
+<!-- ==================================================== icon sprite -->
+<svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Z"></path><path d="m3 12 9 5 9-5M3 16.5l9 5 9-5"></path></symbol>
+  <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8Z"></path><path d="M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8Z"></path></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"></path></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"></path></symbol>
+  <symbol id="i-maximize" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1"></rect></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M19 14.5A7.5 7.5 0 0 1 9.5 5a7.5 7.5 0 1 0 9.5 9.5Z"></path></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"></path></symbol>
+  <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></symbol>
+  <symbol id="i-sort" viewBox="0 0 24 24"><path d="M7 4v16M4 17l3 3 3-3M14 4h6M14 10h5M14 16h3"></path></symbol>
+  <symbol id="i-rows" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="6" rx="2"></rect><rect x="4" y="14" width="16" height="6" rx="2"></rect></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14-4"></path><path d="M4 13a8 8 0 0 0 14 4"></path><path d="M4 4v4h4M20 20v-4h-4"></path></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M15.5 4.5 19.5 8.5 8 20H4v-4L15.5 4.5Z"></path></symbol>
+  <symbol id="i-tag" viewBox="0 0 24 24"><path d="M11 3H5a2 2 0 0 0-2 2v6l9 9 8-8-9-9Z"></path><circle cx="8" cy="8" r="1.3"></circle></symbol>
+  <symbol id="i-note" viewBox="0 0 24 24"><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"></path><path d="M14 3v6h6M9 13h6M9 17h4"></path></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"></path></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2.6 20h18.8L12 3Z"></path><path d="M12 8v5M12 16.5v.6"></path></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-8 8"></path><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"></path></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"></path><path d="M9 11v5M15 11v5"></path></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"></path><circle cx="9" cy="6" r="2"></circle><circle cx="15" cy="12" r="2"></circle><circle cx="8" cy="18" r="2"></circle></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v6M12 7v.5"></path></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></symbol>
+  <symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"></ellipse><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"></path><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"></path></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1 0l2-2a5 5 0 0 0-7.1-7.1L11 5"></path><path d="M14 11a5 5 0 0 0-7.1 0l-2 2a5 5 0 0 0 7.1 7.1L13 19"></path></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5"></path><path d="M4 21h16"></path></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 17V5M7 10l5-5 5 5"></path><path d="M4 21h16"></path></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.4 8 8 9 4.6-1 8-4 8-9V6Z"></path><path d="m9 12 2 2 4-4"></path></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"></rect><rect x="14" y="3" width="7" height="7" rx="2"></rect><rect x="3" y="14" width="7" height="7" rx="2"></rect><rect x="14" y="14" width="7" height="7" rx="2"></rect></symbol>
+  <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="11" rx="3"></rect><path d="M12 8V5M11 3.6h2M8 12v2M16 12v2M3.5 11.5v4M20.5 11.5v4"></path></symbol>
+</svg>
+
+<script>
+/* 与 head 中的样式版本号保持一致，避免 WebView2 复用缓存的旧脚本。 */
+(function () {
+  var m = /[?&]v=([^&?]+)/.exec(location.search);
+  var v = m ? '?v=' + m[1] : '';
+  ['bridge.js', 'data.js', 'app.js'].forEach(function (name) {
+    document.write('<script src="' + name + v + '"><\/script>');
+  });
+})();
+</script>
+</body>
+</html>
