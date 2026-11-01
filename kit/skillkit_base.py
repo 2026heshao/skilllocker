@@ -65,7 +65,12 @@ def load_config():
                 cfg.update(json.load(fh))
         except (OSError, ValueError) as exc:
             cfg["_load_error"] = "config.json 解析失败，已退回默认配置: %s" % exc
-    cfg["store"] = os.path.normpath(cfg["store"]).replace(os.sep, "/")
+    cfg["store"] = os.path.normpath(str(cfg.get("store") or "")).replace(os.sep, "/")
+    if cfg["store"] in ("", ".", ".."):
+        # 空串 / 相对根：normpath("") 得 "."，会把中央仓库指到 kit 目录本身，
+        # 下一轮 rescan 在 kit 下扫不到 SKILL.md 就清库 + 清 meta
+        cfg["_load_error"] = "config.json 的 store 为空或相对根，已退回默认仓库目录"
+        cfg["store"] = os.path.normpath(DEFAULT_STORE).replace(os.sep, "/")
     try:
         os.makedirs(cfg["store"], exist_ok=True)
     except OSError as exc:

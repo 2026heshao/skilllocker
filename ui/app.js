@@ -190,7 +190,10 @@
         toast('bad', '保存失败', String(err && err.message || err));
         return;
       }
-      // 失败的 key 留在 dirtyKeys，稍后随下一轮 flush 重试（成功后清除）
+      // 失败的 key 回写脏标记，稍后随下一轮 flush 重试（成功后清除）。
+      // 注意：flushMeta 发送前已 delete，这里不回写就永远等不到重试。
+      // 放弃重试的分支（上面）不回写 —— 已弹「保存失败」，别再无限留脏。
+      dirtyKeys[key] = 1;
       if (!metaRetryTimer) {
         metaRetryTimer = setTimeout(function () {
           metaRetryTimer = null;

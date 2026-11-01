@@ -205,7 +205,12 @@ def _scan_unique_root(t, root, src, deletable, shared_with, agent_enabled,
     - 根目录临时不可枚举时记入 errors 并跳过：调用方据此让 prune_meta
       跳过本轮，避免把「暂时看不见」当「已删除」清掉用户 meta。
     """
-    if not root or not os.path.isdir(root):
+    if not root:
+        return
+    if not os.path.isdir(root):
+        # 根整个看不见（可移动盘拔出 / 盘符暂缺 / 目录被临时移走）与「不可枚举」
+        # 同等对待：记进 errors 让 prune_meta 跳过本轮，别把看不见的行当已删除清 meta
+        errors.append("%s: 目录不存在（跳过本轮 meta 修剪）" % root)
         return
     try:
         names = sorted(os.listdir(root))

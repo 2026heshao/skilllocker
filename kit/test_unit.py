@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import skillkit  # noqa: E402
 import skillkit_base  # noqa: E402
+import skillkit_store  # noqa: E402
 
 CASES = []
 
@@ -232,6 +233,38 @@ def _():
             skillkit_base.DB_FILE = old
 
 
+@case("scan_unique: 根目录不存在也要记 scanDegraded（M3 残余）")
+def _():
+    with tempfile.TemporaryDirectory() as td:
+        con, old = _temp_db(td)
+        try:
+            store = os.path.join(td, "store")
+            agent = os.path.join(td, "agent", "skills")
+            os.makedirs(store)
+            os.makedirs(os.path.join(agent, "uniq1"))
+            write(os.path.join(agent, "uniq1", "SKILL.md"), "---\nname: uniq1\n---\n")
+            cfg = tmp_cfg(store)
+            insert_tool(con, "t1", agent)
+            skillkit.rescan(con, cfg)
+            con.execute("insert into skill_meta(scope,key) values('unique','t1/uniq1')")
+            con.commit()
+            trow = con.execute("select * from tools where key='t1'").fetchone()
+            # 可移动盘拔出 / 盘符暂缺：根整个看不见
+            gone = os.path.join(td, "drive_missing", "skills")
+            out, errors = [], []
+            skillkit_store._scan_unique_root(
+                trow, gone, "main", True, [], 1, {}, cfg, {}, {}, out, errors)
+            assert errors, "目录不存在必须记进 errors"
+            assert not out, "看不见的根不得产出独有行"
+            boards = {"meta": {"scanDegraded": errors}, "skills": [], "unique": []}
+            assert skillkit.prune_meta(con, boards) == 0, "降级轮绝不清 meta"
+            assert con.execute(
+                "select count(*) from skill_meta where key='t1/uniq1'").fetchone()[0] == 1
+        finally:
+            con.close()
+            skillkit_base.DB_FILE = old
+
+
 @case("set_meta / get_meta: 截断与回读")
 def _():
     with tempfile.TemporaryDirectory() as td:
@@ -353,6 +386,35 @@ def _():
             assert con.execute(
                 "select count(*) from skills where name='myskill'").fetchone()[0] == 1
             assert os.path.isfile(os.path.join(store, "myskill", "SKILL.md"))
+        finally:
+            con.close()
+            skillkit_base.DB_FILE = old
+
+
+@case("resolve_conflict: 非法名拒绝（M6），store 与本地目录原样")
+def _():
+    with tempfile.TemporaryDirectory() as td:
+        store = os.path.join(td, "store")
+        agent = os.path.join(td, "agent", "skills")
+        os.makedirs(os.path.join(store, "s1"))
+        write(os.path.join(store, "s1", "SKILL.md"), "central\n")
+        os.makedirs(os.path.join(agent, "s1"))
+        write(os.path.join(agent, "s1", "SKILL.md"), "local\n")
+        con, old = _temp_db(td)
+        try:
+            insert_tool(con, "t1", agent)
+            cfg = tmp_cfg(store)
+            for bad in ("..", "a/b", "../evil"):
+                for direction in ("central-to-local", "local-to-central"):
+                    try:
+                        skillkit.resolve_conflict(con, cfg, "t1", bad, direction)
+                        raise AssertionError("%r/%s 应被拒绝" % (bad, direction))
+                    except RuntimeError as exc:
+                        assert "非法 skill 名" in str(exc), exc
+            # 非法名在入口校验就被拦：两个目录都必须原样（name=".." 曾会
+            # delete_tree 到 skills_dir 的父目录 / store 根）
+            assert os.path.isfile(os.path.join(store, "s1", "SKILL.md"))
+            assert os.path.isfile(os.path.join(agent, "s1", "SKILL.md"))
         finally:
             con.close()
             skillkit_base.DB_FILE = old
@@ -548,6 +610,23 @@ def _():
             cfg = skillkit.load_config()
             assert cfg["store"] == skillkit.DEFAULT_STORE
             assert "config.json 解析失败" in cfg.get("_load_error", "")
+        finally:
+            skillkit_base.CONFIG_FILE = old_file
+
+
+@case("load_config: store 为空串/相对根退回默认仓库（L3）")
+def _():
+    old_file = skillkit_base.CONFIG_FILE
+    with tempfile.TemporaryDirectory() as td:
+        cfg_file = os.path.join(td, "config.json")
+        skillkit_base.CONFIG_FILE = cfg_file
+        try:
+            for bad in ('{"store": ""}', '{"store": "."}', '{"store": ".."}'):
+                write(cfg_file, bad)
+                cfg = skillkit.load_config()
+                assert cfg["store"] == os.path.normpath(
+                    skillkit.DEFAULT_STORE).replace(os.sep, "/"), cfg
+                assert "为空或相对根" in cfg.get("_load_error", ""), cfg
         finally:
             skillkit_base.CONFIG_FILE = old_file
 

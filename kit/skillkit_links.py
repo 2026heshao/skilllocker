@@ -302,6 +302,10 @@ def resolve_conflict(con, cfg, tool_key, name, direction):
     trow = con.execute("select * from tools where key=?", (tool_key,)).fetchone()
     if not trow:
         raise RuntimeError("未知工具: %s" % tool_key)
+    # 与 remove_unique / import_dir 同一标准：name 只能是 skills_dir / store 的
+    # 直属目录名。否则 name=".." 时 central-to-local 会 delete_tree 到父目录。
+    if not name or name in (".", "..") or os.path.basename(name) != name:
+        raise RuntimeError("非法 skill 名: %s（不能含路径分隔符）" % name)
     local = os.path.join(trow["skills_dir"], name)
     central = os.path.join(cfg["store"], name)
     if direction == "local-to-central":
