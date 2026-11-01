@@ -296,7 +296,7 @@ design|taste|stitch|minimalist|brutalist|brandkit|imagegen|image-to-code|redesig
 | 卡片 | 520 宽居中：红色 `!` 图标 → 标题「后端启动失败」→ 副标题 → `<pre>` 错误详情（`err.message`，可滚动，`danger-soft` 底）→ 提示行「详细原因见安装目录 kit\skillkit.log」→【重试】主色按钮 |
 | 重试 | `location.reload()` 重跑整条 boot 链路（后端恢复后自然成功） |
 | 数据 | **不调用 `hydrate`、不渲染任何演示快照数据**；`window.__SK_MODE = 'error'`、`data-mode=error`；`applyBootstrap()` 顶部守卫直接 return（刷新入口禁用） |
-| 降级边界 | 仅「桌面壳已连上但后端失败」走错误页；`file://` 原型与 pywebview 注入超时仍走只读快照 + toast（原有行为） |
+| 降级边界 | 「桌面壳已连上但后端失败」与「桌面壳内 pywebview 注入超时」都走错误页；仅 `file://` 原型保留只读快照 + toast（原有行为） |
 | 启动动画 | 进入错误页前先 `BootFX.fail()` 收尾编排时钟，overlay 不会卡在加载态 |
 
 ---

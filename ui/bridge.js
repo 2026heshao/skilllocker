@@ -15,10 +15,12 @@
   });
 
   var api = null;
+  // desktop=1 只说明「跑在桌面壳里」；壳里桥也可能接不上（注入超时），
+  // app.js 的 boot() 需要区分这两种失败，把它提到模块作用域并暴露
+  var desktopHint = /[?&]desktop=1/.test(location.search);
   var ready = new Promise(function (resolve) {
     // pywebview 在页面加载完成后才注入 window.pywebview，
     // 用 URL 上的 desktop=1 区分桌面壳与 file:// 原型，避免原型白等。
-    var desktopHint = /[?&]desktop=1/.test(location.search);
     var settled = false;
     var tick = null;
     function settle(a) {
@@ -41,7 +43,9 @@
     var tries = 0;
     tick = setInterval(function () {
       if (fromInjection()) return;
-      if (++tries > 15) settle(null);
+      // 与 6s 兜底对齐：轮询负责尽早命中（pywebviewready 事件兜不住时），
+      // 超时判定交给下面 6000ms 那一发，这里只管别比它早判死
+      if (++tries > 58) settle(null);
     }, 100);
     setTimeout(function () { if (!fromInjection()) settle(null); }, 6000);
   });
@@ -87,6 +91,7 @@
   window.SKILLKIT_BRIDGE = {
     ready: ready,
     isDesktop: function () { return !!api; },
+    isDesktopShell: function () { return desktopHint; },
     bootstrap: function () { return call('bootstrap'); },
     saveMeta: function (scope, key, fields) { return call('save_meta', scope, key, fields); },
     clearMeta: function (scope, key) { return call('clear_meta', scope, key); },

@@ -104,6 +104,8 @@ def list_boards(con, cfg):
             "uniqueCount": len(unique),
             # 非 None = 本轮有扫描根不可枚举（prune_meta 会跳过）；给排障留现场
             "scanDegraded": scan_errors or None,
+            # config.json 损坏退回默认配置的留痕：前端 toast 显性化，别静默换仓库
+            "loadError": cfg.get("_load_error") or None,
         },
         "skills": skill_out,
         "tools": out_tools,

@@ -15,14 +15,24 @@ set "LOG=%KIT%\skillkit.log"
 set "PYW=D:\develop\python\3.12\pythonw.exe"
 
 if exist "%PYW%" goto run
-rem 固定路径不存在（换了机器）：退回 PATH 里的 pythonw
-where pythonw.exe >nul 2>nul
-if not errorlevel 1 (
-  set "PYW=pythonw.exe"
-  goto run
+rem Pinned path missing (new machine): fall back to pythonw on PATH, but skip
+rem the WindowsApps store stub -- it is not a real Python: start() returns
+rem immediately, writes no log and shows no dialog.
+set "PYWC="
+for /f "usebackq delims=" %%i in (`where pythonw.exe 2^>nul`) do (
+  echo %%i | "%SystemRoot%\System32\find.exe" /i "WindowsApps" >nul
+  if errorlevel 1 if not defined PYWC set "PYWC=%%i"
 )
->>"%LOG%" echo [%DATE% %TIME%] Missing Python: %PYW% and no pythonw.exe in PATH
-powershell -NoProfile -WindowStyle Hidden -Command "Add-Type -AssemblyName PresentationFramework; [System.Windows.MessageBox]::Show('未找到 Python：D:\develop\python\3.12\pythonw.exe，且 PATH 里没有 pythonw.exe','skillkit')"
+if not defined PYWC goto nopython
+set "PYW=%PYWC%"
+rem Prove it actually runs (stub or broken install surfaces here, not later)
+"%PYW%" -VV >nul 2>nul
+if errorlevel 1 goto nopython
+goto run
+
+:nopython
+>>"%LOG%" echo [%DATE% %TIME%] Missing Python: %PYW% and no usable pythonw.exe in PATH
+powershell -NoProfile -WindowStyle Hidden -Command "Add-Type -AssemblyName PresentationFramework; [System.Windows.MessageBox]::Show('未找到可用的 Python：需要 D:\develop\python\3.12\pythonw.exe，或 PATH 里一个非 WindowsApps 的 pythonw.exe','skillkit')"
 exit /b 1
 
 :run

@@ -3389,6 +3389,9 @@
     if (MODE === 'error') return; // 启动错误页：任何刷新入口都不再往空界面上渲染
     hydrate(res.data);
     setMetaMap(res.meta);
+    // config.json 损坏退回默认配置：与 scanDegraded 同一套显性化口径，
+    // 别让用户在毫不知情下看着「另一个仓库」的数据
+    if (META.loadError) toast('warn', '配置未生效', META.loadError);
     // 当前所在的文件夹若已被删除回根（共有=folder id，独有=agent key）；
     // 选中行由 renderList 兜底回落
     if (state.folder && state.folder !== 'none') {
@@ -3444,11 +3447,16 @@
     if (!SKB) { bootLocal(window.SKILLKIT_DATA); return; }
     SKB.ready.then(function (api) {
       if (!api) {
-        // 桌面壳里 pywebview 注入超时：与 bootstrap 失败路径同一待遇，给降级
-        // 提示 —— 否则用户以为在操作真库，其实只是只读原型
         BootFX.fail();
+        if (SKB.isDesktopShell && SKB.isDesktopShell()) {
+          // 桌面壳里注入超时与 bootstrap 失败同等对待：错误页 + 重试（reload），
+          // 绝不退回演示快照 —— 那会让用户以为在改真库，实际只是内存里的假数据
+          MODE = 'error';
+          renderBootError(new Error("pywebview 注入超时：桌面壳已启动但桥未接上，"
+            + "通常是 WebView2 冷启动过慢，点「重试」重新加载"));
+          return;
+        }
         bootLocal(window.SKILLKIT_DATA);
-        toast('warn', '桌面端未连接', 'pywebview 注入超时，已进入只读原型模式');
         return;
       }
       MODE = 'db';

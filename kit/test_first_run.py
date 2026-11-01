@@ -166,6 +166,28 @@ def _():
             assert "中央仓库目录不存在" in res.get("error", ""), res
 
 
+@case("first_run: config store 空串退回默认仓库，留痕进 payload 与日志（M-4/L-3）")
+def _():
+    with tempfile.TemporaryDirectory() as td:
+        with sandbox(td, adapters=ADAPTERS, config={"store": ""}):
+            import desktop
+            records = []
+            h = logging.Handler()
+            h.emit = lambda r: records.append(r.getMessage())  # noqa: E731
+            lg = logging.getLogger("skillkit")
+            lg.addHandler(h)
+            try:
+                res = desktop.Api().bootstrap()
+            finally:
+                lg.removeHandler(h)
+            assert res.get("ok"), res
+            # store 已退回默认仓库：skill 照常登记，但留痕必须显性化
+            assert [s["name"] for s in res["data"]["skills"]] == ["demo-skill"]
+            load_error = res["data"]["meta"].get("loadError")
+            assert load_error and "为空或相对根" in load_error, load_error
+            assert any("为空或相对根" in m for m in records), records
+
+
 @case("first_run: 空工具表 + adapters.json 损坏 → 显式报错")
 def _():
     with tempfile.TemporaryDirectory() as td:

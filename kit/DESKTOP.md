@@ -250,8 +250,8 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 
 | 现象 | 原因 | 处理 |
 |---|---|---|
-| 界面显示「后端启动失败」错误页（含错误详情与重试按钮） | 后端 `bootstrap()` 抛错：常见为 store 指向不存在的盘符 / 目录、adapters.json 损坏且工具表为空 | 看错误详情与 `kit\skillkit.log`；修好 `config.json` 的 `store` 或 `kit\adapters.json` 后点【重试】。这是明确失败，界面**不会**拿内置演示快照冒充真实数据 |
-| 界面显示「LOCAL」胶囊、编辑没写进数据库 | `bridge.js` 没等到 `window.pywebview` | 确认是用 `desktop.py` 打开（URL 必须带 `?desktop=1`）；`--debug` 看控制台错误 |
+| 界面显示「后端启动失败」错误页（含错误详情与重试按钮） | 后端 `bootstrap()` 抛错：常见为 store 指向不存在的盘符 / 目录、adapters.json 损坏且工具表为空；或桌面壳内 pywebview 注入超时（WebView2 冷启动过慢，桥未接上） | 看错误详情与 `kit\skillkit.log`；修好 `config.json` 的 `store` 或 `kit\adapters.json` 后点【重试】。这是明确失败，界面**不会**拿内置演示快照冒充真实数据 |
+| 界面显示「LOCAL」胶囊、编辑没写进数据库（仅 `file://` 直开才会这样） | `bridge.js` 没等到 `window.pywebview`；桌面壳内注入超时已改为启动错误页，不再进只读原型 | 确认是用 `desktop.py` 打开（URL 必须带 `?desktop=1`）；`--debug` 看控制台错误 |
 | 窗口跑到屏幕外 / 右侧被切 | 进程未声明 DPI 感知，或尺寸没按工作区收口 | 确认 `desktop.py` 的 `_make_dpi_aware()`、`_centered_rect()`、`_nc_css()` 未被改动；建窗即居中，`on_start()` 只兜底最小化还原 |
 | 改了 `app.js` / `styles.css`，界面还是旧样子 | WebView2 缓存了 `file://` 资源 | 确认 `desktop.py` 的 `_asset_version()` 仍在 URL 上带 `&v=`，且 `index.html` 用版本号加载资源；必要时重启进程 |
 | 白屏 | 找不到 `ui\index.html` | 启动时会校验并报「找不到界面文件」；确认 `ui` 与 `kit` 同级 |

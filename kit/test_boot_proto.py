@@ -119,6 +119,34 @@ with sync_playwright() as p:
           "mode=%s rows=%d" % (mode, snap_rows))
     check("错误页 0 条 JS 错误", not errors3, "; ".join(errors3[:3]))
     page3.close()
+
+    # ---------- 4) 桌面壳内注入超时 → 启动错误页（评审 M-2 / M-1）----------
+    # file:// + ?desktop=1 但不注入 pywebview：桥 6s 判死（M-1 对齐后轮询不再
+    # 提前 1.6s 判死），boot() 必须走错误页，绝不退回内置演示快照
+    page4 = browser.new_page(viewport={"width": 1200, "height": 760})
+    errors4 = []
+    page4.on("pageerror", lambda e: errors4.append(str(e)))
+    page4.goto(URL + "?desktop=1")
+    t4 = time.time()
+    page4.wait_for_selector("#boot-error", timeout=12000)
+    t_err = time.time() - t4
+    check("注入超时走错误页", page4.is_visible("#boot-error"), "t=%.2fs" % t_err)
+    check("超时判定对齐 6s（M-1）", 5.0 <= t_err <= 9.0, "t=%.2fs" % t_err)
+    title4 = page4.text_content("#boot-error h1").strip()
+    detail4 = page4.text_content(".boot-error-detail").strip()
+    check("注入超时错误详情", title4 == "后端启动失败" and "注入超时" in detail4,
+          "%s | %s" % (title4, detail4[:40]))
+    check("重试按钮存在", page4.is_visible("#boot-error-retry"))
+    mode4 = page4.evaluate("window.__SK_MODE")
+    dm4 = page4.evaluate("document.documentElement.getAttribute('data-mode')")
+    snap4 = page4.eval_on_selector_all(".row, .file-card, .folder-card:not(.ghost)",
+                                       "els => els.length")
+    check("进入 error 模式且无演示数据", mode4 == "error" and dm4 == "error"
+          and snap4 == 0, "mode=%s data-mode=%s rows=%d" % (mode4, dm4, snap4))
+    page4.wait_for_selector("#boot", state="hidden", timeout=8000)
+    check("boot overlay 已收尾", page4.is_hidden("#boot"))
+    check("注入超时页 0 条 JS 错误", not errors4, "; ".join(errors4[:3]))
+    page4.close()
     browser.close()
 
 fails = [r for r in results if not r[1]]

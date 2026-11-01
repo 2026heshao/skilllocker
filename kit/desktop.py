@@ -510,6 +510,8 @@ class Api:
             cfg = skillkit.load_config()
             if cfg.get("_load_error"):
                 skillkit.log_event(con, "warn", cfg["_load_error"])
+                # events 表前端取不到（payload 恒 []），必须同时进 skillkit.log
+                _LOG.warning("config: %s", cfg["_load_error"])
                 con.commit()
             # 首屏探测：幂等、毫秒级（读 adapters.json + 每工具一次 isdir）。
             # 必须在 seed_meta 之前：seed 的独有播种依赖 tools 表
