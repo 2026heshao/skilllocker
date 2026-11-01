@@ -22,6 +22,7 @@ import logging
 import math
 import os
 import sys
+import threading
 import time
 from logging.handlers import RotatingFileHandler
 
@@ -327,6 +328,25 @@ def _ensure_minimize_box(hwnd):
         user32.SetWindowLongW(handle, -16, style | WS_MINIMIZEBOX)
         return bool(user32.GetWindowLongW(handle, -16) & WS_MINIMIZEBOX)
     except Exception:  # noqa: BLE001
+        return False
+
+
+def _dwm_transitions(hwnd, disable):
+    """临时关掉 DWM 的最小化 / 最大化 / 还原缩放动画（DWMWA_TRANSITIONS_FORCEDISABLED）。
+
+    WebView2 在系统缩放动画期间内容不跟帧：最大化窗口还原时先播一段缩放动画，
+    网页布局却要等落定才重排，肉眼看就是「闪动 + 震荡」。程序化切换窗口态时
+    把动画关掉、落定后再打开，窗口瞬移到目标尺寸，一帧到位。失败静默放过
+    （dwmapi 缺席只影响动画，不影响功能）。
+    """
+    if sys.platform != "win32" or not hwnd:
+        return False
+    try:
+        val = ctypes.c_int(1 if disable else 0)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            ctypes.wintypes.HWND(hwnd), 3, ctypes.byref(val), ctypes.sizeof(val))
+        return True
+    except Exception:  # noqa: BLE001 - 动画开关失败不拖累窗口操作
         return False
 
 
@@ -803,13 +823,25 @@ class Api:
         # 缓存 _maxed 已经不准，按缓存走会出现按钮「失灵」一次
         hwnd = _hwnd_by_title(visible_only=False)
         zoomed = bool(hwnd and ctypes.windll.user32.IsZoomed(ctypes.wintypes.HWND(hwnd)))
-        if zoomed:
+        if hwnd:
+            _dwm_transitions(hwnd, True)  # 缩放动画期间 WebView2 内容不跟帧，瞬移代替
+            # pywebview 的 maximize/restore 带 @_shown_call：从未 Shown 的窗口
+            # （--selftest 的隐藏窗）调用是静默 no-op，自检里最大化永远不生效。
+            # 直接走 ShowWindow，隐藏 / 可见窗口一视同仁。
+            ctypes.windll.user32.ShowWindow(
+                ctypes.wintypes.HWND(hwnd), 9 if zoomed else 3)  # SW_RESTORE / SW_MAXIMIZE
+            _LOG.info("winmax pre-zoomed=%s post-zoomed=%s", zoomed,
+                      bool(ctypes.windll.user32.IsZoomed(ctypes.wintypes.HWND(hwnd))))
+        elif zoomed:
             self._window.restore()
         else:
             self._window.maximize()
         self._maxed = not zoomed
-        time.sleep(0.2)
+        time.sleep(0.2)  # 等 WinForms 把 Location/Size 落定，再把动画开关还回去
+        if hwnd:
+            _dwm_transitions(hwnd, False)
         _refresh_window_chrome()
+        threading.Thread(target=_keep_window_chrome, daemon=True).start()
         return {"ok": True, "maximized": self._maxed}
 
     @_guard
@@ -837,16 +869,32 @@ class Api:
 
     @_guard
     def win_restore(self):
-        """最大化窗口开始拖动时先还原，再按还原后的外框继续拖（Windows 习惯）。"""
+        """最大化窗口拖动越过阈值后先还原，再按还原后的外框继续拖（Windows 习惯）。
+
+        前端只在真实拖动（位移 > 6px）时才调到这里；单击标题栏不还原，
+        缩小交给双击（win_max 切换）。
+        """
         if not self._window:
             raise RuntimeError("窗口未就绪")
         hwnd = _hwnd_by_title(visible_only=False)
         zoomed = bool(hwnd and ctypes.windll.user32.IsZoomed(ctypes.wintypes.HWND(hwnd)))
         if self._maxed or zoomed:
-            self._window.restore()
+            if hwnd:
+                _dwm_transitions(hwnd, True)  # 缩放动画期间 WebView2 内容不跟帧，瞬移代替
+                # 同 win_max：不走 @_shown_call 的 pywebview restore，隐藏窗也能真还原
+                ctypes.windll.user32.ShowWindow(
+                    ctypes.wintypes.HWND(hwnd), 9)  # SW_RESTORE
+            else:
+                self._window.restore()
             self._maxed = False
             time.sleep(0.2)  # 等 WinForms 把 Location/Size 落定，再读基准矩形
+            if hwnd:
+                _dwm_transitions(hwnd, False)
+            _LOG.info("winrestore pre-zoomed=%s post-zoomed=%s",
+                      zoomed, bool(ctypes.windll.user32.IsZoomed(
+                          ctypes.wintypes.HWND(hwnd))))
             _refresh_window_chrome()
+            threading.Thread(target=_keep_window_chrome, daemon=True).start()
         bounds = window_bounds()
         if not bounds:
             raise RuntimeError("窗口未就绪")

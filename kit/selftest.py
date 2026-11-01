@@ -747,38 +747,6 @@ def _selftest_body(window, results):
         % (b0.get("x", 0), b0.get("y", 0), b0.get("w", WIN_W), b0.get("h", WIN_H)))
     _await_js(window, "__SK_B5")
 
-    # 最大化态拖标题栏：应先还原再继续位移，不能静默放弃（老实现直接 endMove）
-    window.evaluate_js(
-        "window.__SK_MX=null;window.pywebview.api.win_max()"
-        ".then(function(r){window.__SK_MX=r})")
-    _await_js(window, "__SK_MX")
-    time.sleep(0.5)
-    window.evaluate_js(
-        "var bar=document.querySelector('.titlebar');"
-        "bar.dispatchEvent(new PointerEvent('pointerdown',{pointerId:92,button:0,bubbles:true,"
-        "screenX:500,screenY:300,clientX:200,clientY:20}))")
-    time.sleep(0.6)
-    window.evaluate_js(
-        "document.dispatchEvent(new PointerEvent('pointermove',{pointerId:92,bubbles:true,"
-        "screenX:530,screenY:320}))")
-    time.sleep(0.6)
-    window.evaluate_js(
-        "document.dispatchEvent(new PointerEvent('pointerup',{pointerId:92,bubbles:true,"
-        "screenX:530,screenY:320}))")
-    time.sleep(0.6)
-    window.evaluate_js(
-        "window.__SK_B6=null;window.pywebview.api.win_bounds()"
-        ".then(function(r){window.__SK_B6=r})")
-    b6 = _await_js(window, "__SK_B6") or {}
-    nb6 = b6.get("bounds") or {}
-    restored_ok = b6.get("ok") is True and b6.get("maximized") is False \
-        and abs(nb6.get("w", 0) - b0.get("w", WIN_W)) <= 40 \
-        and abs(nb6.get("x", 0) - (b0.get("x", 0) + 30)) <= 40
-    results.append(("最大化拖动先还原再位移", restored_ok,
-                    "from=(%s,%s,%s) to=(%s,%s,%s)" % (b0.get("x"), b0.get("y"), b0.get("w"),
-                                                       nb6.get("x"), nb6.get("y"), nb6.get("w")))
-                    )
-
     if ag_missing:
         key_js = json.dumps(ag_missing[0])
         window.evaluate_js(
@@ -844,6 +812,85 @@ def _selftest_body(window, results):
     ok3 = (raw3 or {}).get("ok") is True and abs(rect3.get("w", 0) - MIN_W) <= 3 \
         and abs(rect3.get("h", 0) - MIN_H) <= 3
     results.append(("外框最小尺寸兜底 1180x720", ok3, json.dumps(raw3, ensure_ascii=False)))
+
+    # —— 窗口态测试（真实最大化 / 还原）必须放在最后：隐藏窗口的 WebView2 布局
+    #    在真实最大化过一次后会卡在最大化尺寸（OS 外框已还原、innerWidth 仍 1536，
+    #    也不再跟随后续 resize），上面的 innerWidth / 布局断言不能被它污染；
+    #    末轮 boot 会重载页面，拿回干净布局。
+
+    # 最大化态拖标题栏：位移越过阈值（>6px）才还原跟随，不能静默放弃（老实现直接 endMove）
+    window.evaluate_js(
+        "window.__SK_B9=null;window.pywebview.api.win_set_bounds(%s,%s,%s,%s)"
+        ".then(function(r){window.__SK_B9=r})"
+        % (b0.get("x", 0), b0.get("y", 0), b0.get("w", WIN_W), b0.get("h", WIN_H)))
+    _await_js(window, "__SK_B9")
+    time.sleep(0.3)
+    window.evaluate_js(
+        "window.__SK_MX=null;window.pywebview.api.win_max()"
+        ".then(function(r){window.__SK_MX=r})")
+    _await_js(window, "__SK_MX")
+    time.sleep(0.5)
+    window.evaluate_js(
+        "var bar=document.querySelector('.titlebar');"
+        "bar.dispatchEvent(new PointerEvent('pointerdown',{pointerId:92,button:0,bubbles:true,"
+        "screenX:500,screenY:300,clientX:200,clientY:20}))")
+    time.sleep(0.6)
+    window.evaluate_js(
+        "document.dispatchEvent(new PointerEvent('pointermove',{pointerId:92,bubbles:true,"
+        "screenX:530,screenY:320}))")
+    time.sleep(0.6)
+    window.evaluate_js(
+        "document.dispatchEvent(new PointerEvent('pointerup',{pointerId:92,bubbles:true,"
+        "screenX:530,screenY:320}))")
+    time.sleep(0.6)
+    window.evaluate_js(
+        "window.__SK_B6=null;window.pywebview.api.win_bounds()"
+        ".then(function(r){window.__SK_B6=r})")
+    b6 = _await_js(window, "__SK_B6") or {}
+    nb6 = b6.get("bounds") or {}
+    restored_ok = b6.get("ok") is True and b6.get("maximized") is False \
+        and abs(nb6.get("w", 0) - b0.get("w", WIN_W)) <= 40 \
+        and abs(nb6.get("x", 0) - (b0.get("x", 0) + 30)) <= 40
+    results.append(("最大化拖动先还原再位移", restored_ok,
+                    "from=(%s,%s,%s) to=(%s,%s,%s)" % (b0.get("x"), b0.get("y"), b0.get("w"),
+                                                       nb6.get("x"), nb6.get("y"), nb6.get("w")))
+                    )
+
+    # 最大化态单击标题栏：不得还原（老实现基准矩形一回来就 restore，单击也缩窗闪屏）。
+    # 缩小只认双击（win_max 切换）与越过阈值的真实拖动；松手位置带 1px 抖动也不算拖。
+    window.evaluate_js(
+        "window.__SK_MX2=null;window.pywebview.api.win_max()"
+        ".then(function(r){window.__SK_MX2=r})")
+    _await_js(window, "__SK_MX2")
+    time.sleep(0.5)
+    window.evaluate_js(
+        "var bar=document.querySelector('.titlebar');"
+        "bar.dispatchEvent(new PointerEvent('pointerdown',{pointerId:93,button:0,bubbles:true,"
+        "screenX:500,screenY:300,clientX:200,clientY:20}))")
+    time.sleep(0.5)
+    window.evaluate_js(
+        "document.dispatchEvent(new PointerEvent('pointerup',{pointerId:93,bubbles:true,"
+        "screenX:501,screenY:301}))")
+    time.sleep(0.5)
+    window.evaluate_js(
+        "window.__SK_B7=null;window.pywebview.api.win_bounds()"
+        ".then(function(r){window.__SK_B7=r})")
+    b7 = _await_js(window, "__SK_B7") or {}
+    click_ok = b7.get("ok") is True and b7.get("maximized") is True
+    results.append(("最大化单击不还原", click_ok,
+                    "maximized=%s w=%s" % (b7.get("maximized"),
+                                           (b7.get("bounds") or {}).get("w"))))
+    # 复位：还原回基准外框，末轮 boot 重载后的断言在正常窗口态下进行
+    window.evaluate_js(
+        "window.__SK_MX3=null;window.pywebview.api.win_max()"
+        ".then(function(r){window.__SK_MX3=r})")
+    _await_js(window, "__SK_MX3")
+    window.evaluate_js(
+        "window.__SK_B8=null;window.pywebview.api.win_set_bounds(%s,%s,%s,%s)"
+        ".then(function(r){window.__SK_B8=r})"
+        % (b0.get("x", 0), b0.get("y", 0), b0.get("w", WIN_W), b0.get("h", WIN_H)))
+    _await_js(window, "__SK_B8")
+    time.sleep(0.3)
 
 
 def _selftest_boot(window, results):

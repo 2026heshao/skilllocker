@@ -143,7 +143,7 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 | `win_min / win_max / win_close` | — | `{ok}` | 标题栏三键 |
 | `win_bounds()` | — | `{ok, bounds:{x,y,w,h}, maximized}` | 标题栏拖动 / 四边四角 grip 按下时取基准外框（CSS 像素） |
 | `win_set_bounds(x, y, w, h)` | CSS 像素矩形 | `{ok, bounds}` | 标题栏拖动与 grip 拖动中按位移算出的目标矩形，后端 `SetWindowPos` 落窗 |
-| `win_restore()` | — | `{ok, bounds, maximized:false}` | 最大化态下开始拖标题栏：先还原，再按还原后的外框继续拖 |
+| `win_restore()` | — | `{ok, bounds, maximized:false}` | 最大化态拖标题栏越过阈值（>6px）后调用：先还原，再按还原后的外框继续拖；单击标题栏不还原（缩小只认双击与真实拖动） |
 | `log_ui(kind, detail)` | 事件名 + JSON 字符串 | `{ok}` | 前端拖动诊断落盘 `kit/ui-drag.log`（加锁追加，超 48KB 只留最近 200 行） |
 
 `set_agent` 的 `action` 字段：开 → `{on:true, changed, conflicts, skipped}`；关 → `{on:false, removed, kept}`。`kept` 是撤链接后仍留在 agent 目录里的冲突副本，界面会如实提示。
@@ -170,7 +170,7 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 - 缩放：无边框窗口自己实现 8 个贴边手柄（`#app-window > .grips > [data-resize]`，仅 `body.desktop` 显示，5px 边 / 13px 角）。拖动逻辑在前端：`pointerdown` 调 `win_bounds()` 取基准矩形，`pointermove` 用 `screenX/screenY` 的**绝对位移**算目标矩形（`≥1180×720`），节流后调 `win_set_bounds()`，由后端 `SetWindowPos(SWP_NOZORDER|SWP_NOACTIVATE)` 落窗；`pointerup` 补发终值。
   > 曾试过把按下事件交给系统原生缩放（`ReleaseCapture()` + `SendMessage(WM_NCLBUTTONDOWN, HT*)`），但 WebView2 持有鼠标捕获，`ReleaseCapture` 只对调用线程生效（pywebview 的 API 跑在别的线程），实测拖完外框 delta 恒为 0，故改为自算矩形。
   > 另有一处坑：**不能**给全局 `ctypes.windll.user32.SetWindowPos` 设 `argtypes`——pywebview 的 `BrowserForm.move()` 会传 `None` 当宽高，全局声明会让它抛 `ArgumentError`，标题栏拖动直接失效。`desktop.py` 因此改用独立的 `ctypes.WinDLL("user32")` 实例 `_spos` 承载签名。
-- 缩放坐标系：前端 `screenX/innerWidth` 是 CSS 像素，后端 `GetWindowRect` 是物理像素，`window_bounds()` / `set_window_bounds()` 统一按系统缩放（1.25）折算，读写两侧才闭合。最大化态（`IsZoomed`）下：**拖标题栏会先 `win_restore()` 还原、再按还原后的外框继续拖**（Windows 习惯），`win_set_bounds()` 在最大化态直接返回 `False` 不落窗；grip 缩放遇到最大化则直接放弃（要先还原再改尺寸）。
+- 缩放坐标系：前端 `screenX/innerWidth` 是 CSS 像素，后端 `GetWindowRect` 是物理像素，`window_bounds()` / `set_window_bounds()` 统一按系统缩放（1.25）折算，读写两侧才闭合。最大化态（`IsZoomed`）下：**拖标题栏越过 6px 阈值才 `win_restore()` 还原、再按还原后的外框继续拖**（Windows 习惯；单击 / 轻微抖动不还原，缩小只认双击标题栏），`win_set_bounds()` 在最大化态直接返回 `False` 不落窗；grip 缩放遇到最大化则直接放弃（要先还原再改尺寸）。程序化的最大化 / 还原（`win_max` / `win_restore`）会用 `DwmSetWindowAttribute(DWMWA_TRANSITIONS_FORCEDISABLED)` 临时关掉 DWM 缩放动画——WebView2 在动画期间内容不跟帧，瞬移到目标尺寸才不会闪；走的是 Win32 `ShowWindow` 而不是 pywebview 同名方法（后者带 `@_shown_call`，从未 Shown 的隐藏窗口调用是静默 no-op，自检里最大化会永远不生效）。
 - 进程在建窗前声明 DPI 感知（`SetProcessDpiAwareness(1)`），否则 Windows 会把坐标再虚拟化一次，导致窗口跑到屏幕外。
 - 缓存：`desktop.py` 以 `ui` 五个资源文件的 mtime 合成 `?v=` 挂在 URL 上；`index.html` 再把同一个版本号带到 `styles.css` / `bridge.js` / `data.js` / `app.js`，避免 WebView2 继续使用旧的缓存脚本。
 
@@ -179,13 +179,13 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 
 ## 7. 自检与验收
 
-### 7.1 桌面端自检（`--selftest`，离屏窗口，当前 91 项）
+### 7.1 桌面端自检（`--selftest`，离屏窗口，当前 92 项）
 
 **期望值一律现算，不写死库内数据**：共有/独有行数、独有行键集合、序号范围、已编辑条数、已连接 agent 数、store 路径、**分类夹数与未归档数（`boards.folders` / `skill_meta.folder_id`）** 全部取自 `skillkit.list_boards()` / `get_meta()` / `load_config()`。库内增删 skill、冲突收口之后重跑自检仍然成立。
 
-覆盖：模式=db、0 条 JS 错误、共有行数与侧栏计数、独有行数 / 行键集合与后端一致（含 extra / 容器展开 / 外部链接来源，见 §1.2）、独有序号连续 1..N、已编辑条数与 meta 一致（只有显示名 / 备注算编辑，归属夹不算）、**分类夹数、未归档数**、已连接 agent 数、路径来自 `config.json`、选中 `pdf`、列表上方筛选行已移除、**序号列（首行=1、共有序号连续 1..N、第 10 行两位数仍 26×26 不溢出）**、详情栏删除按钮存在、**分类文件夹 11 项**（网格视图卡片数=后端 folders 数、`#grid-new-folder` 虚卡存在、点 `data-folder-card` 进夹后标题=夹名且行数=后端夹内计数、面包屑返回根后 `.folder-grid` 重新出现、临时建夹+归入 pdf 后卡片数 +1、`folder_delete` 后卡片数复原且夹内行 `folder_id` 置空 / moved 计数正确、切列表视图 `.row` 数=sh_total、`set_meta(folder)` 落库与 `''` 复原、全新库上迁移回填一次且二次迁移零改动——自检用的临时库已在 `skillkit.db` 升级时完成真实迁移）、**差异入口按冲突数据分支**（`boards.conflict` 来自独有板的同名覆盖行；共有板差异分支只在 `find_conflict_tool()` 现查到实体冲突时才测，否则核对「共有板无差异按钮」；独有板按 `scope=unique` 核对表头 `CONFLICT · tool / skill` 与弹窗出现）、改名写库（**目标选一条当前没有人工改名/备注的共有 skill，结束后只还原显示名与时间戳——整行 insert-or-replace 会把 folder_id 抹掉**）、已编辑计数 ±1、搜索（只校验「命中 pdf + 列表收窄」，不写死命中条数）与清筛选、非法删除被拒、从 UI 详情栏点击「彻底删除」并确认（临时 skill 的磁盘目录与列表行都消失、自动选中下一条）、设置弹窗文案、深色主题、智能体看板（10 行 / 侧栏 10 / tab 已连接数现算 / 4 个状态筛 / 每行开关 / 未安装开关禁用 / **序号列（首行=1、连续 1..N、≥10 行时第 10 行两位数仍 26×26 不溢出，不足 10 行跳过该项）**；没有未安装行时跳过「未安装调 API 被拒」）、**开关方向回归（点「开」着的开关必须先弹「关闭 … 分发？」确认框、一次点击只弹一个框、取消后开关回到开）**、**外部来源（agent 自己安装的目录如 `~/.agents/skills`：行标题出现「外部 N」标记且 N 与后端 `external[0].count` 一致、详情栏出现「外部来源」行、外部行详情有「卸载」按钮且无「删除副本」按钮；本机没有外部同名实体时整组跳过）**、**原生窗口（5 项：`WS_MINIMIZEBOX` 在、窗口小图标=ico 帧、窗口大图标=ico 帧、`ICON_SMALL2` 回退到小图标、最小化位被抹掉后能自动补回）**、8 个缩放手柄、窗口外框 API 可读（本机回读 1200 × 760 @ 168,28）、**标题栏拖动窗口（合成 pointerdown/move/up，外框应位移 dx=60,dy=40）**、**最大化态拖动先还原再位移**、启动尺寸 1180~1200 × 720~760、底部设置按钮与版本号完整可见、详情栏右边界 ≤ 窗口宽、1180 宽无横向溢出、外框写入 `1240×780` 回读一致、写入 `900×500` 被兜底成 `1180×720`。
+覆盖：模式=db、0 条 JS 错误、共有行数与侧栏计数、独有行数 / 行键集合与后端一致（含 extra / 容器展开 / 外部链接来源，见 §1.2）、独有序号连续 1..N、已编辑条数与 meta 一致（只有显示名 / 备注算编辑，归属夹不算）、**分类夹数、未归档数**、已连接 agent 数、路径来自 `config.json`、选中 `pdf`、列表上方筛选行已移除、**序号列（首行=1、共有序号连续 1..N、第 10 行两位数仍 26×26 不溢出）**、详情栏删除按钮存在、**分类文件夹 11 项**（网格视图卡片数=后端 folders 数、`#grid-new-folder` 虚卡存在、点 `data-folder-card` 进夹后标题=夹名且行数=后端夹内计数、面包屑返回根后 `.folder-grid` 重新出现、临时建夹+归入 pdf 后卡片数 +1、`folder_delete` 后卡片数复原且夹内行 `folder_id` 置空 / moved 计数正确、切列表视图 `.row` 数=sh_total、`set_meta(folder)` 落库与 `''` 复原、全新库上迁移回填一次且二次迁移零改动——自检用的临时库已在 `skillkit.db` 升级时完成真实迁移）、**差异入口按冲突数据分支**（`boards.conflict` 来自独有板的同名覆盖行；共有板差异分支只在 `find_conflict_tool()` 现查到实体冲突时才测，否则核对「共有板无差异按钮」；独有板按 `scope=unique` 核对表头 `CONFLICT · tool / skill` 与弹窗出现）、改名写库（**目标选一条当前没有人工改名/备注的共有 skill，结束后只还原显示名与时间戳——整行 insert-or-replace 会把 folder_id 抹掉**）、已编辑计数 ±1、搜索（只校验「命中 pdf + 列表收窄」，不写死命中条数）与清筛选、非法删除被拒、从 UI 详情栏点击「彻底删除」并确认（临时 skill 的磁盘目录与列表行都消失、自动选中下一条）、设置弹窗文案、深色主题、智能体看板（10 行 / 侧栏 10 / tab 已连接数现算 / 4 个状态筛 / 每行开关 / 未安装开关禁用 / **序号列（首行=1、连续 1..N、≥10 行时第 10 行两位数仍 26×26 不溢出，不足 10 行跳过该项）**；没有未安装行时跳过「未安装调 API 被拒」）、**开关方向回归（点「开」着的开关必须先弹「关闭 … 分发？」确认框、一次点击只弹一个框、取消后开关回到开）**、**外部来源（agent 自己安装的目录如 `~/.agents/skills`：行标题出现「外部 N」标记且 N 与后端 `external[0].count` 一致、详情栏出现「外部来源」行、外部行详情有「卸载」按钮且无「删除副本」按钮；本机没有外部同名实体时整组跳过）**、**原生窗口（5 项：`WS_MINIMIZEBOX` 在、窗口小图标=ico 帧、窗口大图标=ico 帧、`ICON_SMALL2` 回退到小图标、最小化位被抹掉后能自动补回）**、8 个缩放手柄、窗口外框 API 可读（本机回读 1200 × 760 @ 168,28）、**标题栏拖动窗口（合成 pointerdown/move/up，外框应位移 dx=60,dy=40）**、启动尺寸 1180~1200 × 720~760、底部设置按钮与版本号完整可见、详情栏右边界 ≤ 窗口宽、1180 宽无横向溢出、外框写入 `1240×780` 回读一致、写入 `900×500` 被兜底成 `1180×720`；**窗口态测试放最后**（最大化拖动越过阈值先还原再位移、**最大化单击不还原**）——真实最大化过一次后，隐藏窗口的 WebView2 布局会卡在最大化尺寸不再跟随 OS 外框（`innerWidth` 恒 1536），所以这两项排在所有 innerWidth / 布局断言之后，末轮 boot 重载页面拿回干净布局；程序化最大化 / 还原走 `ShowWindow`（pywebview 同名方法带 `@_shown_call`，隐藏窗调用是静默 no-op——不加这一层，自检里最大化永远不生效，最大化拖动会靠普通拖动假通过）并临时禁用 DWM 缩放动画（WebView2 动画期间内容不跟帧，闪烁的根源）。
 
-结果：**91/91 PASS，`ERRORS: []`**（本机当前库：51 共有 / 152 独有 / 7 已连接 / 无共有实体冲突 / 7 个分类文件夹，51 条旧分类全部一次性回填进预置夹）。原生窗口那 5 项同时也在一台真实可见窗口（快捷方式启动的实例）上单独核对过：`WM_GETICON` 三档 = 20px 帧 / 40px 帧 / 同小图，样式 `0x16030000`，点任务栏按钮 = 最小化 ↔ 恢复，`WS_MINIMIZEBOX` 全程未丢。
+结果：**92/92 PASS，`ERRORS: []`**（本机当前库：51 共有 / 152 独有 / 7 已连接 / 无共有实体冲突 / 7 个分类文件夹，51 条旧分类全部一次性回填进预置夹）。原生窗口那 5 项同时也在一台真实可见窗口（快捷方式启动的实例）上单独核对过：`WM_GETICON` 三档 = 20px 帧 / 40px 帧 / 同小图，样式 `0x16030000`，点任务栏按钮 = 最小化 ↔ 恢复，`WS_MINIMIZEBOX` 全程未丢。
 
 > 旧版自检写死了 `独有 2 行`、`workbuddy/pdf` 的 19 行差异、`分类 7`、`agent 7`、`搜索 pdf 行数=1`，`workbuddy/pdf` 冲突收口成 junction 后这些项必 FAIL；现在已按上面的「现算」方式改写。
 
@@ -221,11 +221,12 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 | 拖标题栏空白 +70 / +45 | d=(70, 45) |
 | 拖 `.local-pill` / 搜索框 | d=(0, 0)（交互控件不参与拖动） |
 | 双击标题栏空白 | `IsZoomed=True`，外框 1536 × 864（frameless 最大化覆盖整屏，属既有行为） |
+| 最大化后单击标题栏 | 不还原、外框不动（缩小只认双击与拖动越过阈值；无缩放动画闪动） |
 | 右边缘向右 120 | 1320 × 760，x 不变（合成事件与真实鼠标各测一次，均 `delta=(120,0)`） |
 | 左边缘向右 100 | x 168→268，宽 1320→1220 |
 | 右下角 +80 / +60 | 1300 × 820（真实鼠标 +90 / +70 → 1290 × 830） |
 | 右边缘向左 600（越界） | 夹到最小 **1180 × 820** |
-| 最大化后拖标题栏 | 先还原成 1200 × 760，再按还原后的外框继续位移（`win_restore()` → `moveFrom()`） |
+| 最大化后拖标题栏 | 位移越过 6px 阈值后先还原成 1200 × 760，再按还原后的外框继续位移（`win_restore()` → `moveFrom()`） |
 | 拖完松开 | `body.moving` / `body.resizing` 均已移除，选中行仍为 `pdf`，`__SK_ERRORS` 为空 |
 
 标题栏拖动是在「每 10ms 轮询外框」的压力下验证的：即使 `win_bounds()` 的基准矩形晚于鼠标松手才返回，补发终值的逻辑仍能让外框精确位移，不会出现「拖了但没动」。
@@ -238,11 +239,10 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 2. **独有看板的外部行只展示不管理**：`extra` / `foreign-link` / 容器展开来源的行一律 `deletable=false`——UI 不渲染删除按钮，直调 `delete_skill` 也被后端拒绝。这些真身由 agent（ClawHub / codex / Tabbit 等）自己装、自己升级，本工具删了会被装回来或直接弄坏 agent。要把某个外部 skill 收进中央仓库，用 CLI `import <目录>`。
 3. **`workbuddy/pdf` 冲突已收口成 junction**：`store\pdf` 现在是 WorkBuddy 1.0.1 的那份内容（含 `_skillhub_meta.json`），`C:\Users\LENOVO\.workbuddy\skills\pdf` 是指回中央的 junction，所以「独有」里不再有它。改动前的中央目录整份备份在 `D:\skillkit\.scratch\pdf-backup-20261030-222737\`（`central` / `local` 两份，尚未清理）。`suppressed` 表已空，`skillkit.py verify` 不应再报这条冲突。
 4. **设计稿 1440 × 900 只用于原型**：桌面窗口默认 1200 × 760，`≤1340` 断点会收起看板副标题与 tab 小字，列表与详情栏仍完整；最小 1180 × 720 已实测无横向溢出。
-5. **`zoomable=False`、`easy_drag=False`**：缩放内容与 pywebview 自带的拖动区都被刻意关掉。拖动改由前端实现——整条标题栏（含 `.brand`、空白处）`pointerdown` 记起点，`pointermove` 按 `screenX/screenY` 绝对位移调 `win_set_bounds`，`pointerup` 补发终值；搜索框 / 按钮 / LOCAL 胶囊 / 窗口三键不触发。双击标题栏空白切换最大化。改变窗口大小走 8 个 grip。
-6. **数据库是单文件**：界面开着时另跑 `skillkit.py scan/remove` 也能工作（WAL），但改完建议在界面里点「重新探测」刷新。
+5. **`zoomable=False`、`easy_drag=False`**：缩放内容与 pywebview 自带的拖动区都被刻意关掉。拖动改由前端实现——整条标题栏（含 `.brand`、空白处）`pointerdown` 记起点，`pointermove` 按 `screenX/screenY` 绝对位移调 `win_set_bounds`，`pointerup` 补发终值；搜索框 / 按钮 / LOCAL 胶囊 / 窗口三键不触发。双击标题栏空白切换最大化。改变窗口大小走 8 个 grip。6. **数据库是单文件**：界面开着时另跑 `skillkit.py scan/remove` 也能工作（WAL），但改完建议在界面里点「重新探测」刷新。
 7. **`pythonw` 下窗口可能以最小化状态出现**：Windows 建窗时给的是 (-32000, -32000)，`on_start()` 先补图标/最小化位，再兜底——检测 `IsIconic` 后 `ShowWindow(SW_RESTORE)`，位置与尺寸在建窗时已正确，不再二次摆位。若手改这段代码，注意别把还原步骤删掉，否则窗口会"看不见但其实在跑"。
 8. **同前缀的 WebView2 工具窗**：枚举窗口时会看到一个 `Chrome_WidgetWin_1`（标题带 `-联想浏览器`）。`_hwnd_by_title()` 只认 `WindowsForms10.*` 主窗口，改选择逻辑时别只看标题。
-9. **缩放是自算矩形，不是系统原生缩放**：8 个 grip 只在 `body.desktop` 下存在；拖动依赖 `setPointerCapture` 在窗口外继续收 `pointermove`，光标离开窗口太远或系统抢走捕获时会提前结束。最大化态（`IsZoomed`）下：grip 缩放直接放弃（需先还原）；标题栏拖动会先 `win_restore()` 还原再位移。坐标折算按**系统级 DPI**（`GetDpiForSystem`）写死，跨不同缩放比例的副屏拖动未验证。
+9. **缩放是自算矩形，不是系统原生缩放**：8 个 grip 只在 `body.desktop` 下存在；拖动依赖 `setPointerCapture` 在窗口外继续收 `pointermove`，光标离开窗口太远或系统抢走捕获时会提前结束。最大化态（`IsZoomed`）下：grip 缩放直接放弃（需先还原）；标题栏拖动越过 6px 阈值才 `win_restore()` 还原再位移，单击不还原。坐标折算按**系统级 DPI**（`GetDpiForSystem`）写死，跨不同缩放比例的副屏拖动未验证。
 
 ---
 
@@ -262,6 +262,7 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 | 点任务栏按钮只切前台、不最小化 | 无边框 WinForms 窗口没有 `WS_MINIMIZEBOX` | 看 `GetWindowLong(GWL_STYLE)` 是否有 `0x00020000`；`_ensure_minimize_box()` 会补位，`minimized/maximized/restored` 事件上挂了 `_keep_window_chrome()` 兜底重补 |
 | 弹「启动失败：TypeError: create_window() got an unexpected keyword argument 'icon'」 | 旧版 `main()` 把 `icon=ICON` 传给 `webview.start()`，有的 pywebview 版本会把该参数透传给 `create_window()` | 本版已不再传 `icon`（Windows 图标由 `on_start()` → `_apply_window_icon()` 走 `WM_SETICON`）；不要把 `icon` 加回 `webview.start()` |
 | 打开/重连 agent 时黑窗口连闪（关掉→重连最明显） | `make_junction()` 每次都用 `cmd /c mklink` 建链接；`pythonw` 无控制台，每个控制台子进程都会新分配一个黑窗口，49 个 skill 就是 49 次闪窗 | `_quiet_kwargs()` 已给子进程加 `CREATE_NO_WINDOW` + `SW_HIDE`；实测子进程 `GetConsoleWindow()` 由 `1051536` 变 `0`。另：`cmd` 输出是 ANSI，**不能**用 `text=True`（会 `UnicodeDecodeError`），统一走 `_decode()` |
+| 最大化态单击标题栏，窗口闪动一下缩小成原尺寸 | 旧实现 `winBounds()` 一回来发现 `maximized` 就立刻 `winRestore()`——根本没等用户真的拖动，单击也触发还原；还原又带着 DWM 缩放动画，WebView2 动画期间内容不跟帧，看起来就是「闪动 + 震荡」 | 前端把还原挂起（`moveState.zmax`），位移越过 6px 阈值才 `win_restore()`；单击只收尾不动作，缩小只认双击标题栏（`win_max` 切换）。后端 `win_max` / `win_restore` 程序化切换窗口态时 `DwmSetWindowAttribute(DWMWA_TRANSITIONS_FORCEDISABLED)` 临时关掉缩放动画，瞬移到目标尺寸；并改走 `ShowWindow`（pywebview 同名方法在隐藏窗口上是静默 no-op）。回归项：`--selftest` 的「最大化单击不还原」 |
 | 自检卡住 | 异常抛出后窗口未销毁 | `selftest()` 已用 `try/finally` 保证打印并 `destroy()` |
 | 关闭某个 agent 后（skillkit 显示「已关闭」、目录也空了），**新开会话仍能调用它的 skill** | 该 agent 还有第二条读取路径：Trae CN 除 `~/.trae-cn/skills` 外还读 `~/.agents/skills`（ClawHub / GitHub 安装的真身，见 `~/.agents/.skill-lock.json`）。本工具只管 `skills_dir`，删链接不影响那里 | 看智能体行是否标了「外部 N」、详情栏是否列出 `.agents/skills` 与「N 个内容一致」——有就是如实检测，不是开关失效。要真正失效可以在独有看板对那条 skill 点「卸载」（v0.2 起支持，`uninstall_unique` 永久删除该目录或只摘 foreign-link 链接；agent 更新时可能重新安装） |
 

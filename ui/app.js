@@ -2530,6 +2530,9 @@
   // 标题栏整条可拖：空白区 / 品牌区按下即移动；输入框、按钮、窗口三键不参与。
   // 同样用 screenX/screenY 绝对位移 + SetWindowPos，避免依赖 pywebview 的 drag-region。
   var moveState = null;
+  // 最大化态的还原阈值（CSS 像素）：按下后拖过这个距离才算「真的在拖」，
+  // 才还原窗口跟随光标；单击 / 轻微抖动不还原 —— 缩小只认双击标题栏。
+  var DRAG_RESTORE_PX = 6;
 
   // 诊断：真实手拖出问题时，kit/skillkit.log 能说清断在哪一步
   function uiLog(kind, payload) {
@@ -2570,19 +2573,35 @@
     try { st.bar.releasePointerCapture(st.pid); } catch (e) {}
   }
 
-  // 基准外框到手：最大化先还原再拖，然后按 lx/ly 决定是继续跟随还是补发终值
+  // 基准外框到手：最大化先挂起（等拖动阈值），还原后按 lx/ly 决定继续跟随还是补发终值
   function moveFrom(res, pid) {
     var st = moveState;
     if (!st || st.pid !== pid) return;
     if (res && res.maximized) {
-      uiLog('move.restore', res);
-      SKB.winRestore().then(function (r2) {
-        moveFrom(r2, pid);
-      }, function (err) {
-        uiLog('move.fail', { why: 'restore', err: String(err && err.message || err) });
-        endMove();
-        toast('bad', '移动失败', String(err && err.message || err));
-      });
+      // 松手前基准矩形才回来（快速点按）：只有位移已越过阈值才补还原，
+      // 纯单击（含 ≤ 阈值的抖动）什么都不做，直接收尾
+      if (st.done) {
+        if (Math.abs(st.lx - st.sx) > DRAG_RESTORE_PX ||
+            Math.abs(st.ly - st.sy) > DRAG_RESTORE_PX) {
+          uiLog('move.restore', res);
+          SKB.winRestore().then(function (r2) {
+            moveFrom(r2, pid);
+          }, function (err) {
+            uiLog('move.fail', { why: 'restore', err: String(err && err.message || err) });
+            endMove();
+            toast('bad', '移动失败', String(err && err.message || err));
+          });
+        } else {
+          uiLog('move.click', { at: [st.sx, st.sy] });
+          endMove();
+        }
+        return;
+      }
+      // 还按着：挂起还原，交给 pointermove 的阈值判定
+      if (!st.zmax) {
+        st.zmax = true;
+        uiLog('move.maxpend', { at: [st.sx, st.sy] });
+      }
       return;
     }
     st.bounds = res && res.bounds;
@@ -2618,7 +2637,8 @@
       bar: bar, pid: pid,
       sx: e.screenX, sy: e.screenY,
       lx: e.screenX, ly: e.screenY,
-      bounds: null, target: null, inflight: false, done: false, logged: false
+      bounds: null, target: null, inflight: false, done: false, logged: false,
+      zmax: false  // 基准矩形回来时是最大化：挂起还原，拖过阈值才真的还原
     };
     document.body.classList.add('moving');
     uiLog('move.down', { x: e.screenX, y: e.screenY, pid: pid,
@@ -2649,6 +2669,21 @@
       var mv = moveState;
       if (mv && e.pointerId === mv.pid) {
         mv.lx = e.screenX; mv.ly = e.screenY;
+        // 最大化挂起还原：位移越过阈值才算拖动，此刻才还原并继续跟随；
+        // 单击 / 轻微抖动永远走不到这里，窗口保持最大化
+        if (mv.zmax && !mv.done &&
+            (Math.abs(mv.lx - mv.sx) > DRAG_RESTORE_PX ||
+             Math.abs(mv.ly - mv.sy) > DRAG_RESTORE_PX)) {
+          mv.zmax = false;
+          uiLog('move.restore', { dx: mv.lx - mv.sx, dy: mv.ly - mv.sy });
+          SKB.winRestore().then(function (r2) {
+            moveFrom(r2, mv.pid);
+          }, function (err) {
+            uiLog('move.fail', { why: 'restore', err: String(err && err.message || err) });
+            endMove();
+            toast('bad', '移动失败', String(err && err.message || err));
+          });
+        }
         if (mv.bounds && !mv.done) {
           mv.target = moveTarget(mv.lx - mv.sx, mv.ly - mv.sy);
           if (!mv.logged) {
@@ -2687,6 +2722,12 @@
       var mv = moveState;
       if (!mv || e.pointerId !== mv.pid) return;
       mv.lx = e.screenX; mv.ly = e.screenY;
+      // 最大化挂起还原时松手 = 一次单击：不还原、不写外框，直接收尾
+      if (mv.zmax) {
+        uiLog('move.click', { at: [mv.sx, mv.sy] });
+        endMove();
+        return;
+      }
       if (mv.bounds && SKB && SKB.winSetBounds) {
         var fin = moveTarget(mv.lx - mv.sx, mv.ly - mv.sy);
         SKB.winSetBounds(fin.x, fin.y, fin.w, fin.h).catch(function () {});
