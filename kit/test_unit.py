@@ -9,6 +9,8 @@
 import json
 import os
 import shutil
+import sqlite3
+import subprocess
 import sys
 import tempfile
 
@@ -415,6 +417,164 @@ def _():
             # delete_tree 到 skills_dir 的父目录 / store 根）
             assert os.path.isfile(os.path.join(store, "s1", "SKILL.md"))
             assert os.path.isfile(os.path.join(agent, "s1", "SKILL.md"))
+        finally:
+            con.close()
+            skillkit_base.DB_FILE = old
+
+
+@case("sha_tree: 目录不可枚举时严格报错，展示/判定/删除不下结论（L4）")
+def _():
+    if sys.platform != "win32":
+        raise AssertionError("仅 Windows（需要 icacls 构造不可读目录）")
+
+    def deny(path):
+        # 只拒「列目录」(RD) 保留 READ_CONTROL：sha_tree 拿不到清单，但
+        # icacls 还能摘掉 deny ACE，临时目录才能清理干净（全拒 R 摘不回来）
+        r = subprocess.run(["icacls", path, "/deny", "*S-1-1-0:(RD)"],
+                           capture_output=True)
+        assert r.returncode == 0, r.returncode
+
+    def undeny(path):
+        subprocess.run(["icacls", path, "/remove:d", "*S-1-1-0"],
+                       capture_output=True)
+
+    with tempfile.TemporaryDirectory() as td:
+        inner = os.path.join(td, "locked")
+        os.makedirs(inner)
+        write(os.path.join(inner, "b.txt"), "two")
+        write(os.path.join(td, "a.txt"), "one")
+        deny(inner)
+        try:
+            # 哈希路径严格：不可枚举绝不算成「空树 / 缺块」哈希（旧实现会）
+            try:
+                skillkit.sha_tree(td)
+                raise AssertionError("不可枚举的目录应让 sha_tree 抛错")
+            except RuntimeError as exc:
+                assert "不可枚举" in str(exc), exc
+            # 展示路径宽容：dir_stats / file_list 照常工作
+            skillkit.dir_stats(td)
+            skillkit.file_list(td)
+
+            # 判定路径不下结论：target_state 返回 conflict-dir（--fix 跳过）
+            store = os.path.join(td, "store")
+            agent = os.path.join(td, "agent")
+            os.makedirs(store)
+            os.makedirs(os.path.join(agent, "s1"))
+            write(os.path.join(agent, "s1", "SKILL.md"), "local\n")
+            locked = os.path.join(agent, "s1", "locked")
+            os.makedirs(locked)
+            deny(locked)
+            cfg = tmp_cfg(store)
+            srow = {"name": "s1", "content_hash": "x" * 64}
+            trow = {"mode": "copy", "skills_dir": agent.replace(os.sep, "/")}
+            state, detail = skillkit.target_state(
+                os.path.join(agent, "s1"), cfg, srow, trow)
+            assert state == "conflict-dir" and "不可读" in detail, (state, detail)
+            assert skillkit._hash_tree(os.path.join(agent, "s1")) is None
+
+            # 删除守卫：不可枚举就不删（宁可残留也不误删）
+            con, old = _temp_db(td)
+            try:
+                insert_tool(con, "t1", agent)
+                con.execute("insert into skills(name,content_hash) values('s1',?)",
+                            ("x" * 64,))
+                con.commit()
+                removed = skillkit.unlink_skill(con, cfg, "s1")
+                assert removed == [], removed
+                assert os.path.isdir(os.path.join(agent, "s1"))
+            finally:
+                con.close()
+                skillkit_base.DB_FILE = old
+        finally:
+            undeny(inner)
+            undeny(locked)
+
+
+@case("migrate_folders: 加列竞态不抛，且不重放回填（L6）")
+def _():
+    with tempfile.TemporaryDirectory() as td:
+        con, old = _temp_db(td)
+        try:
+            class RaceCon:
+                """pragma 看不到 folder_id、alter 撞 duplicate：模拟双进程竞态。"""
+
+                def __init__(self, real):
+                    self._real = real
+                    self._raced = False
+
+                def execute(self, sql, *a):
+                    if "pragma table_info(skill_meta)" in sql:
+                        return [r for r in self._real.execute(sql, *a)
+                                if r[1] != "folder_id"]
+                    if ("alter table skill_meta add column folder_id" in sql
+                            and not self._raced):
+                        self._raced = True
+                        raise sqlite3.OperationalError("duplicate column name: folder_id")
+                    return self._real.execute(sql, *a)
+
+                def commit(self):
+                    return self._real.commit()
+
+                def __getattr__(self, item):
+                    return getattr(self._real, item)
+
+            # 对方进程已把列加上并回填：老 cats 已是历史，我方绝不重放
+            con.execute("alter table skill_meta add column folder_id text")
+            con.execute("insert into skill_meta(scope,key,categories) "
+                        "values('shared','k','[\"eng\"]')")
+            con.commit()
+            skillkit.migrate_folders(RaceCon(con), {"store": td})  # 不抛即过
+            row = con.execute(
+                "select folder_id from skill_meta where key='k'").fetchone()
+            assert not row["folder_id"], row["folder_id"]
+            assert con.execute("select count(*) from folders").fetchone()[0] > 0
+        finally:
+            con.close()
+            skillkit_base.DB_FILE = old
+
+
+@case("check_skill_name: Windows 保留名 / 尾点尾空格 / 冒号（L7）")
+def _():
+    with tempfile.TemporaryDirectory() as td:
+        src = os.path.join(td, "myskill")
+        write(os.path.join(src, "SKILL.md"), "---\nname: myskill\n---\n")
+        store = os.path.join(td, "store")
+        os.makedirs(store)
+        con, old = _temp_db(td)
+        try:
+            cfg = tmp_cfg(store)
+            for bad in ("con", "NUL", "com1", "LPT9", "aux", "a.", "a ", "a:b"):
+                try:
+                    skillkit.import_dir(con, cfg, src, bad)
+                    raise AssertionError("%r 应被拒绝" % bad)
+                except RuntimeError as exc:
+                    assert "非法 skill 名" in str(exc), exc
+            # 拒绝发生在 copytree 之前：store 始终干净
+            assert os.listdir(store) == [], os.listdir(store)
+            assert skillkit.check_skill_name("normal-skill") == "normal-skill"
+        finally:
+            con.close()
+            skillkit_base.DB_FILE = old
+
+
+@case("scan_unique: .skpart-* 崩溃残留不进独有列表（L5）")
+def _():
+    with tempfile.TemporaryDirectory() as td:
+        store = os.path.join(td, "store")
+        agent = os.path.join(td, "agent", "skills")
+        os.makedirs(store)
+        part = os.path.join(agent, ".skpart-4242-half")
+        os.makedirs(part)
+        write(os.path.join(part, "SKILL.md"), "---\nname: half\n---\n")
+        cfg = tmp_cfg(store)
+        con, old = _temp_db(td)
+        try:
+            insert_tool(con, "t1", agent)
+            trow = con.execute("select * from tools where key='t1'").fetchone()
+            out, errors = [], []
+            skillkit_store._scan_unique_root(
+                trow, agent, "main", True, [], 1, {}, cfg, {}, {}, out, errors)
+            assert out == [], out
         finally:
             con.close()
             skillkit_base.DB_FILE = old

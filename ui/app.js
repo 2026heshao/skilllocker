@@ -637,8 +637,9 @@
     document.getElementById('store-path').title = STORE;
     document.getElementById('store-count').textContent = SKILLS.length;
     document.getElementById('store-size').textContent = META.storeSize || '—';
+    var healthDen = SKILLS.length + UNIQUE.length;
     document.getElementById('store-health').style.width =
-      (100 - (UNIQUE.length / (SKILLS.length + UNIQUE.length)) * 100).toFixed(1) + '%';
+      (healthDen ? (100 - (UNIQUE.length / healthDen) * 100).toFixed(1) : '0') + '%';
 
     var sharedCount = SKILLS.length;
     var uniqueCount = UNIQUE.length;
@@ -2835,12 +2836,20 @@
 
       if (t.closest('[data-agent-rescan]')) {
         if (MODE === 'db' && SKB) {
+          // 与 requestRefresh 共用 refreshBusy 防重入：连点会并发多个 rescan、
+          // 重复 applyBootstrap 和双 toast（refreshBusy 与 #refresh-btn 的
+          // is-busy 类解耦，这里不会让工具栏按钮误转圈）
+          if (refreshBusy) { toast('info', '扫描进行中', '请等待当前扫描完成'); return; }
+          refreshBusy = true;
+          var doneRs = function () { refreshBusy = false; };
           runProgress(600, function () {
             SKB.rescan().then(function (res) {
+              doneRs();
               applyBootstrap(res);
               toast('ok', '探测完成', '识别到 ' + agentCounts(agentRows()).connected +
                 ' 个已连接 agent');
             }).catch(function (err) {
+              doneRs();
               toast('bad', '重新探测失败', String(err && err.message || err));
             });
           });

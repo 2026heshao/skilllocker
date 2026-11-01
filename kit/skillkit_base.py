@@ -260,8 +260,8 @@ def delete_tree(path):
 
 
 # ---------------------------------------------------------------- 内容解析
-def iter_files(root):
-    for dirpath, dirnames, filenames in os.walk(root):
+def iter_files(root, onerror=None):
+    for dirpath, dirnames, filenames in os.walk(root, onerror=onerror):
         dirnames[:] = [d for d in dirnames if d not in IGNORE_NAMES]
         for f in sorted(filenames):
             if f in IGNORE_NAMES:
@@ -277,7 +277,15 @@ def iter_files(root):
 
 def sha_tree(root):
     h = hashlib.sha256()
-    for rel, p in sorted(iter_files(root)):
+
+    def _onerror(exc):
+        # 目录存在但（整体或子树）不可枚举（权限 / 杀软锁）时 os.walk 默认静默
+        # 跳过，会把哈希算成「缺了一块甚至空树」的值 —— target_state 据此判
+        # stale-copy，--fix 就按假判定删了重拷。哈希路径必须严格：拿不到完整
+        # 证据就抛错，展示用的 dir_stats / file_list 保持宽容（不传 onerror）。
+        raise RuntimeError("目录不可枚举: %s" % exc)
+
+    for rel, p in sorted(iter_files(root, onerror=_onerror)):
         try:
             digest = hashlib.sha256(open(p, "rb").read()).hexdigest()
         except OSError:
@@ -408,14 +416,18 @@ def ordered_tools(con):
 
 
 def _hash_tree(path, cache=None):
-    """sha_tree 带备忘：同一次看板快照里独有检测与外部来源统计会各算一遍。"""
+    """sha_tree 带备忘：同一次看板快照里独有检测与外部来源统计会各算一遍。
+
+    不可枚举的目录缓存 None：拿不到证据不下结论，调用方（target_state /
+    _unique_item）按冲突展示、绝不按「空树哈希」自动改写。
+    """
     if cache is None:
-        return sha_tree(path)
+        cache = {}
     key = norm_path(path)
     if key not in cache:
         try:
             cache[key] = sha_tree(path)
-        except OSError:
+        except (OSError, RuntimeError):
             cache[key] = None
     return cache[key]
 
@@ -443,6 +455,11 @@ def target_state(link, cfg, skill_row, tool_row, hash_cache=None):
         return "foreign-link", "%s -> %s" % (path, tgt)
     if os.path.isdir(path):
         actual = _hash_tree(path, hash_cache)
+        if actual is None:
+            # 目录存在但不可枚举（权限 / 杀软锁）：绝不下「内容不一致」的结论 ——
+            # copy 模式那会判成 stale-copy 让 --fix 删了重拷。conflict-dir 的
+            # action 恒为 None：--fix 跳过，等用户修复权限后现算。
+            return "conflict-dir", "%s（目录不可读，跳过自动处置）" % path
         if tool_row["mode"] == "copy":
             return ("ok-copy" if actual == skill_row["content_hash"] else "stale-copy"), path
         # junction 模式下出现实体目录：内容一致就接管，不一致就是冲突
@@ -553,7 +570,12 @@ def migrate_folders(con, cfg):
     cols = {r[1] for r in con.execute("pragma table_info(skill_meta)")}
     fresh_column = "folder_id" not in cols
     if fresh_column:
-        con.execute("alter table skill_meta add column folder_id text")
+        try:
+            con.execute("alter table skill_meta add column folder_id text")
+        except sqlite3.OperationalError:
+            # 另一个进程（CLI / 第二个桌面实例）刚加上：本次不回填。回填只应
+            # 发生在「由我加列」的那一次，否则老 cats 会撤销用户的「移出到未归档」
+            fresh_column = False
     changed = False
     if not con.execute("select 1 from folders limit 1").fetchone():
         stamp = now_ms()

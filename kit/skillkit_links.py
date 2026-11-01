@@ -8,6 +8,7 @@
 """
 import json
 import os
+import re
 import shutil
 
 import skillkit_base as _base  # noqa: F401 - 统一从门面取常量时走这里
@@ -102,6 +103,23 @@ def do_sync(con, cfg, only_tools=None, only_skills=None, apply_changes=True):
 
 
 # ---------------------------------------------------------------- 增删
+def check_skill_name(name):
+    """skill 名 = 中央仓库 / skills_dir 的直属目录名，所有删除与导入入口共用。
+
+    - 路径分隔符 / . .. ：copytree、delete_tree 会写到目录树之外
+    - Windows 保留名（CON/NUL/COM1...）：copytree 失败或产出无法访问的目录
+    - 尾点 / 尾空格：NTFS 静默吞掉，注册名与磁盘名不一致
+    - 冒号：NTFS 备用数据流语法，不是目录名
+    """
+    if not name or name in (".", "..") or os.path.basename(name) != name:
+        raise RuntimeError("非法 skill 名: %s（不能含路径分隔符）" % name)
+    if re.match(r"^(con|prn|aux|nul|com[1-9]|lpt[1-9])$", name.lower()):
+        raise RuntimeError("非法 skill 名: %s（Windows 保留名）" % name)
+    if name != name.rstrip(". ") or ":" in name:
+        raise RuntimeError("非法 skill 名: %s（不能以点/空格结尾或含冒号）" % name)
+    return name
+
+
 def copy_tree_atomic(src, dst):
     """copytree 的原子版：先拷到同盘同级的 .skpart-* 临时名，再 os.replace 翻正。
 
@@ -138,11 +156,9 @@ def import_dir(con, cfg, src, name=None):
             raise RuntimeError("源是链接但解析不到 SKILL.md：%s -> %s" % (src, tgt))
         src = real
     name = name or os.path.basename(src)
-    # 与 remove_unique 同一标准：skill 名只能是中央仓库的直属目录名。
-    # 否则 --name ../../x 会让 copytree 写到 store 之外，--name a/b 写出的
-    # 嵌套目录永远不会被注册成 skill。
-    if not name or name in (".", "..") or os.path.basename(name) != name:
-        raise RuntimeError("非法 skill 名: %s（不能含路径分隔符）" % name)
+    # 与 remove_unique / resolve_conflict 同一标准：skill 名只能是中央仓库的
+    # 直属目录名，否则 --name ../../x 会让 copytree 写到 store 之外
+    check_skill_name(name)
     central = os.path.join(cfg["store"], name)
     if os.path.normcase(central) == os.path.normcase(src):
         raise RuntimeError("源与中央仓库同名同路径：%s" % central)
@@ -166,7 +182,11 @@ def _unlink_one(con, cfg, name, tool_row):
             return [path.replace(os.sep, "/")]
         return []
     if os.path.isdir(path) and not is_reparse(path) and row:
-        if sha_tree(path) == row["content_hash"]:
+        try:
+            same = sha_tree(path) == row["content_hash"]
+        except (OSError, RuntimeError):
+            same = False  # 不可枚举（sha_tree 严格模式）：拿不到证据就不删
+        if same:
             delete_tree(path)
             return [path.replace(os.sep, "/")]
     return []
@@ -209,9 +229,14 @@ def remove_skill(con, cfg, name, purge=True):
         elif os.path.isdir(path) and not is_reparse(path):
             # 实体拷贝：只删内容与我方一致的那些，避免误删用户手改的版本
             row = con.execute("select content_hash from skills where name=?", (name,)).fetchone()
-            if row and sha_tree(path) == row["content_hash"]:
-                delete_tree(path)
-                removed_links.append(path.replace(os.sep, "/"))
+            if row:
+                try:
+                    same = sha_tree(path) == row["content_hash"]
+                except (OSError, RuntimeError):
+                    same = False  # 不可枚举（sha_tree 严格模式）：拿不到证据就不删
+                if same:
+                    delete_tree(path)
+                    removed_links.append(path.replace(os.sep, "/"))
     if purge:
         central = os.path.join(cfg["store"], name)
         if os.path.isdir(central):
@@ -236,8 +261,7 @@ def remove_unique(con, cfg, tool_key, name):
     if not row["detected"]:
         raise RuntimeError("这个 agent 没有装在本机")
     name = str(name or "")
-    if not name or name in (".", "..") or os.path.basename(name) != name:
-        raise RuntimeError("非法 skill 名: %s" % name)
+    check_skill_name(name)
     base = os.path.normpath(row["skills_dir"])
     path = os.path.normpath(os.path.join(base, name))
     if os.path.normcase(os.path.dirname(path)) != os.path.normcase(base):
@@ -304,8 +328,8 @@ def resolve_conflict(con, cfg, tool_key, name, direction):
         raise RuntimeError("未知工具: %s" % tool_key)
     # 与 remove_unique / import_dir 同一标准：name 只能是 skills_dir / store 的
     # 直属目录名。否则 name=".." 时 central-to-local 会 delete_tree 到父目录。
-    if not name or name in (".", "..") or os.path.basename(name) != name:
-        raise RuntimeError("非法 skill 名: %s（不能含路径分隔符）" % name)
+    name = str(name or "")
+    check_skill_name(name)
     local = os.path.join(trow["skills_dir"], name)
     central = os.path.join(cfg["store"], name)
     if direction == "local-to-central":

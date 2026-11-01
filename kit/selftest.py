@@ -52,10 +52,16 @@ def _await_js(window, key, timeout=15.0):
     """
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if window.evaluate_js("!!window.%s" % key):
-            break
+        try:
+            if window.evaluate_js("!!window.%s" % key):
+                break
+        except Exception:  # noqa: BLE001 - 页面加载期 evaluate_js 可能抛错（与 _poll_js 同口径）
+            pass
         time.sleep(0.1)
-    raw = window.evaluate_js("JSON.stringify(window.%s||null)" % key)
+    try:
+        raw = window.evaluate_js("JSON.stringify(window.%s||null)" % key)
+    except Exception:  # noqa: BLE001
+        return None
     return json.loads(raw) if raw else None
 
 

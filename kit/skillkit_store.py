@@ -219,7 +219,9 @@ def _scan_unique_root(t, root, src, deletable, shared_with, agent_enabled,
         return
     for n in names:
         p = os.path.join(root, n)
-        if n in IGNORE_NAMES or not os.path.isdir(p):
+        # .skpart-* 是 copy_tree_atomic 崩溃残留的半成品（中央仓库侧已在
+        # store_skill_dirs / rescan 清理）；agent 目录里冒出来同样不能当技能行
+        if n in IGNORE_NAMES or n.startswith(".skpart-") or not os.path.isdir(p):
             continue
         if is_reparse(p) or os.path.islink(p):
             tgt = link_target(p)
