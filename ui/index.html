@@ -86,7 +86,7 @@
         </svg>
       </div>
       <div class="boot-word">skilllocker</div>
-      <div class="boot-eyebrow">SKILL LIBRARY · V0.3.0</div>
+      <div class="boot-eyebrow">SKILL LIBRARY · V0.3.1</div>
       <div class="boot-chips" aria-hidden="true"></div>
       <div class="boot-agents" aria-hidden="true"></div>
       <div class="boot-foot">
@@ -161,7 +161,7 @@
             <span>设置与数据</span>
             <kbd>⌘,</kbd>
           </button>
-          <div class="version">v0.3.0 · 快照 <span id="ver-scan">22:16</span></div>
+          <div class="version">v0.3.1 · 快照 <span id="ver-scan">22:16</span></div>
         </div>
       </aside>
 
@@ -223,6 +223,9 @@
           </div>
 
           <div class="crumb-bar" id="crumb-bar" hidden></div>
+
+          <!-- 首启引导：中央仓库为空时出现（接管已有仓库 / 一键收编 / 导入），由 app.js 渲染 -->
+          <div class="first-run" id="first-run" role="region" aria-label="首次启动引导" hidden></div>
 
           <div class="list-card" id="list-card">
             <div class="list-head" id="list-head">
@@ -288,7 +291,7 @@
         <span class="status-sep"></span>
         <span>扫描 <b id="sb-scan">22:16</b></span>
         <span class="status-sep"></span>
-        <span>v0.3.0</span>
+        <span>v0.3.1</span>
       </div>
     </footer>
 

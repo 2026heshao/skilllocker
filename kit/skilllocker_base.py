@@ -26,16 +26,23 @@ import threading
 import time
 
 KIT = os.path.dirname(os.path.abspath(__file__))
-CONFIG_FILE = os.path.join(KIT, "config.json")
-ADAPTERS_FILE = os.path.join(KIT, "adapters.json")
-DB_FILE = os.path.join(KIT, "skilllocker.db")
+FROZEN = bool(getattr(sys, "frozen", False))
+# 安装版：程序文件只读，数据写到 %LOCALAPPDATA%\SkillLocker。
+# 源码运行：保持原来的 kit/ 旁 store、config、db，开发机零迁移。
+RES_DIR = getattr(sys, "_MEIPASS", KIT) if FROZEN else KIT
+DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"),
+                        "SkillLocker") if FROZEN else KIT
+os.makedirs(DATA_DIR, exist_ok=True)
+CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
+ADAPTERS_FILE = os.path.join(RES_DIR, "adapters.json")
+DB_FILE = os.path.join(DATA_DIR, "skilllocker.db")
 HOME = os.path.expanduser("~")
 IGNORE_NAMES = {".git", ".DS_Store", "Thumbs.db", ".gitignore"}
-# 默认中央仓库跟随安装目录（kit/ 的上一级）。不写死盘符：无 D: 盘的机器
-# 首启也能解析出正确路径；开发机 D:\skilllocker 下推导值与旧硬编码一致，零迁移。
+# 源码运行默认中央仓库跟随仓库根目录；安装版跟随 %LOCALAPPDATA%\SkillLocker。
 DEFAULT_STORE = os.path.normpath(
-    os.path.join(os.path.dirname(KIT), "store")).replace(os.sep, "/")
-APP_VERSION = "0.2.1"
+    os.path.join(DATA_DIR if FROZEN else os.path.dirname(KIT), "store")
+).replace(os.sep, "/")
+APP_VERSION = "0.3.1"
 
 # UI 上的两字母标记；不在表里的工具用 label 首字母推导
 TOOL_MARKS = {
@@ -79,6 +86,31 @@ def load_config():
         cfg["_load_error"] = ("中央仓库目录不可创建: %s（%s）；"
                               "请检查磁盘或修改 config.json 的 store" % (cfg["store"], exc))
     return cfg
+
+
+def write_config(cfg):
+    """把 store 写回 config.json（临时名 + os.replace 原子替换）。
+
+    首启「接管已有中央仓库」是唯一会改仓库路径的入口，改完必须落盘，否则
+    下次启动又回到空的默认仓库。只持久化 store：_load_error 等运行期留痕
+    不进文件。失败抛 RuntimeError，由调用方（adopt_store）如实回给前端。
+    """
+    store = os.path.normpath(str(cfg.get("store") or "")).replace(os.sep, "/")
+    if store in ("", ".", ".."):
+        raise RuntimeError("拒绝写入空的中央仓库路径")
+    payload = {"store": store}
+    tmp = "%s.tmp-%d" % (CONFIG_FILE, os.getpid())
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False, indent=2)
+        os.replace(tmp, CONFIG_FILE)
+    except OSError as exc:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise RuntimeError("config.json 写入失败（%s）：%s" % (CONFIG_FILE, exc))
+    return store
 
 
 def db():
@@ -186,6 +218,18 @@ def link_target(path):
         return norm_path(os.readlink(path))
     except OSError:
         return None
+
+
+def path_under(child, parent):
+    """child 是否就是 parent 或在 parent 之下（两侧都先 norm_path 归一化）。
+
+    接管已有仓库 / 批量收编都要判断「这个目录是不是 agent 自己管的地盘」，
+    字符串前缀比会漏掉分隔符（C:/x 与 C:/xy），统一走这里。
+    """
+    c, p = norm_path(child), norm_path(parent)
+    if not c or not p:
+        return False
+    return c == p or c.startswith(p + "/")
 
 
 _CREATE_NO_WINDOW = 0x08000000  # Windows: 子进程不分配控制台

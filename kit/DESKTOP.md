@@ -71,6 +71,24 @@
 
 ---
 
+### 1.3 首启引导（安装版空中央仓库，v0.3.1 新增）
+
+安装版的数据目录是 `%LOCALAPPDATA%\SkillLocker`，中央仓库 `...\store` **天生是空目录**（安装程序不预置任何技能），所以全新安装首启必然是「共有 0 / 磁盘上的技能全在独有看板」——检测没错，缺的是把本机已有内容接管进来的那一步。`list_boards()` 在共有为空时额外回一个 `data.firstRun` 块（正常机器不算、不回，零开销）：
+
+- `candidate`：`skilllocker.find_existing_store()` 从各 agent 主目录**已有 junction 的汇聚点**反推「本机其实存在的中央仓库」（链接目标父目录，同一根至少 2 条链接 + 2 个带 `SKILL.md` 的子目录才成立；落在任何 agent 的 `skills_dir` / `extra_dirs` 里、或就是当前仓库本身一律不认）。本机形态：Claude Code / Codex / Trae CN … 的 378 条链接都指向同一仓库 → 候选即该仓库。
+- `adoptable` / `adoptableAgents`：`skilllocker.adoptable_rows()` 过滤出的可收编独有行 = `src=main` + `kind=unique` + 非同名覆盖，即 agent 主目录里的**实体**技能。外部目录、容器展开行、`foreign-link` 一律不进这个集合（口径与单行「转为共有」一致）。
+
+界面（`#first-run` 面板，见 `ui/UI-SPEC.md` §首启引导）：面板出现时共有看板的内容区（列表 + 网格）整体收起，避免「0 个 skill 的夹墙」和「没有匹配的 skill」两种误导空态；三个出口分别走 `adopt_store(candidate.store)` / `adopt_local_skills()` / 现有导入弹窗，「以后再说」只隐藏到下次启动。前端渲染时 `uiLog('firstrun', {...})` 落一行日志——`skilllocker.log` 里没有这行就是面板没渲染，别先怀疑检测。
+
+后端两个写入口的守卫（`kit/skilllocker_links.py`）：
+
+- `adopt_store(con, cfg, path)`：**只写 config.json + 重扫登记**，不搬文件、不建链接，删掉 `config.json` 即回到默认仓库。拒绝条件：目标不存在 / 目标或当前仓库不可枚举 / 目标目录里没有带 `SKILL.md` 的技能 / 目标与任一 agent 管的目录互相包含 / 目标就是当前仓库 / **当前仓库已有技能**（有内容时改指会让 `prune_meta` 把旧仓库那批共有 meta 当「行已消失」清掉，改名与归档就丢了；真要换仓库请退出后手改 `config.json`）。
+- `adopt_local_skills(con, cfg)`：批量收编，语义等同逐行点「转为共有」，但把 N 次 `rescan` 合成 1 次。按真身目录名分组：同名同内容只收一份（其余源副本保留，独有行按内容哈希自动消失）；同名不同内容**跳过**并在回包 `skipped` 里说明「请到独有看板单独处置」，绝不静默覆盖。独有行上已写过的显示名 / 备注迁给共有行。拷贝用 `copy_tree_atomic`（崩溃残留 `.skpart-*` 由下轮 `rescan` 清理）。收完只对**分发开关开着**的 agent 跑一次 `do_sync(only_skills=adopted)`：同名实体 `takeover → relink` 成指向仓库的链接，仓库里新增而它还没有的技能顺手补链；开关关着的源副本原样保留（探测到 ≠ 授权分发）。回包 `{adopted[], skipped[], relinked, linked, files, bytes, metaMoved, store}`。
+
+回归：`python kit/test_first_run.py`（15 项，含候选反推边界、两个入口的守卫与收编结果）+ `python kit/test_firstrun_ui.py`（18 项，真实后端沙箱回包喂假桥，Playwright 走查面板渲染 → 确认弹窗 → 执行后看板与 toast）。
+
+---
+
 ## 2. 依赖与环境
 
 | 项 | 实际值 | 说明 |
@@ -129,7 +147,7 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 
 | 方法 | 入参 | 返回 | 前端触发点 |
 |---|---|---|---|
-| `bootstrap()` | — | `{ok, data: 看板快照, meta: 全部元数据}` | 启动首屏：先 `sync_tools_from_adapters` 首屏探测 agent，skills 表为空（全新库）时自动 `rescan` 登记中央仓库，再 `migrate_folders + seed_meta` 播种、`prune_meta` 清理；失败返回 `ok:false` → 前端启动错误页（绝不退回演示快照）。`data.agents[].external[]` 是 agent 自己读取的外部技能目录统计（方案 A 只检测展示） |
+| `bootstrap()` | — | `{ok, data: 看板快照, meta: 全部元数据}` | 启动首屏：先 `sync_tools_from_adapters` 首屏探测 agent，skills 表为空（全新库）时自动 `rescan` 登记中央仓库，再 `migrate_folders + seed_meta` 播种、`prune_meta` 清理；失败返回 `ok:false` → 前端启动错误页（绝不退回演示快照）。`data.agents[].external[]` 是 agent 自己读取的外部技能目录统计（方案 A 只检测展示）；`data.firstRun` 仅在中央仓库没有任何技能时非空（首启引导的数据源，见 §1.3） |
 | `save_meta(scope, key, payload)` | `scope`: `shared`/`unique`；`payload`: `{tool, display, note, cats}` | `{ok, row}` | 改名 / 备注 / 分类修改（即时调用，无去抖） |
 | `clear_meta(scope, key)` | 同上 | `{ok}` | 详情栏「还原」 |
 | `delete_skill(scope, key)` | `scope`: `shared`/`unique` | `{ok, data, meta, action}` | 详情栏「彻底删除 skill / 删除本地副本」；`shared` 删中央实体 + 所有链接，`unique` 只删该 agent 的副本 |
@@ -140,6 +158,9 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 | `copy_path(text)` | 文本（≤2000 字） | `{ok, text}` | 详情栏「复制路径」 |
 | `open_dir(scope, key)` | `scope`: `shared`/`unique`/`agent`，只接受 scope+key | `{ok, path}` | 详情栏「打开目录」（路径由后端现算，防任意路径） |
 | `set_agent(key, on)` | agent key + 开关目标值 | `{ok, data, meta, action}` | 智能体看板的开关；开=补链接，关=撤链接 |
+| `promote_unique(key)` | `tool/name` | `{ok, data, meta, action}` | 独有行详情栏「转为共有」（单个实体拷进中央仓库 + 迁移改名备注） |
+| `adopt_store(path)` | 候选仓库绝对路径 | `{ok, data, meta, action:{store, previous, skills}}` | 首启引导「接管该仓库」；守卫见 §1.3，只写 config.json + 重扫 |
+| `adopt_local_skills()` | — | `{ok, data, meta, action:{adopted, skipped, relinked, linked, files, bytes, metaMoved}}` | 首启引导「一键收编」（只收 `src=main` 实体行） |
 | `win_min / win_max / win_close` | — | `{ok}` | 标题栏三键 |
 | `win_bounds()` | — | `{ok, bounds:{x,y,w,h}, maximized}` | 标题栏拖动 / 四边四角 grip 按下时取基准外框（CSS 像素） |
 | `win_set_bounds(x, y, w, h)` | CSS 像素矩形 | `{ok, bounds}` | 标题栏拖动与 grip 拖动中按位移算出的目标矩形，后端 `SetWindowPos` 落窗 |
@@ -287,3 +308,8 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 开关即在其 skills 目录建指向 `<安装目录>\store\<skill>` 的 junction。失败路径都有明确
 出口：缺 pywebview → 系统弹窗 + 退出码 2；store 不可用 / adapters.json 损坏 → 界面
 启动错误页（错误详情 + 重试），不会拿演示数据冒充真实数据。
+
+**Setup.exe 形态（v0.3.1 起）**：冻结版不跟随安装目录，数据一律落 `%LOCALAPPDATA%\SkillLocker`
+（`store` / `skilllocker.db` / `config.json` / `desktop_profile`），安装程序只创建程序文件与
+快捷方式，**不预置任何技能** —— 所以全新安装首启的仓库是空的，界面按 §1.3 给出
+「接管已有仓库 / 一键收编 / 导入」三个出口，而不是留一面「共有 0」的空看板。

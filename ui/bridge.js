@@ -60,6 +60,8 @@
     delete_skill: 180000,
     uninstall_unique: 180000,
     promote_unique: 180000,
+    adopt_store: 180000,
+    adopt_local_skills: 600000,  // 批量拷贝 + 一次 rescan，按仓库大小给足预算
     set_agent: 180000,
     reseed_meta: 120000,
     diff: 60000,
@@ -104,6 +106,8 @@
     deleteSkill: function (scope, key) { return call('delete_skill', scope, key); },
     uninstallUnique: function (key) { return call('uninstall_unique', key); },
     promoteUnique: function (key) { return call('promote_unique', key); },
+    adoptStore: function (path) { return call('adopt_store', path); },
+    adoptLocalSkills: function () { return call('adopt_local_skills'); },
     chooseDir: function () { return call('choose_dir'); },
     importPreflight: function (src, name) { return call('import_preflight', src, name); },
     importSkill: function (src, name, folder) { return call('import_skill', src, name, folder); },

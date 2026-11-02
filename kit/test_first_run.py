@@ -49,6 +49,31 @@ ADAPTERS = [
      "skills_dir": ".cursor/skills", "detect_dir": ".cursor"},
 ]
 
+# 同 ADAPTERS，但 claude_code 还声明一个外部目录（~/.agents/skills）：
+# 首启探测必须把它当「agent 自己管的地盘」排除，不能建议接管
+ADAPTERS_WITH_EXTRA = [
+    {"key": "claude_code", "label": "Claude Code",
+     "skills_dir": ".claude/skills", "detect_dir": ".claude",
+     "extra_dirs": [".agents/skills"]},
+    {"key": "cursor", "label": "Cursor",
+     "skills_dir": ".cursor/skills", "detect_dir": ".cursor"},
+]
+
+
+def skill_dir(root, name, body="body"):
+    """造一个真的 skill 目录（含 SKILL.md），返回路径。"""
+    p = os.path.join(root, name)
+    write(os.path.join(p, "SKILL.md"),
+          "---\nname: %s\ndescription: %s\n---\n%s\n" % (name, name, body))
+    return p
+
+
+def empty_store(td, name="store"):
+    """安装版首启的真实形态：仓库目录存在但一个技能也没有。"""
+    p = os.path.normpath(os.path.join(td, name)).replace(os.sep, "/")
+    os.makedirs(p.replace("/", os.sep), exist_ok=True)
+    return p
+
 
 def absent_drive():
     """找一个本机不存在的盘符构造「坏 store」用例；全占满时让用例显式失败。"""
@@ -107,6 +132,8 @@ def _():
             assert all(a["status"] == "off" and not a["enabled"] for a in agents), agents
             assert [s["name"] for s in skills] == ["demo-skill"], skills
             assert len(res["data"]["folders"]) == len(skilllocker.FOLDER_PRESETS)
+            # 仓库有内容 → 不该出现首启引导
+            assert res["data"].get("firstRun") is None, res["data"].get("firstRun")
             con = skilllocker.db()
             try:
                 rows = {r["key"]: r["enabled"] for r in con.execute("select key,enabled from tools")}
@@ -249,6 +276,238 @@ def _():
         desktop.webview, desktop._report, sys.argv = old_webview, old_report, old_argv
     assert rc == 2, rc
     assert reports and "pywebview" in reports[0], reports
+
+
+# ---------------------------------------------------------------- 首启接管 / 一键收编
+@case("first_run: 空仓库首启给出引导块（storeEmpty + adoptable + candidate）")
+def _():
+    if sys.platform != "win32":
+        raise AssertionError("仅 Windows（需要 junction）")
+    with tempfile.TemporaryDirectory() as td:
+        store = empty_store(td)
+        central = os.path.join(td, "central")
+        with sandbox(td, store=store, adapters=ADAPTERS) as (home, _s):
+            skill_dir(central, "one")
+            skill_dir(central, "two")
+            for tool_dir in (".claude", ".cursor"):
+                for n in ("one", "two"):
+                    skilllocker.make_junction(
+                        os.path.join(home, tool_dir, "skills", n),
+                        os.path.join(central, n))
+            skill_dir(os.path.join(home, ".claude", "skills"), "local-only")
+            import desktop
+            res = desktop.Api().bootstrap()
+            assert res.get("ok"), res
+            assert res["data"]["skills"] == []  # 空仓库：共有 0（就是用户报的现象）
+            fr = res["data"]["firstRun"]
+            assert fr and fr["storeEmpty"] is True, fr
+            assert fr["candidate"] and fr["candidate"]["skillCount"] == 2, fr
+            assert [a["name"] for a in fr["adoptable"]] == ["local-only"], fr["adoptable"]
+            assert fr["adoptableAgents"] == ["Claude Code"], fr["adoptableAgents"]
+
+
+@case("first_run: 反推可接管仓库的边界（agent 地盘 / 链接太少都不给候选）")
+def _():
+    if sys.platform != "win32":
+        raise AssertionError("仅 Windows（需要 junction）")
+    with tempfile.TemporaryDirectory() as td:
+        store = empty_store(td)
+        with sandbox(td, store=store, adapters=ADAPTERS_WITH_EXTRA) as (home, _s):
+            con = skilllocker.db()
+            try:
+                cfg = skilllocker.load_config()
+                skilllocker.sync_tools_from_adapters(con, cfg)
+
+                def cand():
+                    return skilllocker.find_existing_store(con, cfg)
+
+                assert cand() is None, cand()
+                # 1) 只有一条链接 → 证据不足（min_links=2）
+                one = skill_dir(os.path.join(td, "central"), "solo")
+                skilllocker.make_junction(
+                    os.path.join(home, ".claude", "skills", "solo"), one)
+                assert cand() is None, "单条链接不该当仓库证据"
+                # 2) 两条链接指向同一父目录 → 候选成立
+                skill_dir(os.path.join(td, "central"), "second")
+                skilllocker.make_junction(
+                    os.path.join(home, ".cursor", "skills", "second"),
+                    os.path.join(td, "central", "second"))
+                c = cand()
+                assert c and c["skillCount"] == 2 and c["linkCount"] == 2, c
+                assert c["store"] == skilllocker.norm_path(os.path.join(td, "central")), c
+                # 3) 链接汇聚点落在 agent 自己声明的外部目录 → 绝不接管
+                agents_root = os.path.join(home, ".agents", "skills")
+                for n in ("ext-a", "ext-b"):
+                    skill_dir(agents_root, n)
+                    skilllocker.make_junction(
+                        os.path.join(home, ".claude", "skills", n),
+                        os.path.join(agents_root, n))
+                c2 = cand()
+                assert c2["store"] != skilllocker.norm_path(agents_root), c2
+            finally:
+                con.close()
+
+
+@case("first_run: adopt_store 改指 + 落盘 config + 登记技能，独有行归零")
+def _():
+    if sys.platform != "win32":
+        raise AssertionError("仅 Windows（需要 junction）")
+    with tempfile.TemporaryDirectory() as td:
+        store = empty_store(td)
+        with sandbox(td, store=store, adapters=ADAPTERS) as (home, _s):
+            central = os.path.join(td, "central")
+            for n in ("one", "two", "three"):
+                skill_dir(central, n)
+                for tool_dir in (".claude", ".cursor"):
+                    skilllocker.make_junction(
+                        os.path.join(home, tool_dir, "skills", n),
+                        os.path.join(central, n))
+            import desktop
+            api = desktop.Api()
+            assert api.bootstrap()["ok"]
+            got = api.adopt_store(central)
+            assert got.get("ok"), got
+            res = api.bootstrap()  # 下一次启动必须沿用被接管的仓库
+            assert res.get("ok"), res
+            assert [s["name"] for s in res["data"]["skills"]] == ["one", "three", "two"], \
+                [s["name"] for s in res["data"]["skills"]]
+            assert res["data"]["unique"] == [], res["data"]["unique"]  # 链接已指向仓库
+            assert res["data"]["firstRun"] is None, res["data"]["firstRun"]
+            with open(skilllocker_base.CONFIG_FILE, encoding="utf-8") as fh:
+                assert skilllocker.norm_path(json.load(fh)["store"]) == \
+                    skilllocker.norm_path(central), fh
+            con = skilllocker.db()
+            try:
+                kinds = {r["kind"] for r in
+                         con.execute("select kind from events where kind in ('adopt-store','scan')")}
+                assert "adopt-store" in kinds, kinds
+            finally:
+                con.close()
+
+
+@case("first_run: adopt_store 守卫（非空仓库 / 无 SKILL.md / agent 目录 / 自己）")
+def _():
+    if sys.platform != "win32":
+        raise AssertionError("仅 Windows（需要 junction）")
+    with tempfile.TemporaryDirectory() as td:
+        store = empty_store(td)
+        with sandbox(td, store=store, adapters=ADAPTERS) as (home, _s):
+            central = os.path.join(td, "central")
+            skill_dir(central, "one")
+            skill_dir(central, "two")
+            skilllocker.make_junction(
+                os.path.join(home, ".claude", "skills", "one"),
+                os.path.join(central, "one"))
+            skilllocker.make_junction(
+                os.path.join(home, ".cursor", "skills", "two"),
+                os.path.join(central, "two"))
+            import desktop
+            api = desktop.Api()
+            assert api.bootstrap()["ok"]
+            bad = api.adopt_store(os.path.join(td, "not-here"))
+            assert not bad.get("ok") and "不存在" in bad["error"], bad
+            empty_dir = os.path.join(td, "nothing")
+            os.makedirs(empty_dir, exist_ok=True)
+            bad = api.adopt_store(empty_dir)
+            assert not bad.get("ok") and "SKILL.md" in bad["error"], bad
+            bad = api.adopt_store(os.path.join(home, ".claude", "skills"))
+            assert not bad.get("ok") and "agent 自己的技能目录" in bad["error"], bad
+            good = api.adopt_store(central)
+            assert good.get("ok"), good
+            bad = api.adopt_store(central)  # 已经是当前仓库
+            assert not bad.get("ok") and "已经是当前中央仓库" in bad["error"], bad
+            # 仓库已有内容后不再允许首启改指（防共有 meta 被 prune 误清）
+            other = os.path.join(td, "another")
+            skill_dir(other, "x")
+            skill_dir(other, "y")
+            bad = api.adopt_store(other)
+            assert not bad.get("ok") and "空仓库" in bad["error"], bad
+
+
+@case("first_run: adopt_local_skills 只收 main 实体，extra / foreign-link 不收")
+def _():
+    if sys.platform != "win32":
+        raise AssertionError("仅 Windows（需要 junction）")
+    with tempfile.TemporaryDirectory() as td:
+        store = empty_store(td)
+        with sandbox(td, store=store, adapters=ADAPTERS_WITH_EXTRA) as (home, _s):
+            cl = os.path.join(home, ".claude", "skills")
+            cu = os.path.join(home, ".cursor", "skills")
+            skill_dir(cl, "alpha")
+            skill_dir(cu, "alpha")               # 同名同内容：只收一份
+            skill_dir(cl, "beta")
+            write(os.path.join(skill_dir(cu, "beta"), "SKILL.md"),
+                  "---\nname: beta\n---\n另一版\n")  # 同名不同内容：跳过
+            skill_dir(os.path.join(home, ".agents", "skills"), "ext-skill")
+            outside = skill_dir(os.path.join(td, "elsewhere"), "linked-skill")
+            skilllocker.make_junction(os.path.join(cl, "linked-skill"), outside)
+            import desktop
+            api = desktop.Api()
+            boot = api.bootstrap()
+            assert boot.get("ok"), boot
+            assert sorted(a["name"] for a in boot["data"]["firstRun"]["adoptable"]) == \
+                ["alpha", "alpha", "beta", "beta"], boot["data"]["firstRun"]["adoptable"]
+            res = api.adopt_local_skills()
+            assert res.get("ok"), res
+            act = res["action"]
+            assert sorted(act["adopted"]) == ["alpha", "beta"], act
+            assert [s["name"] for s in res["data"]["skills"]] == ["alpha", "beta"], \
+                res["data"]["skills"]
+            assert act["skipped"] and "内容不同" in act["skipped"][0]["reason"], act["skipped"]
+            names = {u["name"] for u in res["data"]["unique"]}
+            assert names == {"beta", "ext-skill", "linked-skill"}, names
+            kinds = {(u["src"], u["kind"]) for u in res["data"]["unique"]}
+            assert ("main", "unique") not in kinds, kinds          # 可收编实体已全部进仓库
+            assert (".agents/skills", "unique") in kinds, kinds    # 外部目录只展示不收
+            assert ("main", "foreign-link") in kinds, kinds        # 指向别处的链接只展示不收
+            assert ("main", "overridden") in kinds, kinds          # 同名不同内容留给人工处置
+            assert res["data"]["firstRun"] is None, res["data"]["firstRun"]
+            # 非破坏：源副本都还在（两个 agent 的分发开关都是关的）
+            assert os.path.isdir(os.path.join(cl, "alpha")) and not skilllocker.is_reparse(
+                os.path.join(cl, "alpha")), "开关关着不该改写 agent 目录"
+            assert os.path.isdir(os.path.join(cu, "alpha"))
+            assert os.path.isfile(os.path.join(store.replace("/", os.sep), "beta", "SKILL.md"))
+
+
+@case("first_run: 收编迁移改名备注，并对开着分发的 agent 对齐成链接")
+def _():
+    if sys.platform != "win32":
+        raise AssertionError("仅 Windows（需要 junction）")
+    with tempfile.TemporaryDirectory() as td:
+        store = empty_store(td)
+        with sandbox(td, store=store, adapters=ADAPTERS) as (home, _s):
+            cl = os.path.join(home, ".claude", "skills")
+            cu = os.path.join(home, ".cursor", "skills")
+            skill_dir(cl, "alpha")
+            skill_dir(cl, "beta")
+            skill_dir(cu, "gamma")
+            import desktop
+            api = desktop.Api()
+            assert api.bootstrap()["ok"]
+            con = skilllocker.db()
+            try:
+                skilllocker.set_meta(con, "unique", "claude_code/beta",
+                                     {"display": "我的小技能", "note": "备注保留"})
+                con.execute("update tools set enabled=1 where key='claude_code'")
+                con.commit()
+            finally:
+                con.close()
+            res = api.adopt_local_skills()
+            assert res.get("ok"), res
+            act = res["action"]
+            assert sorted(act["adopted"]) == ["alpha", "beta", "gamma"], act
+            assert act["metaMoved"] == 1, act
+            assert res["meta"].get("beta", {}).get("display") == "我的小技能", res["meta"]
+            assert act["relinked"] == 2, act    # claude 开着：两个同名实体转成链接
+            assert act["linked"] == 1, act       # gamma 是仓库新技能，给开着的 claude 补一条链接
+            for n in ("alpha", "beta"):
+                p = os.path.join(cl, n)
+                assert skilllocker.is_reparse(p), p
+                assert skilllocker.link_target(p) == skilllocker.norm_path(
+                    os.path.join(store, n)), p
+            assert os.path.isdir(os.path.join(cu, "gamma")) and not skilllocker.is_reparse(
+                os.path.join(cu, "gamma")), "cursor 开关关着，源副本必须保留"
+            assert res["data"]["unique"] == [], res["data"]["unique"]
 
 
 def main():

@@ -9,7 +9,8 @@ import sys
 from skilllocker_base import (  # noqa: F401 - 部分名字经 skilllocker 门面再导出
     APP_VERSION, HOME, _file_digest, _tool_mark, file_list, fmt_bytes,
     folder_rows, last_scan_time, ordered_tools, target_state, tree_stats)
-from skilllocker_store import agent_entries, unique_entries
+from skilllocker_store import (  # noqa: F401 - 门面再导出
+    adoptable_rows, agent_entries, find_existing_store, unique_entries)
 
 
 def _db_path():
@@ -71,6 +72,25 @@ def list_boards(con, cfg):
 
     scan_at = last_scan_time(con)
     generated = datetime.datetime.now()
+
+    # 首启引导（只在中央仓库没有任何技能时算，正常机器零开销）：
+    # 安装版的默认仓库是空的，安装程序不预置技能 —— 不给出「接管已有仓库 /
+    # 一键收编」的入口，用户看到的就是「共有 0、全是独有」，像 bug。
+    # candidate 来自各 agent 目录里已有 junction 的汇聚点（见 find_existing_store），
+    # 反推不出来就只给收编 / 导入入口。
+    first_run = None
+    if not skill_out:
+        ready = adoptable_rows(unique)
+        first_run = {
+            "storeEmpty": True,
+            "candidate": find_existing_store(con, cfg, tools),
+            "adoptable": [{"tool": u["tool"], "toolLabel": u["toolLabel"],
+                           "mark": u["mark"], "name": u["name"],
+                           "files": u["files"], "bytes": u["bytes"]}
+                          for u in ready],
+            "adoptableAgents": sorted({u["toolLabel"] for u in ready}),
+        }
+
     out_tools = []
     for t in tools:
         rel = ""
@@ -114,6 +134,7 @@ def list_boards(con, cfg):
         "unique": unique,
         "events": [],
         "conflict": conflict,
+        "firstRun": first_run,
     }
 
 

@@ -303,6 +303,26 @@ design|taste|stitch|minimalist|brutalist|brandkit|imagegen|image-to-code|redesig
 
 ---
 
+### 4.2 首启引导面板（中央仓库为空）
+
+后端 `list_boards()` 在共有为 0 时回 `data.firstRun`（§1.3 of `kit/DESKTOP.md`），前端渲染 `#first-run`：
+
+| 项 | 规格 |
+|---|---|
+| 出现条件 | `MODE === 'db'` 且 `SKILLS.length === 0` 且 `firstRun` 非空且未被「以后再说」收起；`firstRun` 内容变化（候选仓库 / 可收编数）时忽略态自动复位 |
+| 内容区 | 面板出现时 `#list-card` 与 `#grid-root` **一起收起**（`renderContent` 顶部早退），不给「0 个 skill 的夹墙」和「没有匹配的 skill」两种假空态 |
+| 容器 | `border-radius:14px`，1px `color-mix(accent 20%, line)` 边框，`accent-soft` → `surface` 竖向渐变，`--shadow-1`；标题行 + 出口列表两段式 |
+| 标题 | 「中央仓库还是空的，所以「共有技能」是 0」+ 一行口径说明（共有 = 仓库 `<store 路径>`；独有 = 各 agent 能加载但仓库没有 / 内容不同）+ 本机计数（已检测 agent 数、独有行数） |
+| 出口①接管 | 仅 `firstRun.candidate` 存在时出现，排在首位：标题「接管本机已有的中央仓库」，正文给 `path`、`skillCount`、贡献链接的 agent 与前 3 个 agent 名 + `linkCount` 条链接；按钮【接管该仓库】→ `adopt_store(candidate.store)` |
+| 出口②收编 | `firstRun.adoptable` 非空时出现：标题「一键收编本机 N 个技能」，正文点明来源 agent、源目录保留、外部目录 / 指向别处的链接 / 同名不同内容不在范围；按钮【收编】→ `adopt_local_skills()` |
+| 出口③导入 | 恒有：【导入目录】直接打开现有导入弹窗（`impOpen('source')`），本地目录与 GitHub 两个来源都在里面 |
+| 确认与结果 | 两个写盘出口都先 `confirmModal`（路径、技能数、是否改链接、可逆说明），执行期 `runProgress` 收口，回包经 `applyBootstrap` 落数据；toast 汇报接管/收编数、跳过数与对齐链接数 |
+| 失败 | 桥 `ok:false` → toast『接管失败 / 收编失败』原样显示后端守卫文案（当前仓库非空、落在 agent 目录、同名不同内容等），界面不自行猜测 |
+| 留痕 | 首次渲染 `uiLog('firstrun', {store, unique, candidate, candidateSkills, adoptable})` 进 `skilllocker.log`；没这行就是面板没出现 |
+| 回归 | `python kit/test_firstrun_ui.py`（18 项，Playwright + 真实后端沙箱回包） |
+
+---
+
 ## 5. 数据契约
 
 ### 5.1 `data.js` → `window.SKILLLOCKER_DATA`

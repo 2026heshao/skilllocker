@@ -17,6 +17,12 @@
   var AGENTS = [];
   var FOLDERS = [];
   var CONFLICT = null;
+  // 首启引导块（后端 list_boards 在仓库为空时给，见 kit/skilllocker_boards.py）
+  var FIRST_RUN = null;
+  var firstRunDismissed = false;
+  var firstRunSig = '';
+  var firstRunLogged = false;
+  var frBusy = false;   // 接管 / 收编进行中：按钮禁用并显示「处理中」，避免重复点击
 
   var STORE = 'D:\\skilllocker\\store';
   var SCAN = '22:16';
@@ -30,6 +36,13 @@
     UNIQUE = D.unique || [];
     AGENTS = D.agents || [];
     CONFLICT = (D.conflict && D.conflict.skill) ? D.conflict : null;
+    // 首启引导：后端只在「仓库里一个技能都没有」时给这个块，接管 / 收编成功后
+    // 下一次快照自然为 null，面板随之消失；内容变化时清掉「以后再说」的忽略态
+    var frNext = D.firstRun || null;
+    var frSig = frNext ? JSON.stringify([frNext.candidate && frNext.candidate.store,
+                                        (frNext.adoptable || []).length]) : '';
+    if (frSig !== firstRunSig) { firstRunSig = frSig; firstRunDismissed = false; firstRunLogged = false; }
+    FIRST_RUN = frNext;
     STORE = META.store || STORE;
     SCAN = META.scanAt || SCAN;
     // 桌面端永远信后端快照；本地模式的文件夹定义以 prefs（含自建夹）为准
@@ -980,6 +993,178 @@
     });
   }
 
+  /* ---------------------------------------------------------- 首启引导 */
+  // 安装版的中央仓库（%LOCALAPPDATA%\SkillLocker\store）天生是空的，安装程序
+  // 不预置任何技能 —— 不处理就是「共有 0 / 全是独有」，看着像 bug。这里按后端
+  // firstRun 快照给出口：① 接管从已有 junction 反推出来的仓库；② 一键收编各
+  // agent 主目录里的实体技能；③ 手动导入。范围与守卫都在后端把关。
+  function firstRunModel() {
+    if (MODE !== 'db' || !FIRST_RUN || firstRunDismissed || SKILLS.length) return null;
+    return {
+      cand: FIRST_RUN.candidate || null,
+      items: FIRST_RUN.adoptable || [],
+      agents: FIRST_RUN.adoptableAgents || [],
+      uniqueCount: UNIQUE.length,
+      agentCount: AGENTS.filter(function (a) { return a.detected; }).length
+    };
+  }
+
+  function frOptHtml(o) {
+    return '<div class="fr-opt">' +
+      '<span class="fr-opt-icon">' + icon(o.icon) + '</span>' +
+      '<div class="fr-opt-main"><b>' + esc(o.title) + '</b><span>' + o.text + '</span></div>' +
+      '<button class="btn' + (o.primary ? ' btn-primary' : '') + '" id="' + o.id + '">' +
+      esc(o.label) + '</button></div>';
+  }
+
+  function firstRunHtml(m) {
+    var opts = [];
+    if (m.cand) {
+      var labels = m.cand.tools.map(function (t) { return esc(t.label); });
+      var who = labels.slice(0, 3).join('、') +
+        (labels.length > 3 ? ' 等 ' + labels.length + ' 个 agent' : '');
+      opts.push(frOptHtml({
+        icon: 'folder-open', id: 'fr-adopt-store', label: '接管该仓库', primary: true,
+        title: '接管本机已有的中央仓库',
+        text: '<code>' + esc(m.cand.path) + '</code> 里有 ' + m.cand.skillCount +
+          ' 个技能，正被 ' + who + ' 的 ' + m.cand.linkCount +
+          ' 条链接指向。接管只写 config.json 并重新登记，不搬文件、不建链接，随时可退回默认仓库。'
+      }));
+    }
+    if (m.items.length) {
+      opts.push(frOptHtml({
+        icon: 'download', id: 'fr-adopt-local', label: '收编',
+        primary: !m.cand,
+        title: '一键收编本机 ' + m.items.length + ' 个技能',
+        text: '把 ' + esc(m.agents.join('、')) + ' 主 skills 目录里的实体技能各拷一份进中央仓库，' +
+          '拷完它们就是共有技能。源目录保留；外部目录、指向别处的链接、同名但内容不同的副本都不动。'
+      }));
+    }
+    opts.push(frOptHtml({
+      icon: 'layers', id: 'fr-import', label: '导入目录',
+      title: '自己挑一个目录导入',
+      text: '导入弹窗支持本地目录与 GitHub 来源，一次一个，入库前会给预检报告。'
+    }));
+    return '<div class="fr-head">' +
+      '<div class="fr-title"><b>中央仓库还是空的，所以「共有技能」是 0</b>' +
+      '<span>共有 = 中央仓库 <code>' + esc(STORE) + '</code> 里的技能；' +
+      '独有 = 各 agent 目录里能加载、但仓库没有（或内容不同）的技能。' +
+      '本机已检测到 ' + m.agentCount + ' 个 agent、' + m.uniqueCount + ' 个独有技能。</span></div>' +
+      '<button class="fr-dismiss" id="fr-dismiss" title="本次启动不再显示">' +
+      icon('x') + '</button></div>' +
+      '<div class="fr-opts">' + opts.join('') + '</div>';
+  }
+
+  function renderFirstRun() {
+    var root = document.getElementById('first-run');
+    if (!root) return;
+    var m = firstRunModel();
+    if (!m) {
+      root.hidden = true;
+      root.innerHTML = '';
+      return;
+    }
+    root.hidden = false;
+    root.innerHTML = firstRunHtml(m);
+    // 安装版首启排障留痕：日志里没有 firstrun 行 = 面板压根没渲染
+    if (!firstRunLogged) {
+      firstRunLogged = true;
+      uiLog('firstrun', { store: STORE, unique: m.uniqueCount,
+                          candidate: m.cand ? m.cand.store : null,
+                          candidateSkills: m.cand ? m.cand.skillCount : 0,
+                          adoptable: m.items.length });
+    }
+    var bind = function (id, fn) {
+      var el = document.getElementById(id);
+      if (el) el.addEventListener('click', fn);
+    };
+    bind('fr-adopt-store', requestAdoptStore);
+    bind('fr-adopt-local', requestAdoptLocal);
+    bind('fr-import', function () { impOpen('source'); });
+    bind('fr-dismiss', function () { firstRunDismissed = true; renderFirstRun(); });
+    if (frBusy) {
+      // 后端串行执行（OPS_LOCK），重复点击只会排队；界面直接禁用并说明在做什么
+      [['fr-adopt-store', '接管该仓库'], ['fr-adopt-local', '收编']].forEach(function (pair) {
+        var el = document.getElementById(pair[0]);
+        if (!el) return;
+        el.disabled = true;
+        el.dataset.idleLabel = pair[1];
+        el.textContent = '处理中…';
+      });
+      var dismiss = document.getElementById('fr-dismiss');
+      if (dismiss) dismiss.disabled = true;
+    } else {
+      ['fr-adopt-store', 'fr-adopt-local'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el && el.dataset.idleLabel) { el.disabled = false; el.textContent = el.dataset.idleLabel; }
+      });
+      var d2 = document.getElementById('fr-dismiss');
+      if (d2) d2.disabled = false;
+    }
+  }
+
+  function requestAdoptStore() {
+    var m = firstRunModel();
+    if (!m || !m.cand || frBusy) return;
+    var c = m.cand;
+    confirmModal('把中央仓库改成 ' + c.path + '？',
+      '接管后「共有技能」就是这个目录里的 ' + c.skillCount + ' 个技能，' + c.linkCount +
+      ' 条已有链接直接认作本工具的分发结果，独有看板相应减少。' +
+      '只更新 config.json 并重新扫描登记，不搬移、不删除任何技能文件。',
+      '接管该仓库', function () {
+        closeModal();
+        frBusy = true;
+        renderFirstRun();
+        runProgress(900, function () {
+          SKB.adoptStore(c.store).then(function (res) {
+            frBusy = false;
+            applyBootstrap(res);
+            var act = res.action || {};
+            if (SKILLS.length) setState({ board: 'shared', folder: null, selected: SKILLS[0].name });
+            toast('ok', '已接管中央仓库',
+              (act.skills || 0) + ' 个技能进入共有看板 · 原仓库 ' + (act.previous || ''));
+          }).catch(function (err) {
+            frBusy = false;
+            toast('bad', '接管失败', String(err && err.message || err));
+          });
+        });
+      });
+  }
+
+  function requestAdoptLocal() {
+    var m = firstRunModel();
+    if (!m || !m.items.length || frBusy) return;
+    var uniq = {};
+    m.items.forEach(function (a) { uniq[a.name] = 1; });
+    var names = Object.keys(uniq);
+    confirmModal('把 ' + names.length + ' 个技能收进中央仓库？',
+      '来源是 ' + m.agents.join('、') + ' 的主 skills 目录（磁盘上 ' + m.items.length +
+      ' 份副本，同名同内容只收一份）。每个技能拷贝一份进仓库并登记为共有；' +
+      '分发开关开着的 agent 会把源目录对齐成指向仓库的链接，其余原样保留。',
+      '开始收编', function () {
+        closeModal();
+        frBusy = true;
+        renderFirstRun();
+        runProgress(1200, function () {
+          SKB.adoptLocalSkills().then(function (res) {
+            frBusy = false;
+            applyBootstrap(res);
+            var act = res.action || {};
+            var got = (act.adopted || []).length;
+            var align = (act.relinked || 0) + (act.linked || 0);
+            var skip = (act.skipped || []).length;
+            if (SKILLS.length) setState({ board: 'shared', folder: null, selected: SKILLS[0].name });
+            toast(got ? 'ok' : 'warn', got ? '已收编 ' + got + ' 个技能' : '没有可收编的技能',
+              (skip ? skip + ' 个已跳过（同名不同内容等），到独有看板逐条处置'
+                    : '源目录已保留') + (align ? ' · 对齐 ' + align + ' 处分发链接' : ''));
+          }).catch(function (err) {
+            frBusy = false;
+            toast('bad', '收编失败', String(err && err.message || err));
+          });
+        });
+      });
+  }
+
   /* ---------------------------------------------------------- render: content / list */
   // 网格视图只在「共有 / 独有看板 + 根层级 + 该看板视图=网格」出现；
   // 文件夹 / agent 文件夹 / 未归档永远是列表 + 面包屑。
@@ -987,6 +1172,18 @@
     var gridRoot = document.getElementById('grid-root');
     var listCard = document.getElementById('list-card');
     var crumbBar = document.getElementById('crumb-bar');
+    renderFirstRun();
+    // 首启空仓库：共有看板的内容区就是引导面板本身。再挂一面「0 个 skill 的
+    // 分类夹墙」或「没有匹配的 skill」空态只会误导，两个容器一起收起。
+    if (state.board === 'shared' && !state.folder && !SKILLS.length &&
+        !document.getElementById('first-run').hidden) {
+      listCard.hidden = true;
+      gridRoot.hidden = true;
+      gridRoot.innerHTML = '';
+      crumbBar.hidden = true;
+      renderFilters();
+      return;
+    }
     var gridView = (state.board === 'shared' || state.board === 'unique') &&
       !state.folder && viewOf(state.board) === 'grid';
 
@@ -1129,13 +1326,19 @@
       cover = '<div class="row-cover"><span class="row-starred-at">' +
         fmtStarredAt(r.starredAt) + '</span></div>';
     } else if (r.board === 'shared') {
+      var linked = r.skill.agents || [];
+      var real = r.skill.realIn || [];
       var segs = ENABLED.map(function (t) {
-        var bad = (r.skill.realIn || []).indexOf(t.key) > -1;
-        return '<span class="cover-seg ' + (bad ? 'bad' : '') + '" title="' + esc(t.label) + ' · ' + (bad ? '同名冲突' : 'junction') + '"></span>';
+        var bad = real.indexOf(t.key) > -1;
+        var ok = linked.indexOf(t.key) > -1;
+        var cls = bad ? 'bad' : ok ? '' : 'none';
+        var tip = bad ? '同名冲突' : ok ? '已分发' : '未分发';
+        return '<span class="cover-seg ' + cls + '" title="' + esc(t.label + ' · ' + tip) + '"></span>';
       }).join('');
-      var okCount = ENABLED.length - (r.conflict ? 1 : 0);
+      var okCount = linked.length;
+      var coverCls = 'cover-text' + (r.conflict ? ' bad' : okCount < ENABLED.length ? ' is-partial' : '');
       cover = '<div class="row-cover"><div class="cover-bar">' + segs + '</div>' +
-        '<span class="cover-text ' + (r.conflict ? 'bad' : '') + '">' + okCount + '/' + ENABLED.length + '</span></div>';
+        '<span class="' + coverCls + '">' + okCount + '/' + ENABLED.length + '</span></div>';
     } else {
       var sharedNames = (r.entry.sharedWith || []).map(toolLabelOf);
       var sharedTip = sharedNames.length
@@ -1476,18 +1679,24 @@
     }
 
     var coverHtml = '';
+    var missingCount = 0;
     if (r.board === 'shared') {
-      var tools = r.skill.agents || [];
+      var linked = r.skill.agents || [];
+      var real = r.skill.realIn || [];
       coverHtml = ENABLED.map(function (t) {
-        var bad = (r.skill.realIn || []).indexOf(t.key) > -1;
-        return '<div class="cover-item' + (bad ? ' is-bad' : '') + '" title="' + esc(t.dir) + '">' +
+        var bad = real.indexOf(t.key) > -1;
+        var ok = linked.indexOf(t.key) > -1;
+        if (!ok && !bad) missingCount++;
+        var cls = bad ? ' is-bad' : ok ? '' : ' is-missing';
+        var tip = (bad ? '同名冲突' : ok ? '已分发' : '未分发') + ' · ' + t.dir;
+        return '<div class="cover-item' + cls + '" title="' + esc(tip) + '">' +
           '<b>' + esc(t.mark) + '</b><span>' + esc(t.label) + '</span>' +
-          icon(bad ? 'alert' : 'check') + '</div>';
+          icon(bad ? 'alert' : ok ? 'check' : 'minus') + '</div>';
       }).join('');
       if (prefs.showDisabled) {
         var offs = TOOLS.filter(function (t) { return !t.enabled; });
         coverHtml += offs.map(function (t) {
-          return '<div class="cover-item" style="opacity:.55" title="' + esc(t.dir) + '">' +
+          return '<div class="cover-item is-off" title="未启用分发 · ' + esc(t.dir) + '">' +
             '<b>' + esc(t.mark) + '</b><span>' + esc(t.label) + '</span>' +
             icon('lock') + '</div>';
         }).join('');
@@ -1597,8 +1806,14 @@
       '<div class="divider"></div>' +
       '<div class="field-block">' +
         '<div class="field-label"><span>' + (r.board === 'shared' ? '分发覆盖' : '本地副本') + '</span>' +
-        '<span style="text-transform:none;letter-spacing:0;font-weight:400">' + (r.board === 'shared' ? ENABLED.length + ' 个 agent' : esc(r.entry.toolLabel)) + '</span></div>' +
+        '<span style="text-transform:none;letter-spacing:0;font-weight:400">' +
+        (r.board === 'shared'
+          ? '已分发 ' + (r.skill.agents || []).length + ' / ' + ENABLED.length
+          : esc(r.entry.toolLabel)) + '</span></div>' +
         (r.board === 'shared' ? '<div class="cover-grid">' + coverHtml + '</div>' : coverHtml) +
+        (r.board === 'shared' && missingCount
+          ? '<div class="field-help">灰色 = 已启用但还没分发；重新打开该 agent 的分发开关即可补齐。</div>'
+          : '') +
       '</div>' +
       '<div class="field-block">' + metaHtml + '</div>' +
       '<div class="field-block">' +

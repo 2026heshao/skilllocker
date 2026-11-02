@@ -15,7 +15,7 @@ import skilllocker_base as _base
 from skilllocker_base import (  # noqa: F401 - 部分名字经 skilllocker 门面再导出
     HOME, IGNORE_NAMES, _hash_tree, _tool_mark, dir_stats, has_skill_md,
     is_reparse, link_target, log_event, norm_path, now_ms, ordered_tools,
-    parse_frontmatter, sha_tree, target_state)
+    parse_frontmatter, path_under, sha_tree, target_state)
 
 AGENT_STATUS_LABEL = {"connected": "已连接", "off": "已关闭", "missing": "未安装"}
 
@@ -61,20 +61,18 @@ def sync_tools_from_adapters(con, cfg):
     return [r for r in rows if r[4]]
 
 
-def store_skill_dirs(cfg):
-    """中央仓库里的 skill 目录清单。
+def skill_dirs_under(root):
+    """列出 root 直属的 skill 目录（含 SKILL.md），与中央仓库同一口径。
 
-    根目录不可枚举（U 盘未挂载 / 网络断连 / 杀软锁目录）时**抛错**而不是当成
-    空仓库返回：rescan 拿到空清单会把所有 skill 当「已消失」从库里删掉，
-    prune_meta 再把用户 meta 一起清掉 —— 一次刷新静默不可逆（见 rescan）。
+    跳过隐藏目录 / .skpart-* 半成品 / 链接 / IGNORE_NAMES。
+    根不可枚举时抛 RuntimeError，调用方不能把它当空目录（rescan 会误清库）。
     """
-    root = cfg["store"]
     if not os.path.isdir(root):
-        raise RuntimeError("中央仓库目录不存在：%s" % root)
+        raise RuntimeError("目录不存在：%s" % root)
     try:
         names = sorted(os.listdir(root))
     except OSError as exc:
-        raise RuntimeError("中央仓库目录不可读，已放弃本轮扫描: %s" % exc)
+        raise RuntimeError("目录不可读，已放弃本轮扫描: %s" % exc)
     out = []
     for n in names:
         if n.startswith(".") or ".skpart-" in n:
@@ -86,6 +84,19 @@ def store_skill_dirs(cfg):
         if has_skill_md(p):
             out.append((n, p))
     return out
+
+
+def store_skill_dirs(cfg):
+    """中央仓库里的 skill 目录清单。
+
+    根目录不可枚举（U 盘未挂载 / 网络断连 / 杀软锁目录）时**抛错**而不是当成
+    空仓库返回：rescan 拿到空清单会把所有 skill 当「已消失」从库里删掉，
+    prune_meta 再把用户 meta 一起清掉 —— 一次刷新静默不可逆（见 rescan）。
+    """
+    root = cfg["store"]
+    if not os.path.isdir(root):
+        raise RuntimeError("中央仓库目录不存在：%s" % root)
+    return skill_dirs_under(root)
 
 
 def rescan(con, cfg):
@@ -456,6 +467,126 @@ def find_unique_row(con, cfg, tool_key, name):
         if u["tool"] == tool_key and u["name"] == name:
             return u
     return None
+
+
+# ---------------------------------------------------------------- 首启探测
+def adoptable_rows(unique):
+    """一键收编的可行范围：agent 主目录里的实体独有行。
+
+    口径与单行收编（promote_unique）一致，只是批量：src=main（就在 agent
+    自己的 skills_dir 直属位）、kind=unique（不是 foreign-link 也不是同名覆盖）、
+    sameName 为假（中央没有同名不同内容的副本）。
+
+    extra 外部目录、容器展开行、指向别处的 junction 都不收 —— 那些真身归
+    agent 或第三方安装器管，本工具往里写东西只会跟它们打架；用户真想收可以
+    在独有看板逐行走「转为共有」或手动导入。
+    """
+    return [u for u in unique or []
+            if u.get("src") == "main" and u.get("kind") == "unique"
+            and not u.get("sameName")]
+
+
+def agent_managed_roots(con, tools=None):
+    """agent 自己管的技能目录（主 skills_dir + adapters 声明的 extra 外部目录）。
+
+    中央仓库绝不能指到这些路径：那是 agent 读写、别的工具安装的地方，当仓库
+    用会把分发链接建回 agent 自己的目录，或删除时弄坏 agent。
+    """
+    roots = []
+    for t in (tools if tools is not None else ordered_tools(con)):
+        if t.get("skills_dir"):
+            roots.append(norm_path(t["skills_dir"]))
+    try:
+        with open(_base.ADAPTERS_FILE, encoding="utf-8") as fh:
+            adapters = json.load(fh)
+    except (OSError, ValueError):
+        adapters = []
+    for a in adapters:
+        if not isinstance(a, dict):
+            continue
+        for rel in a.get("extra_dirs") or []:
+            root = _resolve_extra_root(str(rel).split("/**")[0])
+            if root:
+                roots.append(norm_path(root))
+    dedup = []
+    for r in roots:
+        if r and r not in dedup:
+            dedup.append(r)
+    return dedup
+
+
+def find_existing_store(con, cfg, tools=None, min_links=2, min_skills=2):
+    """从 agent 目录里已有的 junction 反推「本机其实已经存在的中央仓库」。
+
+    安装版的默认中央仓库（%LOCALAPPDATA%\\SkillLocker\\store）是空的，安装程序
+    不预置任何技能，所以首启必然「共有 0 / 全是独有」——用户看起来就是 bug。
+    但其实很多人早就有一份自己的仓库：别的技能管理器或老版本 skilllocker 把各
+    agent 的 skills 目录链到了同一个父目录。那个父目录就是中央仓库，接管它
+    （改指 + 重扫）比让用户一个个重新导入诚实。
+
+    判据（宁缺勿滥，不满足就返回 None，前端退回「一键收编 / 手动导入」引导）：
+      - 至少 min_links 条链接命中同一父目录，且该目录下至少 min_skills 个含
+        SKILL.md 的子目录；
+      - 候选根不与任何 agent 管的目录互相包含（不当 agent 自己的目录用）；
+      - 候选根 ≠ 当前中央仓库。
+    成本：每个已检测 agent 目录一次 listdir + 每条链接一次 isdir/isfile，
+    不做内容哈希；只在仓库为空的首启路径上调用。
+    """
+    tools = tools if tools is not None else ordered_tools(con)
+    managed = agent_managed_roots(con, tools)
+    mine = norm_path(cfg["store"])
+    votes = {}
+    for t in tools:
+        if not t.get("detected") or not t.get("skills_dir"):
+            continue
+        if not os.path.isdir(t["skills_dir"]):
+            continue
+        try:
+            names = sorted(os.listdir(t["skills_dir"]))
+        except OSError:
+            continue
+        for n in names:
+            p = os.path.join(t["skills_dir"], n)
+            if not (is_reparse(p) or os.path.islink(p)):
+                continue
+            tgt = link_target(p)
+            if not tgt or not os.path.isdir(tgt) or not has_skill_md(tgt):
+                continue  # 断链 / 真身不是 skill 目录：不是仓库的证据
+            root = norm_path(os.path.dirname(tgt))
+            if not root or root == mine:
+                continue
+            if any(path_under(root, m) or path_under(m, root) for m in managed):
+                continue
+            v = votes.setdefault(root, {"links": 0, "names": set(), "tools": {}})
+            v["links"] += 1
+            v["names"].add(n)
+            tv = v["tools"].setdefault(
+                t["key"], {"key": t["key"], "label": t["label"], "links": 0})
+            tv["links"] += 1
+    best = None
+    for root, v in sorted(votes.items()):
+        if v["links"] < min_links:
+            continue
+        try:
+            skills = skill_dirs_under(root.replace("/", os.sep))
+        except RuntimeError:
+            continue
+        if len(skills) < min_skills:
+            continue
+        score = (v["links"], len(skills))
+        if best is None or score > best[0]:
+            best = (score, root, v, skills)
+    if best is None:
+        return None
+    _score, root, v, skills = best
+    return {
+        "path": root.replace("/", "\\"),
+        "store": root,
+        "skillCount": len(skills),
+        "linkCount": v["links"],
+        "tools": sorted(v["tools"].values(), key=lambda x: (-x["links"], x["key"])),
+        "sample": [n for n, _p in skills[:8]],
+    }
 
 
 # ---------------------------------------------------------------- agent 看板

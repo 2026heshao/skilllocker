@@ -1064,10 +1064,11 @@ button.cat:hover { filter: brightness(0.96); transform: translateY(-1px); }
 .cover-bar { display: flex; align-items: center; gap: 2px; }
 .cover-seg { width: 9px; height: 7px; border-radius: 2px; background: var(--success); }
 .cover-seg.bad { background: var(--danger); }
-.cover-seg.none { background: var(--surface-3); }
+.cover-seg.none { background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--line); }
 
 .cover-text { font-family: var(--display); font-size: 11.5px; color: var(--ink-2); white-space: nowrap; }
 .cover-text.bad { color: var(--danger); }
+.cover-text.is-partial { color: var(--warning); }
 
 .row-agent { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .agent-chip {
@@ -1457,6 +1458,12 @@ body.reduce-motion .row.row-out { animation: none; opacity: 0; }
 .cover-item.is-bad { border-color: color-mix(in srgb, var(--danger) 26%, transparent); background: var(--danger-soft); }
 .cover-item.is-bad b { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
 .cover-item.is-bad .icon { color: var(--danger); }
+.cover-item.is-missing { border-color: color-mix(in srgb, var(--ink-3) 16%, transparent); background: var(--surface-2); }
+.cover-item.is-missing b { background: var(--surface-3); color: var(--ink-3); }
+.cover-item.is-missing span { color: var(--ink-3); }
+.cover-item.is-missing .icon { color: var(--ink-3); }
+.cover-item.is-off { opacity: .55; }
+.cover-item.is-off .icon { color: var(--ink-3); }
 
 .divider { height: 1px; background: var(--line); margin: 14px 0; }
 
@@ -2517,3 +2524,87 @@ body.dark { color-scheme: dark; }
 
 #boot-error-retry:hover { filter: brightness(1.08); }
 #boot-error-retry:active { transform: translateY(1px); }
+
+/* ---------------------------------------------------------- 首启引导（空中央仓库） */
+/* 安装版首启的中央仓库天生是空的：共有 0、磁盘上的技能全落在独有看板。
+   面板就是共有看板内容区本身（列表与网格一起收起，见 app.js renderContent），
+   所以自己承担滚动与高度。 */
+.first-run[hidden] { display: none; }
+
+.first-run {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: auto;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--line));
+  background: linear-gradient(180deg,
+              color-mix(in srgb, var(--accent-soft) 55%, var(--surface)),
+              var(--surface) 62%);
+  box-shadow: var(--shadow-1);
+  padding: 16px 18px 18px;
+}
+
+.fr-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+
+.fr-title { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 0; }
+
+.fr-title b { font-size: 14px; font-weight: 650; color: var(--ink); }
+
+.fr-title span { font-size: 11.5px; line-height: 1.6; color: var(--ink-2); }
+
+.fr-dismiss {
+  flex: none;
+  width: 26px; height: 26px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-3);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: background var(--fast), color var(--fast);
+}
+.fr-dismiss:hover { background: var(--surface-3); color: var(--ink); }
+
+.fr-opts { display: flex; flex-direction: column; gap: 9px; }
+
+.fr-opt {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 13px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.fr-opt-icon {
+  flex: none;
+  width: 34px; height: 34px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+}
+.fr-opt-icon .icon { width: 17px; height: 17px; }
+
+.fr-opt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.fr-opt-main b { font-size: 12.5px; font-weight: 620; color: var(--ink); }
+.fr-opt-main span { font-size: 11px; line-height: 1.55; color: var(--ink-3); }
+
+.fr-opt code,
+.fr-title code {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--surface-3);
+  color: var(--ink-2);
+  word-break: break-all;
+}
+
+.fr-opt .btn { flex: none; font-size: 11.5px; padding: 8px 16px; }
+
+/* 接管 / 收编执行中：按钮禁用并显示「处理中…」（后端 OPS_LOCK 串行，重复点击只会排队） */
+.first-run .btn:disabled,
+.fr-dismiss:disabled { opacity: .55; cursor: default; }
+.first-run .btn:disabled:hover { filter: none; }

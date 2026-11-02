@@ -22,10 +22,12 @@ import urllib.request
 import skilllocker_base as _base  # noqa: F401 - 统一从门面取常量时走这里
 from skilllocker_base import (  # noqa: F401 - 部分名字经 skilllocker 门面再导出
     IGNORE_NAMES, db, delete_tree, dir_stats, has_skill_md, is_reparse, link_target,
-    log_event, make_junction, norm_path, parse_frontmatter, remove_link, sha_tree,
-    target_state)
-from skilllocker_meta import clear_meta, set_meta
-from skilllocker_store import find_unique_row, rescan
+    log_event, make_junction, norm_path, parse_frontmatter, path_under, remove_link,
+    sha_tree, target_state, write_config)
+from skilllocker_meta import clear_meta, seed_meta, set_meta
+from skilllocker_store import (
+    adoptable_rows, agent_managed_roots, find_unique_row, rescan,
+    skill_dirs_under, store_skill_dirs, unique_entries)
 
 
 # ---------------------------------------------------------------- 分发状态
@@ -508,6 +510,172 @@ def promote_unique(con, cfg, tool_key, name):
     return {"scope": "unique", "key": ukey, "tool": tool_key, "name": store_name,
             "path": path.replace(os.sep, "\\"), "files": files, "bytes": size,
             "relinked": relinked}
+
+
+# ---------------------------------------------------------------- 首启接管 / 一键收编
+def adopt_store(con, cfg, path):
+    """首启接管：把本机其实已经存在的中央仓库目录指为本工具的中心。
+
+    只做三件事：校验 → 写 config.json → 重扫登记。不搬技能、不建链接，所以
+    完全可逆（删掉 config.json 就回到默认仓库）。没有这一步，安装版首启永远
+    是「共有 0 / 全是独有」——用户看到的不是检测错，是空仓库。
+
+    守卫（任一不满足就抛错，让前端如实提示，绝不静默换仓库）：
+      - 当前中央仓库还没有可登记的技能：仓库有内容时改指，prune_meta 会把旧
+        仓库那批共有 meta（改名 / 备注 / 归属夹）当「行已消失」清掉；
+      - 目标目录真实存在、可枚举，且至少含 1 个带 SKILL.md 的子目录；
+      - 目标不在 agent 自己管的目录里（skills_dir / extra_dirs），也不与它们
+        互相包含 —— 把 agent 的读取目录当仓库会让分发链接绕回原地；
+      - 目标不是当前仓库自己。
+    """
+    target = os.path.normpath(str(path or "").strip().strip('"')).replace(os.sep, "/")
+    if not target or target in (".", ".."):
+        raise RuntimeError("要接管的中央仓库路径为空")
+    if not os.path.isdir(target):
+        raise RuntimeError("要接管的目录不存在：%s" % target.replace("/", "\\"))
+    tp = norm_path(target)
+    if tp == norm_path(cfg["store"]):
+        raise RuntimeError("这个目录已经是当前中央仓库：%s" % target.replace("/", "\\"))
+    for m in agent_managed_roots(con):
+        if path_under(tp, m) or path_under(m, tp):
+            raise RuntimeError("要接管的目录落在 agent 自己的技能目录里，不能当中央仓库用：%s"
+                               % target.replace("/", "\\"))
+    try:
+        present = store_skill_dirs(cfg)
+    except RuntimeError:
+        present = []  # 当前仓库根不可读：不该拦住接管，下面 rescan 会给出真实错误
+    if present:
+        raise RuntimeError("当前中央仓库已有 %d 个技能，为避免丢失它们的改名与归档，"
+                           "首启接管只允许在空仓库时使用；退出后手动改 config.json 的 store 也可以"
+                           % len(present))
+    try:
+        skills = skill_dirs_under(target)
+    except RuntimeError as exc:
+        raise RuntimeError("要接管的目录不可用：%s" % exc)
+    if not skills:
+        raise RuntimeError("要接管的目录里没有带 SKILL.md 的技能，不像中央仓库：%s"
+                           % target.replace("/", "\\"))
+    old = cfg["store"]
+    cfg["store"] = tp
+    try:
+        write_config(cfg)
+    except RuntimeError:
+        cfg["store"] = old
+        raise
+    count = rescan(con, cfg)
+    log_event(con, "adopt-store", "接管已有中央仓库 %s（原 %s，登记 %d 个技能）"
+              % (tp, old, count))
+    con.commit()
+    return {"store": tp, "path": tp.replace("/", "\\"),
+            "previous": norm_path(old).replace("/", "\\"),
+            "skills": count, "dirCount": len(skills)}
+
+
+def adopt_local_skills(con, cfg, unique=None):
+    """首启一键收编：把各 agent 主目录里的实体技能目录收进中央仓库。
+
+    范围由 store.adoptable_rows 把关（只收 src=main 的实体行，外部目录 /
+    容器展开 / 指向别处的 junction 一律不碰）。语义与单行收编 promote_unique
+    一致，区别是把 N 次 rescan 合成 1 次：
+      1. 按真身目录名分组：同名多来源只收第一份，其余按内容哈希判定 ——
+         一致就一起算收编完成（源副本保留，独有行自动消失），不一致就跳过
+         让用户到独有看板逐条处置，绝不静默覆盖；
+      2. copy_tree_atomic 拷进仓库（崩溃残留的 .skpart-* 由下轮 rescan 清理）；
+      3. 独有行上的人工改名 / 备注迁给共有行；
+      4. 一次 rescan + 一次 seed_meta（新共有行按预置规则归档）；
+      5. 只对分发开关开着的 agent 做 do_sync 对齐：源副本内容已与中央一致，
+         junction 模式下 takeover → relink 成指向仓库的链接；开关关着的
+         保留实体副本不动（探测到 ≠ 授权分发）。
+    除第 5 步的链接对齐外全部非破坏，源目录保留。
+    """
+    if not os.path.isdir(cfg["store"]):
+        raise RuntimeError("中央仓库目录不可用：%s" % cfg["store"].replace("/", "\\"))
+    rows = adoptable_rows(unique if unique is not None else unique_entries(con, cfg))
+    groups, index = [], {}      # [(name, [(tool, path)])]，保持扫描顺序
+    for u in rows:
+        path = os.path.normpath(u["path"])
+        name = os.path.basename(path)
+        if name in ("", ".", ".."):
+            continue
+        if name in index:
+            groups[index[name]][1].append((u["tool"], path))
+        else:
+            index[name] = len(groups)
+            groups.append((name, [(u["tool"], path)]))
+    adopted, skipped, meta_moved = [], [], 0
+    affected = set()
+    for name, items in groups:
+        try:
+            check_skill_name(name)
+        except RuntimeError as exc:
+            skipped.append({"name": name, "reason": str(exc)})
+            continue
+        central = os.path.join(cfg["store"], name)
+        if os.path.lexists(central):
+            skipped.append({"name": name, "reason": "中央仓库已有同名条目，不覆盖"})
+            continue
+        base = None
+        for tool, path in items:
+            try:
+                h = sha_tree(path)
+            except (OSError, RuntimeError):
+                skipped.append({"name": name, "tool": tool, "reason": "目录不可读，已跳过"})
+                continue
+            if base is None:
+                base = (path, h)
+                affected.add(tool)
+            elif h == base[1]:
+                affected.add(tool)  # 同一份内容：收一次就够，其余源副本保留
+            else:
+                skipped.append({"name": name, "tool": tool,
+                                "reason": "与已收编的同名技能内容不同，请到独有看板单独处置"})
+        if base is None:
+            continue
+        try:
+            copy_tree_atomic(base[0], central)
+        except (OSError, RuntimeError) as exc:
+            skipped.append({"name": name, "reason": "拷入中央仓库失败：%s" % exc})
+            continue
+        for tool, _path in items:
+            um = con.execute("select display_name, note from skill_meta "
+                             "where scope='unique' and key=?",
+                             (tool + "/" + name,)).fetchone()
+            if not um or not (um["display_name"] or um["note"]):
+                continue
+            if con.execute("select 1 from skill_meta where scope='shared' and key=?",
+                           (name,)).fetchone():
+                continue  # 已有共有 meta（用户手动写过）：不覆盖
+            set_meta(con, "shared", name, {"display": um["display_name"] or "",
+                                           "note": um["note"] or ""})
+            meta_moved += 1
+        adopted.append(name)
+        log_event(con, "adopt", "收编 %s ← %s" % (name, base[0].replace(os.sep, "\\")))
+    if adopted:
+        rescan(con, cfg)
+        seed_meta(con, cfg)
+    relinked = linked = 0
+    enabled = {r["key"] for r in con.execute(
+        "select key from tools where detected=1 and enabled=1")}
+    touched = sorted(affected & enabled)
+    if touched and adopted:
+        plan = do_sync(con, cfg, only_tools=touched, only_skills=adopted,
+                       apply_changes=True)
+        # relink = 开着分发的 agent 里那份同名实体被对齐成指向仓库的链接；
+        # junction/copy = 该 agent 还没有这个技能，按开关补一条分发链接（收编的
+        # 目的就是统一分发，补链与 promote_unique 的语义一致）
+        relinked = sum(1 for p in plan if p.get("done") in ("relink", "recopy"))
+        linked = sum(1 for p in plan if p.get("done") in ("junction", "copy"))
+    files = size = 0
+    for name in adopted:
+        f, s = dir_stats(os.path.join(cfg["store"], name))
+        files += f
+        size += s
+    log_event(con, "adopt", "一键收编：进仓库 %d 个，跳过 %d 个，对齐链接 %d 处，补链 %d 处"
+              % (len(adopted), len(skipped), relinked, linked))
+    con.commit()
+    return {"adopted": adopted, "skipped": skipped, "relinked": relinked,
+            "linked": linked, "files": files, "bytes": size,
+            "metaMoved": meta_moved, "store": norm_path(cfg["store"]).replace("/", "\\")}
 
 
 def resolve_conflict(con, cfg, tool_key, name, direction):

@@ -24,13 +24,27 @@
 - 无边框桌面界面（pywebview）与完整 CLI
 - Windows 下所有删除先判断 reparse point，不顺着链接递归删实体
 
+## 安装版（普通用户）
+
+直接下载 [SkillLocker-Setup-v0.3.0.exe](https://2026heshao.github.io/skilllocker/SkillLocker-Setup-v0.3.0.exe)（官网站内直链），或从 [GitHub Release v0.3.0](https://github.com/2026heshao/skilllocker/releases/tag/v0.3.0) 获取同一份安装包；校验值见仓库内 `release/SkillLocker-Setup-v0.3.0.exe.sha256`。安装包自带 Python 运行时，不需要装 Python，也不需要运行 bat 或手动放置 skill。
+
+安装后从开始菜单或桌面打开 SkillLocker。首次启动会自动创建 `%LOCALAPPDATA%\SkillLocker` 下的 store、SQLite 数据库和 WebView2 profile。
+
+中央仓库刚建好时是空的，界面会直接给出三个出口，而不是让你对着「共有 0 / 全是独有」发懵：
+
+- **接管本机已有的中央仓库**：各 agent 目录里已有 skill 链接如果都指向同一个目录，应用会认出它就是你的仓库，一键改指（只写 `config.json` 并重新登记，不搬文件；删掉 `config.json` 就回到默认仓库）
+- **一键收编本机技能**：把各 agent 主 `skills` 目录里的实体技能拷进中央仓库成为共有技能，源目录保留；外部目录与指向别处的链接不会被动
+- **导入目录 / 在线获取**：一次一个，入库前有预检报告
+
+## 源码运行（开发）
+
 ## 环境
 
 - Windows 10 / 11
 - Python 3.12
 - 桌面端需要 `pywebview` 与 WebView2 Runtime；后端与 CLI 无第三方依赖
 
-## 运行
+## 源码启动
 
 双击仓库根目录的 `启动 skilllocker.bat`，或用命令行：
 
@@ -71,5 +85,6 @@ ui/                  前端页面（原生 HTML / CSS / JS，无构建步骤）
 ```bat
 python kit/test_unit.py
 python kit/test_first_run.py
+python kit/test_firstrun_ui.py  :: 需要 playwright 与本机 Edge / Chromium
 python kit/test_boot_proto.py   :: 需要 playwright 与本机 Edge / Chromium
 ```
