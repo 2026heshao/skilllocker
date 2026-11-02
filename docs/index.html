@@ -1,0 +1,639 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>SkillLocker, 本地 Skill 管理</title>
+  <meta name="description" content="SkillLocker 是 Windows 本地 Skill 管理器：扫描中央仓库，把 Skill 链进各 Agent，并用矩阵查看分发状态。">
+  <link rel="stylesheet" href="site.css">
+  <script src="site.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">跳到正文</a>
+
+  <header class="site-nav" id="top">
+    <div class="container nav-inner">
+      <a class="brand" href="#top" aria-label="SkillLocker, 首页">
+        <svg class="brand__mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false">
+          <rect x="1.75" y="1.75" width="12.5" height="12.5" rx="1"></rect>
+          <path d="M10 4.25v7.5"></path>
+        </svg>
+        <span class="brand__word">SkillLocker</span>
+      </a>
+      <nav class="nav-links" aria-label="主要导航">
+        <a href="#why">为什么</a>
+        <a href="#capabilities">能力</a>
+        <a href="#matrix">矩阵</a>
+        <a href="#agents">Agent</a>
+        <a href="#cli">CLI</a>
+        <a href="#install">安装</a>
+      </nav>
+      <span class="nav-state">Local</span>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="product">
+      <div class="container hero__grid">
+        <div class="hero__copy">
+          <h1>所有 Skill，<span class="hero__line">一个本地库。</span></h1>
+          <p class="lede">扫描中央仓库的 SKILL.md，用 junction 链进 Claude Code、Codex、Qoder 等 Agent，再用矩阵看清覆盖、漂移与冲突。</p>
+          <div class="hero__actions">
+            <a class="btn btn--primary" href="#install">本地运行</a>
+            <a class="btn btn--quiet" href="#matrix">看分发矩阵</a>
+          </div>
+          <dl class="hero__meta">
+            <div>
+              <dt>系统</dt>
+              <dd>Windows 10/11</dd>
+            </div>
+            <div>
+              <dt>运行时</dt>
+              <dd>Python 3.12</dd>
+            </div>
+            <div>
+              <dt>账号</dt>
+              <dd>不需要</dd>
+            </div>
+            <div>
+              <dt>适配</dt>
+              <dd>48 个 Agent</dd>
+            </div>
+          </dl>
+        </div>
+
+        <figure class="hero__visual">
+          <div class="shot" aria-hidden="true">
+            <div class="shot__app">
+              <aside class="shot__rail">
+                <svg class="shot__mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false">
+                  <rect x="1.75" y="1.75" width="12.5" height="12.5" rx="1"></rect>
+                  <path d="M10 4.25v7.5"></path>
+                </svg>
+                <span class="shot__rail-icon is-active">
+                  <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true" focusable="false">
+                    <rect x="1.5" y="1.5" width="3.5" height="3.5" rx=".7"></rect>
+                    <rect x="7" y="1.5" width="3.5" height="3.5" rx=".7"></rect>
+                    <rect x="1.5" y="7" width="3.5" height="3.5" rx=".7"></rect>
+                    <rect x="7" y="7" width="3.5" height="3.5" rx=".7"></rect>
+                  </svg>
+                </span>
+                <span class="shot__rail-icon">
+                  <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true" focusable="false">
+                    <path d="M1.5 6h1.5l1-2.5 2.5 5 1-2.5h2"></path>
+                  </svg>
+                </span>
+                <span class="shot__rail-icon">
+                  <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true" focusable="false">
+                    <rect x="1.5" y="2.5" width="9" height="7" rx="1"></rect>
+                    <path d="M1.5 5h9"></path>
+                  </svg>
+                </span>
+                <span class="shot__rail-icon shot__rail-icon--foot">
+                  <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true" focusable="false">
+                    <path d="M1.5 3h9M1.5 6h9M1.5 9h9"></path>
+                    <circle cx="4" cy="3" r="1"></circle>
+                    <circle cx="8" cy="6" r="1"></circle>
+                  </svg>
+                </span>
+              </aside>
+
+              <div class="shot__main">
+                <div class="shot__top">
+                  <span class="shot__title">Skills</span>
+                  <span class="shot__topmeta">
+                    <span class="shot__path">D:\skilllocker\store</span>
+                    <span class="shot__sync"><i class="shot__light shot__light--ok"></i>Synced</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div class="shot__scrim"></div>
+
+            <div class="shot__palette">
+              <div class="shot__palette-head">
+                <span class="shot__field">
+                  <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true" focusable="false">
+                    <circle cx="5.2" cy="5.2" r="3.2"></circle>
+                    <path d="m7.6 7.6 2.3 2.3"></path>
+                  </svg>
+                  <span>Search your locker…</span>
+                </span>
+                <span class="shot__kbd">esc</span>
+              </div>
+
+              <div class="shot__group-title">Skills</div>
+              <div class="shot__option is-selected">
+                <span class="shot__option-name">aihot</span>
+                <span class="shot__kbd">Ctrl 1</span>
+              </div>
+              <div class="shot__option">
+                <span class="shot__option-name">pdf</span>
+                <span class="shot__kbd">Ctrl 2</span>
+              </div>
+              <div class="shot__option">
+                <span class="shot__option-name">brandkit</span>
+                <span class="shot__kbd">Ctrl 3</span>
+              </div>
+
+              <div class="shot__group-title">Actions</div>
+              <div class="shot__option">
+                <span class="shot__option-name">Run last skill</span>
+                <span class="shot__kbd">Ctrl R</span>
+              </div>
+              <div class="shot__option">
+                <span class="shot__option-name">Verify links</span>
+                <span class="shot__kbd">Ctrl Shift V</span>
+              </div>
+              <div class="shot__option">
+                <span class="shot__option-name">Reindex vault</span>
+                <span class="shot__kbd">Ctrl Shift R</span>
+              </div>
+
+              <div class="shot__group-title">Recent</div>
+              <div class="shot__option">
+                <span class="shot__option-name">ci-compile-guard</span>
+                <span class="shot__kbd">Ctrl 4</span>
+              </div>
+              <div class="shot__option">
+                <span class="shot__option-name">design-app-ui-prototype</span>
+                <span class="shot__kbd">Ctrl 5</span>
+              </div>
+
+              <div class="shot__palette-foot">
+                <span>Local index</span>
+                <span class="shot__hints"><span class="shot__kbd">↑↓</span><span class="shot__kbd">esc</span></span>
+              </div>
+            </div>
+          </div>
+          <figcaption>Skills 界面概念，命令面板展开。</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="section why" id="why">
+      <div class="container">
+        <div class="section-head">
+          <h2>Agent 各存一份，迟早会漂移。</h2>
+          <p>复制一次，改一处，剩下的副本就开始分叉。SkillLocker 把中央仓库变成唯一来源。</p>
+        </div>
+        <div class="compare">
+          <div class="compare__panel">
+            <div class="compare__head">
+              <span class="compare__label">没有中央仓库</span>
+              <span class="compare__meta">3 份副本</span>
+            </div>
+            <div class="compare__rows">
+              <div class="compare__row">
+                <span class="compare__path mono">~/.cursor/skills/pdf</span>
+                <span class="compare__hash mono">6f2a</span>
+                <span class="compare__state compare__state--ok">一致</span>
+              </div>
+              <div class="compare__row">
+                <span class="compare__path mono">~/.codex/skills/pdf</span>
+                <span class="compare__hash mono">8c1d</span>
+                <span class="compare__state compare__state--warn">漂移</span>
+              </div>
+              <div class="compare__row">
+                <span class="compare__path mono">~/.claude/skills/pdf</span>
+                <span class="compare__hash mono">6f2a</span>
+                <span class="compare__state compare__state--ok">一致</span>
+              </div>
+            </div>
+            <p class="compare__note">同一个名字，两份内容；删除时还要逐个确认。</p>
+          </div>
+          <div class="compare__panel">
+            <div class="compare__head">
+              <span class="compare__label">SkillLocker</span>
+              <span class="compare__meta">1 份实体</span>
+            </div>
+            <div class="compare__rows">
+              <div class="compare__row">
+                <span class="compare__path mono">D:\skilllocker\store\pdf</span>
+                <span class="compare__hash mono">6f2a</span>
+                <span class="compare__state compare__state--ok">源</span>
+              </div>
+              <div class="compare__row">
+                <span class="compare__path mono">~/.codex/skills/pdf</span>
+                <span class="compare__hash mono">junction</span>
+                <span class="compare__state compare__state--ok">linked</span>
+              </div>
+              <div class="compare__row">
+                <span class="compare__path mono">~/.claude/skills/pdf</span>
+                <span class="compare__hash mono">junction</span>
+                <span class="compare__state compare__state--ok">linked</span>
+              </div>
+            </div>
+            <p class="compare__note">改中央仓库一处，所有链接同时更新；漂移先报告。</p>
+          </div>
+        </div>
+        <p class="why__statement">一份实体，七条链接。<br>改一次，全部同步。</p>
+        <p class="section-caption">示例：同一个 pdf 在三个位置。</p>
+      </div>
+    </section>
+
+    <section class="section capabilities" id="capabilities">
+      <div class="container">
+        <div class="section-head">
+          <h2>六件事，一个库完成。</h2>
+          <p>从登记到分发，再到冲突检查，都在同一套索引上。</p>
+        </div>
+        <div class="capabilities__grid">
+          <article>
+            <h3>扫描</h3>
+            <p>读取每个 SKILL.md 的名称、分类、备注和内容哈希，建立本地索引。</p>
+          </article>
+          <article>
+            <h3>分发</h3>
+            <p>在 Agent 目录建立 junction；失败才复制。一个开关只动链接。</p>
+          </article>
+          <article>
+            <h3>校验</h3>
+            <p>verify 报告缺失、漂移和同名冲突，不静默合并，也不改动磁盘。</p>
+          </article>
+          <article>
+            <h3>矩阵</h3>
+            <p>每个 Skill 对每个 Agent。覆盖、独有、冲突，一张表看清。</p>
+          </article>
+          <article>
+            <h3>导入</h3>
+            <p>本地文件夹、skills.sh 检索、指定仓库获取；导入前先预检命名。</p>
+          </article>
+          <article>
+            <h3>整理</h3>
+            <p>分类文件夹、收藏、备注和显示名。只改界面，不改磁盘目录名。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section workflow" id="workflow">
+      <div class="container">
+        <div class="section-head">
+          <h2>一个仓库，链进所有 Agent。</h2>
+          <p>扫描中央仓库的 SKILL.md，用 junction 分发到每个 Agent；失败时才回退到复制。</p>
+        </div>
+
+        <div class="flow" aria-label="系统图：中央仓库经 SkillLocker 链接到七个 Agent 目录">
+          <div class="flow__store">
+            <div>
+              <div class="flow__label">中央仓库</div>
+              <div class="flow__path">D:\skilllocker\store</div>
+            </div>
+            <div class="flow__count"><b>51</b><span>skills</span></div>
+            <dl class="flow__meta">
+              <div><dt>索引</dt><dd>51 SKILL.md</dd></div>
+              <div><dt>内容哈希</dt><dd>已校验</dd></div>
+              <div><dt>仓库大小</dt><dd>54.4 MB</dd></div>
+            </dl>
+          </div>
+
+          <div class="flow__link" aria-hidden="true">
+            <span class="flow__line"></span>
+            <span class="flow__node"></span>
+            <span class="flow__link-label">SkillLocker</span>
+            <span class="flow__link-sub">junction / verify</span>
+          </div>
+
+          <div class="flow__agents">
+            <div class="flow__agents-head"><span>Agent 目录</span><span>状态</span></div>
+            <div class="flow__agent"><span>Claude Code</span><span class="flow__agent-state">linked</span></div>
+            <div class="flow__agent"><span>Codex</span><span class="flow__agent-state">linked</span></div>
+            <div class="flow__agent"><span>DeepSeek Harness</span><span class="flow__agent-state">linked</span></div>
+            <div class="flow__agent"><span>Qoder</span><span class="flow__agent-state">linked</span></div>
+            <div class="flow__agent"><span>Trae CN</span><span class="flow__agent-state">linked</span></div>
+            <div class="flow__agent"><span>WorkBuddy</span><span class="flow__agent-state">linked</span></div>
+            <div class="flow__agent"><span>ZCode</span><span class="flow__agent-state">linked</span></div>
+          </div>
+        </div>
+
+        <ul class="facts">
+          <li>
+            <h3>Junction 优先</h3>
+            <p>中央仓库只存一份，链接优先；复制是失败时的回退。</p>
+          </li>
+          <li>
+            <h3>哈希漂移</h3>
+            <p>verify 只报告，不静默合并。冲突保留原样。</p>
+          </li>
+          <li>
+            <h3>删除安全</h3>
+            <p>先判断 reparse point，不顺着链接递归删实体。</p>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section matrix" id="matrix">
+      <div class="container">
+        <div class="section-head">
+          <h2>矩阵才是产品。</h2>
+          <p>每个 Skill 对每个 Agent。缺失、漂移、独有副本，一张表看清。</p>
+        </div>
+
+        <div class="matrix__stats">
+          <div class="matrix__stat"><b>51</b><span>skills 总数</span></div>
+          <div class="matrix__stat"><b>49</b><span>已共享</span></div>
+          <div class="matrix__stat"><b>2</b><span>独有</span></div>
+          <div class="matrix__stat"><b>48</b><span>Agent 适配</span></div>
+        </div>
+
+        <div class="matrix__wrap" tabindex="0" aria-label="Skill 分发矩阵，可横向滚动">
+          <table class="matrix-table">
+            <caption class="visually-hidden">Skill 分发矩阵示例</caption>
+            <thead>
+              <tr>
+                <th scope="col">Skill</th>
+                <th scope="col"><span class="agent-full">Claude Code</span><span class="agent-short" aria-hidden="true">CC</span></th>
+                <th scope="col"><span class="agent-full">Codex</span><span class="agent-short" aria-hidden="true">CX</span></th>
+                <th scope="col"><span class="agent-full">DeepSeek</span><span class="agent-short" aria-hidden="true">DS</span></th>
+                <th scope="col"><span class="agent-full">Qoder</span><span class="agent-short" aria-hidden="true">QD</span></th>
+                <th scope="col"><span class="agent-full">Trae CN</span><span class="agent-short" aria-hidden="true">TR</span></th>
+                <th scope="col"><span class="agent-full">WorkBuddy</span><span class="agent-short" aria-hidden="true">WB</span></th>
+                <th scope="col"><span class="agent-full">ZCode</span><span class="agent-short" aria-hidden="true">ZC</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">aihot</th>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+              </tr>
+              <tr>
+                <th scope="row">brandkit</th>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+              </tr>
+              <tr>
+                <th scope="row">pdf</th>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--warn"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 2.25 10.5 9.75h-9z"></path><path d="M6 4.75v2.5"></path><path d="M6 8.75h.01"></path></svg><span class="visually-hidden">漂移</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+              </tr>
+              <tr>
+                <th scope="row">ci-compile-guard</th>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--warn"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 2.25 10.5 9.75h-9z"></path><path d="M6 4.75v2.5"></path><path d="M6 8.75h.01"></path></svg><span class="visually-hidden">漂移</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--missing"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M2.25 6h7.5"></path></svg><span class="visually-hidden">缺失</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+              </tr>
+              <tr>
+                <th scope="row">design-app-ui-prototype</th>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg><span class="visually-hidden">已链接</span></span></td>
+                <td><span class="mark mark--missing"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M2.25 6h7.5"></path></svg><span class="visually-hidden">缺失</span></span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="matrix-legend">
+          <span class="legend__item"><span class="mark mark--ok"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.25 6.25 4.8 8.8 9.8 3.2"></path></svg></span>已链接</span>
+          <span class="legend__item"><span class="mark mark--warn"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 2.25 10.5 9.75h-9z"></path><path d="M6 4.75v2.5"></path><path d="M6 8.75h.01"></path></svg></span>漂移</span>
+          <span class="legend__item"><span class="mark mark--missing"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M2.25 6h7.5"></path></svg></span>缺失</span>
+        </div>
+        <p class="matrix__caption"><span class="matrix__hint-full">矩阵示例。</span><span class="matrix__hint-compact">矩阵示例。列顺序：Claude Code, Codex, DeepSeek, Qoder, Trae CN, WorkBuddy, ZCode。</span></p>
+      </div>
+    </section>
+
+    <section class="section agents" id="agents">
+      <div class="container">
+        <div class="section-head">
+          <h2>七个已连接，适配表里还有更多。</h2>
+          <p>每个 Agent 一个 skills 目录。junction 指向中央仓库；关掉开关只撤链，不动实体。</p>
+        </div>
+        <div class="agent-table__wrap">
+          <table class="agent-table">
+            <caption class="visually-hidden">当前连接的 Agent 与 skills 目录</caption>
+            <thead>
+              <tr>
+                <th scope="col">Agent</th>
+                <th scope="col">Skills 目录</th>
+                <th scope="col" class="agent-dispatch">分发</th>
+                <th scope="col">状态</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><th scope="row">Claude Code</th><td class="mono">~/.claude/skills</td><td class="agent-dispatch">junction</td><td>已连接</td></tr>
+              <tr><th scope="row">Codex</th><td class="mono">~/.codex/skills</td><td class="agent-dispatch">junction</td><td>已连接</td></tr>
+              <tr><th scope="row">DeepSeek Harness</th><td class="mono">~/.dsh/skills</td><td class="agent-dispatch">junction</td><td>已连接</td></tr>
+              <tr><th scope="row">Qoder</th><td class="mono">~/.qoder/skills</td><td class="agent-dispatch">junction</td><td>已连接</td></tr>
+              <tr><th scope="row">Trae CN</th><td class="mono">~/.trae-cn/skills</td><td class="agent-dispatch">junction</td><td>已连接</td></tr>
+              <tr><th scope="row">WorkBuddy</th><td class="mono">~/.workbuddy/skills</td><td class="agent-dispatch">junction</td><td>已连接</td></tr>
+              <tr><th scope="row">ZCode</th><td class="mono">~/.zcode/skills</td><td class="agent-dispatch">junction</td><td>已连接</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="agent-note">适配表内置 48 个 Agent 目录：Cursor、OpenCode、Antigravity、Gemini CLI、Windsurf、Kimi Code CLI 等。未安装的工具显示为未安装，开关禁用。</p>
+      </div>
+    </section>
+
+    <section class="section import" id="import">
+      <div class="container split">
+        <div class="split__copy import__copy">
+          <h2>导入，不离开本地。</h2>
+          <p class="section-lede">本地文件夹、skills.sh 检索、指定仓库获取。导入后仍然落在同一个库。</p>
+          <ul class="modes">
+            <li>
+              <h3>本地文件夹</h3>
+              <p>拖进一个带 SKILL.md 的目录，先预检命名。</p>
+            </li>
+            <li>
+              <h3>在线检索</h3>
+              <p>search 关键词，先看再取。</p>
+            </li>
+            <li>
+              <h3>仓库获取</h3>
+              <p>按 owner/repo/skill 取到临时目录。</p>
+            </li>
+          </ul>
+        </div>
+        <div class="split__panel import__panel">
+          <div class="panel">
+            <div class="panel__head"><span>kit / PowerShell</span><span>skilllocker.py</span></div>
+            <pre><code>python skilllocker.py import &lt;dir&gt;
+python skilllocker.py search &lt;query&gt;
+python skilllocker.py fetch &lt;owner/repo/skill&gt;</code></pre>
+            <div class="panel__sub">
+              <div class="panel__subhead">导入后</div>
+              <div class="tree">
+                <div class="tree__row">release-notes/</div>
+                <div class="tree__row tree__row--indent">SKILL.md</div>
+                <div class="tree__row tree__row--indent">scripts/scan.py</div>
+                <div class="tree__row tree__row--indent">references/format.md</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section cli" id="cli">
+      <div class="container">
+        <div class="section-head">
+          <h2>CLI 读的是同一个库。</h2>
+          <p>scan、verify、sync、import。没有守护进程，也没有账号。</p>
+        </div>
+        <div class="terminal terminal--wide">
+          <div class="panel__head"><span>PowerShell</span><span>D:\skilllocker\kit</span></div>
+          <pre><code><span class="term__cmd"><span class="term__prompt">$</span> python skilllocker.py status</span>
+<span class="term__out">shared 49  unique 2  agents 7</span>
+<span class="term__cmd"><span class="term__prompt">$</span> python skilllocker.py verify</span>
+<span class="term__out">drift 0  conflicts 0</span>
+<span class="term__cmd"><span class="term__prompt">$</span> python skilllocker.py sync --fix</span>
+<span class="term__out">links ok</span></code></pre>
+        </div>
+        <p class="terminal__caption">示例输出。</p>
+
+        <div class="cli-table">
+          <table>
+            <caption class="visually-hidden">SkillLocker CLI 命令</caption>
+            <thead>
+              <tr><th scope="col">命令</th><th scope="col">作用</th></tr>
+            </thead>
+            <tbody>
+              <tr><td class="mono">scan</td><td>重新扫描中央仓库，登记新增和变更。</td></tr>
+              <tr><td class="mono">status</td><td>打印分发矩阵摘要：共有、独有、冲突。</td></tr>
+              <tr><td class="mono">verify</td><td>检查漂移与冲突，只报告，不改动磁盘。</td></tr>
+              <tr><td class="mono">sync [--tool] [--fix]</td><td>建立或修复分发；不带 --fix 时先报告。</td></tr>
+              <tr><td class="mono">import &lt;dir&gt; [--name]</td><td>从本地目录导入，预检命名后落库分发。</td></tr>
+              <tr><td class="mono">remove &lt;name&gt;</td><td>删除分发与实体；先判断 reparse point。</td></tr>
+              <tr><td class="mono">search &lt;keyword&gt;</td><td>在 skills.sh 检索，先看再取。</td></tr>
+              <tr><td class="mono">fetch &lt;owner/repo/skill&gt;</td><td>把远端 Skill 取到临时目录。</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="section faq" id="faq">
+      <div class="container">
+        <div class="section-head">
+          <h2>把担心先写清楚。</h2>
+          <p>本地优先，链接优先，冲突先报告。下面是几个最常见的问题。</p>
+        </div>
+        <div class="faq__list">
+          <details>
+            <summary>数据会离开本机吗？</summary>
+            <p>技能库、索引和分发都在本地。只有 search 和 fetch 会访问网络；scan、status、verify、sync 不联网。</p>
+          </details>
+          <details>
+            <summary>它会把 Skill 复制到每个 Agent 吗？</summary>
+            <p>优先 junction。junction 失败时才回退到复制；复制也会记录内容和哈希。</p>
+          </details>
+          <details>
+            <summary>同名但内容不同怎么办？</summary>
+            <p>标为冲突。verify 只报告，不自动覆盖；你可以查看差异，再决定保留哪一份。</p>
+          </details>
+          <details>
+            <summary>删除一个 Skill 会删掉 Agent 里的东西吗？</summary>
+            <p>不会顺着链接递归删实体。撤链和删实体分开；删除前先判断 reparse point。</p>
+          </details>
+          <details>
+            <summary>需要账号或后台服务吗？</summary>
+            <p>不需要。桌面端是 pywebview，后端与 CLI 无第三方依赖，数据落在本地 SQLite 与文件系统。</p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <section class="section install" id="install">
+      <div class="container">
+        <div class="section-head">
+          <h2>不用安装器，直接跑。</h2>
+          <p>Windows 10/11，Python 3.12，WebView2。无需账号，一个目录就能跑。</p>
+        </div>
+        <ol class="steps steps--row">
+          <li>
+            <h3>取回仓库</h3>
+            <p>把 skilllocker 目录放到本机。</p>
+          </li>
+          <li>
+            <h3>启动桌面端</h3>
+            <p>双击根目录的 启动 skilllocker.bat。</p>
+          </li>
+          <li>
+            <h3>或走命令行</h3>
+            <p>cd kit，然后 python desktop.py。</p>
+          </li>
+        </ol>
+        <dl class="requirements">
+          <div><dt>系统</dt><dd>Windows 10/11</dd></div>
+          <div><dt>Python</dt><dd>3.12</dd></div>
+          <div><dt>桌面端</dt><dd>WebView2 Runtime</dd></div>
+          <div><dt>后端</dt><dd>无第三方依赖</dd></div>
+        </dl>
+        <div class="panel install__panel--wide">
+          <div class="panel__head"><span>快速运行</span><span>PowerShell</span></div>
+          <div class="install__panel-body">
+            <pre><code id="install-code">cd kit
+python desktop.py</code></pre>
+            <div class="install__side">
+              <div class="install__actions">
+                <button class="btn btn--quiet" type="button" data-copy-target="#install-code">复制命令</button>
+                <span class="copy-status" data-copy-status aria-live="polite"></span>
+              </div>
+              <p class="install__note">首次启动会扫描中央仓库；数据不会上传。</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="footer__top">
+        <div>
+          <a class="brand footer__brand" href="#top" aria-label="SkillLocker, 回到顶部">
+            <svg class="brand__mark" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false">
+              <rect x="1.75" y="1.75" width="12.5" height="12.5" rx="1"></rect>
+              <path d="M10 4.25v7.5"></path>
+            </svg>
+            <span class="brand__word">SkillLocker</span>
+          </a>
+          <p class="footer__note">本地 Skill 管理，Windows。</p>
+        </div>
+        <nav class="footer__links" aria-label="页脚导航">
+          <a href="#why">为什么</a>
+          <a href="#capabilities">能力</a>
+          <a href="#workflow">工作流</a>
+          <a href="#matrix">矩阵</a>
+          <a href="#agents">Agent</a>
+          <a href="#import">导入</a>
+          <a href="#cli">CLI</a>
+          <a href="#faq">FAQ</a>
+          <a href="#install">安装</a>
+        </nav>
+      </div>
+      <div class="footer__bottom">
+        <span>Local only</span>
+        <span>Windows 10/11, Python 3.12</span>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>
