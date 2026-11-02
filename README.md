@@ -2,6 +2,19 @@
 
 本地 Agent Skills 管理器（Windows 桌面端）。扫描中央仓库里的 `SKILL.md` 建立技能库，再通过 junction（失败时回退为复制）分发到 Cursor、Claude Code、Codex、DeepSeek Harness 等 agent 的全局 skills 目录，并用一张「技能 × 工具」矩阵统一查看、修复和清理分发状态。
 
+## 界面预览
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/01-library.png" alt="技能库与分发覆盖"><br><sub>共有技能库 · 分类 / 备注 / 分发覆盖</sub></td>
+    <td width="50%"><img src="docs/screenshots/04-agents.png" alt="智能体与分发开关"><br><sub>智能体列表 · junction 分发开关</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/02-unique.png" alt="独有技能看板"><br><sub>各 agent 独有技能 · 来源与本地副本</sub></td>
+    <td width="50%"><img src="docs/screenshots/03-import.png" alt="导入 Skill"><br><sub>导入 Skill · 本地文件夹 / 在线检索</sub></td>
+  </tr>
+</table>
+
 ## 功能
 
 - 扫描中央仓库：登记技能名称、分类、备注与内容哈希
