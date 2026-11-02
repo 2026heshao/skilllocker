@@ -3,7 +3,7 @@
  * vibe: "quiet chrome, Swiss precision, one lit layer"
  * paper: #0B0C0E · ink: #E6E8EB · accent: #8FB4DE · faces: Geist / JetBrains Mono
  * hero: split, copy left, the Skills screen with the palette open right · posture: restrained · axes: dark/grotesk-sans/neutral-cool
- * nav: 64px sticky bar, wordmark, six centred links, a local state · footer: hairline mast, wordmark and links
+ * nav: 64px sticky bar, wordmark, six centred links, a download action · footer: hairline mast, wordmark and links
  * signature: the Skills screen with the command palette open, the only lit layer
  * copy: local vault, junction first, hash drift, seven agents, 48 adapters
  * built: local SkillLocker facts · contrast: pass · fold: pass · v2.0.0
@@ -116,6 +116,7 @@ body {
 html {
   scrollbar-color: var(--color-scroll-thumb) var(--color-bg);
   scrollbar-width: thin;
+  scroll-padding-top: 84px;
 }
 
 body {
@@ -242,6 +243,7 @@ p {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: var(--space-xs);
   min-height: 48px;
   padding: 0 var(--space-lg);
   border: 1px solid var(--color-transparent);
@@ -252,6 +254,12 @@ p {
   white-space: nowrap;
   cursor: pointer;
   transition: background-color var(--dur-micro) var(--ease-out), border-color var(--dur-micro) var(--ease-out), color var(--dur-micro) var(--ease-out);
+}
+
+.btn__icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
 }
 
 .btn--primary {
@@ -282,12 +290,6 @@ p {
 
 .btn--quiet:active {
   background: var(--color-surface-2);
-}
-
-.btn--small {
-  min-height: 40px;
-  padding: 0 var(--space-md);
-  font-size: var(--text-small);
 }
 
 .btn:disabled,
@@ -322,6 +324,7 @@ p {
   align-items: center;
   gap: var(--space-xs);
   min-width: 0;
+  padding-block: 5px;
   color: var(--color-ink);
   transition: color var(--dur-micro) var(--ease-out);
 }
@@ -355,14 +358,10 @@ p {
   margin-inline: auto;
 }
 
-.nav-state {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-xs);
-  color: var(--color-muted);
-  font-size: var(--text-meta);
-  line-height: 1;
-  white-space: nowrap;
+.nav-cta {
+  min-height: 36px;
+  padding-inline: var(--space-md);
+  font-size: var(--text-small);
 }
 
 .nav-links a {
@@ -370,6 +369,7 @@ p {
   font-size: var(--text-small);
   font-weight: 500;
   line-height: 1;
+  padding-block: 6px;
   white-space: nowrap;
   transition: color var(--dur-micro) var(--ease-out);
 }
@@ -1331,30 +1331,6 @@ p {
   margin-top: var(--space-xl);
 }
 
-.install__panel-body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  align-items: stretch;
-}
-
-.install__side {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: var(--space-sm);
-  padding: var(--space-md);
-  border-left: 1px solid var(--color-rule);
-}
-
-.install__side .install__actions {
-  padding: 0;
-  border-top: 0;
-}
-
-.install__side .install__note {
-  padding: 0;
-}
-
 .install__box {
   display: flex;
   flex-direction: column;
@@ -1367,7 +1343,16 @@ p {
 }
 
 .install__download {
-  align-self: stretch;
+  align-self: flex-start;
+  width: 100%;
+  max-width: 360px;
+}
+
+.install__hint {
+  max-width: 360px;
+  color: var(--color-muted);
+  font-size: var(--text-meta);
+  line-height: 1.6;
 }
 
 .install__release {
@@ -1393,21 +1378,6 @@ p {
 
 .install__release a:active {
   color: var(--color-muted);
-}
-
-.install__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-md);
-  padding: var(--space-md);
-  border-top: 1px solid var(--color-rule);
-}
-
-.copy-status {
-  min-height: 1lh;
-  color: var(--color-muted);
-  font-size: var(--text-meta);
-  line-height: 1.4;
 }
 
 .install__note {
@@ -1809,6 +1779,7 @@ p {
   color: var(--color-muted);
   font-size: var(--text-small);
   font-weight: 500;
+  padding-block: 3px;
   white-space: nowrap;
   transition: color var(--dur-micro) var(--ease-out);
 }
@@ -1863,6 +1834,10 @@ p {
     --grid-gap: 32px;
     --section-gap: 96px;
     --section-gap-s: 80px;
+  }
+
+  html {
+    scroll-padding-top: 116px;
   }
 
   .hero {
@@ -1922,15 +1897,6 @@ p {
   .steps--row {
     grid-template-columns: minmax(0, 1fr);
     gap: 0;
-  }
-
-  .install__panel-body {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .install__side {
-    border-top: 1px solid var(--color-rule);
-    border-left: 0;
   }
 
   .compare,
@@ -2141,12 +2107,6 @@ p {
     padding: var(--space-sm);
   }
 
-  .install__actions {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: var(--space-xs);
-  }
-
   .footer__links {
     gap: var(--space-md);
   }
@@ -2166,7 +2126,7 @@ p {
     min-height: 0;
   }
 
-  .nav-state {
+  .nav-cta {
     margin-left: auto;
   }
 
@@ -2182,6 +2142,13 @@ p {
   }
 }
 
+@media (max-width: 640px) and (pointer: coarse) {
+  /* row 1 is now as tall as the 44px download button, row 2 as tall as the 44px links: header 122px */
+  html {
+    scroll-padding-top: 132px;
+  }
+}
+
 @media (pointer: coarse) {
   .nav-links a,
   .footer__links a {
@@ -2190,7 +2157,7 @@ p {
     align-items: center;
   }
 
-  .btn--small {
+  .nav-cta {
     min-height: 44px;
   }
 }

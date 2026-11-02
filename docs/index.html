@@ -6,6 +6,42 @@
   <meta name="color-scheme" content="dark">
   <title>SkillLocker, 本地 Skill 管理</title>
   <meta name="description" content="SkillLocker 是 Windows 本地 Skill 管理器：扫描中央仓库，把 Skill 链进各 Agent，并用矩阵查看分发状态。">
+  <link rel="canonical" href="https://2026heshao.github.io/skilllocker/">
+  <meta name="theme-color" content="#0B0C0E">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="SkillLocker">
+  <meta property="og:locale" content="zh_CN">
+  <meta property="og:url" content="https://2026heshao.github.io/skilllocker/">
+  <meta property="og:title" content="SkillLocker, 所有 Skill 一个本地库">
+  <meta property="og:description" content="Windows 本地 Skill 管理器：扫描中央仓库的 SKILL.md，用 junction 链进各 Agent，再用矩阵看清覆盖、漂移与冲突。Setup.exe 直接下载，装好就能用。">
+  <meta property="og:image" content="https://2026heshao.github.io/skilllocker/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="SkillLocker：所有 Skill，一个本地库。深色分享卡，左侧产品主张与 54/378/7/48 四项数据，右侧命令面板界面。">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="SkillLocker, 所有 Skill 一个本地库">
+  <meta name="twitter:description" content="Windows 本地 Skill 管理器：中央仓库一份实体，junction 链进各 Agent，矩阵看清覆盖与漂移。">
+  <meta name="twitter:image" content="https://2026heshao.github.io/skilllocker/og-image.png">
+  <meta name="twitter:image:alt" content="SkillLocker：所有 Skill，一个本地库">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "SkillLocker",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "Windows 10, Windows 11",
+    "softwareVersion": "0.3.0",
+    "url": "https://2026heshao.github.io/skilllocker/",
+    "downloadUrl": "https://2026heshao.github.io/skilllocker/SkillLocker-Setup-v0.3.0.exe",
+    "installUrl": "https://2026heshao.github.io/skilllocker/SkillLocker-Setup-v0.3.0.exe",
+    "image": ["https://2026heshao.github.io/skilllocker/og-image.png", "https://2026heshao.github.io/skilllocker/screenshots/01-library.png"],
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "CNY" },
+    "sameAs": "https://github.com/2026heshao/skilllocker"
+  }
+  </script>
   <link rel="stylesheet" href="site.css">
 </head>
 <body>
@@ -28,7 +64,14 @@
         <a href="#cli">CLI</a>
         <a href="#install">安装</a>
       </nav>
-      <span class="nav-state">Local</span>
+      <a class="btn btn--quiet nav-cta" href="SkillLocker-Setup-v0.3.0.exe" download="SkillLocker-Setup-v0.3.0.exe">
+        <svg class="btn__icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <path d="M8 2.5v6.75"></path>
+          <path d="M5 6.5 8 9.5l3-3"></path>
+          <path d="M2.75 13.25h10.5"></path>
+        </svg>
+        <span>下载 Setup.exe</span>
+      </a>
     </div>
   </header>
 
@@ -39,7 +82,15 @@
           <h1>所有 Skill，<span class="hero__line">一个本地库。</span></h1>
           <p class="lede">扫描中央仓库的 SKILL.md，用 junction 链进 Claude Code、Codex、Qoder 等 Agent，再用矩阵看清覆盖、漂移与冲突。</p>
           <div class="hero__actions">
-            <a class="btn btn--primary" href="#install">本地运行</a>
+            <a class="btn btn--primary" href="SkillLocker-Setup-v0.3.0.exe" download="SkillLocker-Setup-v0.3.0.exe">
+              <svg class="btn__icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                <path d="M8 2.5v6.75"></path>
+                <path d="M5 6.5 8 9.5l3-3"></path>
+                <path d="M2.75 13.25h10.5"></path>
+              </svg>
+              <span>下载 Setup.exe</span>
+            </a>
+            <a class="btn btn--quiet" href="#install">本地运行</a>
             <a class="btn btn--quiet" href="#matrix">看分发矩阵</a>
           </div>
           <dl class="hero__meta">
@@ -49,7 +100,7 @@
             </div>
             <div>
               <dt>运行时</dt>
-              <dd>Python 3.12</dd>
+              <dd>内置 Python</dd>
             </div>
             <div>
               <dt>账号</dt>
@@ -275,17 +326,17 @@
           <p>扫描中央仓库的 SKILL.md，用 junction 分发到每个 Agent；失败时才回退到复制。</p>
         </div>
 
-        <div class="flow" aria-label="系统图：中央仓库经 SkillLocker 链接到七个 Agent 目录">
+        <div class="flow" role="group" aria-label="系统图：中央仓库经 SkillLocker 链接到七个 Agent 目录">
           <div class="flow__store">
             <div>
               <div class="flow__label">中央仓库</div>
               <div class="flow__path">D:\skilllocker\store</div>
             </div>
-            <div class="flow__count"><b>51</b><span>skills</span></div>
+            <div class="flow__count"><b>54</b><span>skills</span></div>
             <dl class="flow__meta">
-              <div><dt>索引</dt><dd>51 SKILL.md</dd></div>
+              <div><dt>索引</dt><dd>54 SKILL.md</dd></div>
               <div><dt>内容哈希</dt><dd>已校验</dd></div>
-              <div><dt>仓库大小</dt><dd>54.4 MB</dd></div>
+              <div><dt>仓库大小</dt><dd>64.9 MB</dd></div>
             </dl>
           </div>
 
@@ -307,6 +358,8 @@
             <div class="flow__agent"><span>ZCode</span><span class="flow__agent-state">linked</span></div>
           </div>
         </div>
+
+        <p class="section-caption">本机库快照：v0.3.0 · 2026-11-02。</p>
 
         <ul class="facts">
           <li>
@@ -333,13 +386,13 @@
         </div>
 
         <div class="matrix__stats">
-          <div class="matrix__stat"><b>51</b><span>skills 总数</span></div>
-          <div class="matrix__stat"><b>49</b><span>已共享</span></div>
-          <div class="matrix__stat"><b>2</b><span>独有</span></div>
+          <div class="matrix__stat"><b>54</b><span>skills 总数</span></div>
+          <div class="matrix__stat"><b>378</b><span>分发链接</span></div>
+          <div class="matrix__stat"><b>7</b><span>已连接 Agent</span></div>
           <div class="matrix__stat"><b>48</b><span>Agent 适配</span></div>
         </div>
 
-        <div class="matrix__wrap" tabindex="0" aria-label="Skill 分发矩阵，可横向滚动">
+        <div class="matrix__wrap" tabindex="0" role="region" aria-label="Skill 分发矩阵，可横向滚动">
           <table class="matrix-table">
             <caption class="visually-hidden">Skill 分发矩阵示例</caption>
             <thead>
@@ -414,7 +467,7 @@
           <span class="legend__item"><span class="mark mark--warn"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 2.25 10.5 9.75h-9z"></path><path d="M6 4.75v2.5"></path><path d="M6 8.75h.01"></path></svg></span>漂移</span>
           <span class="legend__item"><span class="mark mark--missing"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M2.25 6h7.5"></path></svg></span>缺失</span>
         </div>
-        <p class="matrix__caption"><span class="matrix__hint-full">矩阵示例。</span><span class="matrix__hint-compact">矩阵示例。列顺序：Claude Code, Codex, DeepSeek, Qoder, Trae CN, WorkBuddy, ZCode。</span></p>
+        <p class="matrix__caption"><span class="matrix__hint-full">矩阵为示例数据；统计取自本机库快照（v0.3.0 · 2026-11-02）。</span><span class="matrix__hint-compact">矩阵为示例数据。列顺序：Claude Code, Codex, DeepSeek, Qoder, Trae CN, WorkBuddy, ZCode。统计取自 v0.3.0 快照。</span></p>
       </div>
     </section>
 
@@ -499,13 +552,13 @@ python skilllocker.py fetch &lt;owner/repo/skill&gt;</code></pre>
         <div class="terminal terminal--wide">
           <div class="panel__head"><span>PowerShell</span><span>D:\skilllocker\kit</span></div>
           <pre><code><span class="term__cmd"><span class="term__prompt">$</span> python skilllocker.py status</span>
-<span class="term__out">shared 49  unique 2  agents 7</span>
+<span class="term__out">skills 54  links 378  agents 7</span>
 <span class="term__cmd"><span class="term__prompt">$</span> python skilllocker.py verify</span>
 <span class="term__out">drift 0  conflicts 0</span>
 <span class="term__cmd"><span class="term__prompt">$</span> python skilllocker.py sync --fix</span>
 <span class="term__out">links ok</span></code></pre>
         </div>
-        <p class="terminal__caption">示例输出。</p>
+        <p class="terminal__caption">示例输出。CLI 走源码运行（需要 Python）；桌面安装包不含 CLI。</p>
 
         <div class="cli-table">
           <table>
@@ -588,7 +641,15 @@ python skilllocker.py fetch &lt;owner/repo/skill&gt;</code></pre>
         <div class="panel install__panel--wide">
           <div class="panel__head"><span>Windows installer</span><span>v0.3.0</span></div>
           <div class="install__box">
-            <a class="btn btn--quiet install__download" href="SkillLocker-Setup-v0.3.0.exe" download="SkillLocker-Setup-v0.3.0.exe">下载 SkillLocker-Setup-v0.3.0.exe</a>
+            <a class="btn btn--primary install__download" href="SkillLocker-Setup-v0.3.0.exe" download="SkillLocker-Setup-v0.3.0.exe">
+              <svg class="btn__icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                <path d="M8 2.5v6.75"></path>
+                <path d="M5 6.5 8 9.5l3-3"></path>
+                <path d="M2.75 13.25h10.5"></path>
+              </svg>
+              <span>下载 Setup.exe</span>
+            </a>
+            <p class="install__hint"><span class="mono">SkillLocker-Setup-v0.3.0.exe</span> · 约 27.5 MB · 需在 Windows 10/11 上运行</p>
             <p class="install__note">安装包自带 Python 运行时。首次启动自动创建本地库和数据库；技能在应用内导入。</p>
             <p class="install__release"><a href="https://github.com/2026heshao/skilllocker/releases/tag/v0.3.0">Release 说明</a><span>Windows 10/11, WebView2 Runtime</span></p>
           </div>
@@ -624,7 +685,7 @@ python skilllocker.py fetch &lt;owner/repo/skill&gt;</code></pre>
       </div>
       <div class="footer__bottom">
         <span>Local only</span>
-        <span>Windows 10/11, Python 3.12</span>
+        <span>Windows 10/11 · 安装包内置 Python</span>
       </div>
     </div>
   </footer>

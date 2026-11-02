@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" role="img" aria-label="SkillLocker">
+  <rect width="16" height="16" rx="2.5" fill="#121417"/>
+  <g fill="none" stroke="#E6E8EB" stroke-width="1.5">
+    <rect x="2.75" y="2.75" width="10.5" height="10.5" rx="1.25"/>
+    <path d="M10.25 4.5v7"/>
+  </g>
+</svg>
