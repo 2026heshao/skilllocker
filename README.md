@@ -26,7 +26,7 @@
 
 ## 安装版（普通用户）
 
-直接下载 [SkillLocker-Setup-v0.3.0.exe](https://2026heshao.github.io/skilllocker/SkillLocker-Setup-v0.3.0.exe)（官网站内直链），或从 [GitHub Release v0.3.0](https://github.com/2026heshao/skilllocker/releases/tag/v0.3.0) 获取同一份安装包；校验值见仓库内 `release/SkillLocker-Setup-v0.3.0.exe.sha256`。安装包自带 Python 运行时，不需要装 Python，也不需要运行 bat 或手动放置 skill。
+直接下载 [SkillLocker-Setup-v0.3.1.exe](https://2026heshao.github.io/skilllocker/SkillLocker-Setup-v0.3.1.exe)（官网站内直链），或从 [GitHub Release v0.3.1](https://github.com/2026heshao/skilllocker/releases/tag/v0.3.1) 获取同一份安装包；校验值见仓库内 `release/SkillLocker-Setup-v0.3.1.exe.sha256`。安装包自带 Python 运行时，不需要装 Python，也不需要运行 bat 或手动放置 skill。
 
 安装后从开始菜单或桌面打开 SkillLocker。首次启动会自动创建 `%LOCALAPPDATA%\SkillLocker` 下的 store、SQLite 数据库和 WebView2 profile。
 
