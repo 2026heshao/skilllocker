@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""skillkit 快照层：list_boards 一次性给出 UI 需要的全部只读数据（字段与
+"""skilllocker 快照层：list_boards 一次性给出 UI 需要的全部只读数据（字段与
 ui/data.js 快照保持一致）；conflict_detail 同名副本文件对照；find_conflict_tool
 定位共有 skill 的实体冲突所在 agent。只读，不改库、不改盘。"""
 import datetime
 import os
 import sys
 
-from skillkit_base import (  # noqa: F401 - 部分名字经 skillkit 门面再导出
+from skilllocker_base import (  # noqa: F401 - 部分名字经 skilllocker 门面再导出
     APP_VERSION, HOME, _file_digest, _tool_mark, file_list, fmt_bytes,
     folder_rows, last_scan_time, ordered_tools, target_state, tree_stats)
-from skillkit_store import agent_entries, unique_entries
+from skilllocker_store import agent_entries, unique_entries
 
 
 def _db_path():
-    """skillkit.db 的展示路径。经 base 现读：单测打 DB_FILE 补丁也跟着走。"""
-    import skillkit_base as _base
+    """skilllocker.db 的展示路径。经 base 现读：单测打 DB_FILE 补丁也跟着走。"""
+    import skilllocker_base as _base
     return _base.DB_FILE.replace("/", "\\")
 
 

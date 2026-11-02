@@ -1,12 +1,12 @@
-/* 真实注册表 + 磁盘快照 · 由 skillkit 数据生成，仅用于 UI 原型 */
-window.SKILLKIT_DATA = {
+/* 真实注册表 + 磁盘快照 · 由 skilllocker 数据生成，仅用于 UI 原型 */
+window.SKILLLOCKER_DATA = {
  "meta": {
   "generated": "2026-10-29 22:16",
   "version": "0.2.1",
   "python": "3.12.6",
-  "store": "D:\\skillkit\\store",
+  "store": "D:\\skilllocker\\store",
   "storeSize": "54.4 MB",
-  "db": "D:\\skillkit\\kit\\skillkit.db",
+  "db": "D:\\skilllocker\\kit\\skilllocker.db",
   "scanAt": "22:16",
   "eventsTotal": 574,
   "skillCount": 51,
@@ -1230,7 +1230,7 @@ window.SKILLKIT_DATA = {
   "skill": "pdf",
   "tool": "workbuddy",
   "central": {
-   "path": "D:\\skillkit\\store\\pdf",
+   "path": "D:\\skilllocker\\store\\pdf",
    "count": 12,
    "bytes": 58692,
    "files": [

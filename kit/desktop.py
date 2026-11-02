@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""skillkit 桌面端外壳（pywebview）。
+"""skilllocker 桌面端外壳（pywebview）。
 
-- 直接 `import skillkit`，不启 HTTP 服务、不做 REST/序列化层；
-- 前端通过 window.pywebview.api 调用这里的方法，数据来自 skillkit.db；
+- 直接 `import skilllocker`，不启 HTTP 服务、不做 REST/序列化层；
+- 前端通过 window.pywebview.api 调用这里的方法，数据来自 skilllocker.db；
 - 窗口无边框，标题栏由前端 pointer 事件拖动（app.js window move），
   标题栏双击切换最大化；
 - 启动时建窗即按 1200x760 居中（含 WinForms 去边框的尺寸补偿），不做二次摆位；
 - 关闭即退出进程，编辑内容即时写库（不做去抖，避免隐藏窗口丢编辑）。
 
 用法：
-    双击 D:\\skillkit\\启动 skillkit.bat   # 推荐：pythonw 静默启动，无控制台
+    双击 D:\\skilllocker\\启动 skilllocker.bat   # 推荐：pythonw 静默启动，无控制台
     python desktop.py            # 启动（带控制台，便于看日志）
     python desktop.py --debug    # 打开 WebView2 调试面板
     python desktop.py --selftest # 无人值守自检（离屏跑一遍 UI 与写库）
@@ -33,16 +33,16 @@ except ImportError:
     # 进程会静默死亡。置 None，main() 装配完日志后给弹窗 + 日志 + 退出码 2
     webview = None
 
-import skillkit
+import skilllocker
 
 KIT = os.path.dirname(os.path.abspath(__file__))
 UI_DIR = os.path.join(os.path.dirname(KIT), "ui")
 INDEX = os.path.join(UI_DIR, "index.html")
 PROFILE = os.path.join(KIT, "desktop_profile")
-ICON = os.path.join(KIT, "assets", "skillkit.ico")
+ICON = os.path.join(KIT, "assets", "skilllocker.ico")
 WIN_W, WIN_H = 1200, 760
 MIN_W, MIN_H = 1180, 720
-LOG_FILE = os.path.join(KIT, "skillkit.log")
+LOG_FILE = os.path.join(KIT, "skilllocker.log")
 
 # 无边框 WinForms 窗口会被系统去掉 WS_MINIMIZEBOX，任务栏按钮点击就不会最小化；
 # 这里在窗口显示后补回该样式位，并在每次窗口状态变化后重新补一次。
@@ -50,13 +50,13 @@ WS_MINIMIZEBOX = 0x00020000
 _WINDOW_ICONS = {}  # (slot, px) -> HICON，缓存住句柄，重复应用图标时不再泄漏
 
 # 统一日志：launch.log / ui-drag.log / stdout 三套旁路合并成一个 logging 管线，
-# 全部落 kit/skillkit.log（256KB×3 轮转）。pythonw 没有控制台，文件是唯一出口；
+# 全部落 kit/skilllocker.log（256KB×3 轮转）。pythonw 没有控制台，文件是唯一出口；
 # CLI 的 stdout 输出是命令结果，不在此管线内。logging 自身线程安全。
-_LOG = logging.getLogger("skillkit")
+_LOG = logging.getLogger("skilllocker")
 
 
 def _setup_logging():
-    """幂等装配：桥异常、启动错误、前端诊断（log_ui）统一进 skillkit.log。"""
+    """幂等装配：桥异常、启动错误、前端诊断（log_ui）统一进 skilllocker.log。"""
     if _LOG.handlers:
         return _LOG
     _LOG.setLevel(logging.DEBUG)
@@ -176,7 +176,7 @@ def _centered_rect(width, height):
     return max(0, (work_w - width) // 2), max(0, (work_h - height) // 2)
 
 
-def _hwnd_by_title(prefix="skillkit", visible_only=True):
+def _hwnd_by_title(prefix="skilllocker", visible_only=True):
     """按标题前缀找主窗口。
 
     WebView2 会挂出同前缀的小工具窗（class = Chrome_WidgetWin_1），
@@ -458,7 +458,7 @@ def _guard(fn):
         try:
             return fn(self, *args, **kwargs)
         except Exception as exc:  # noqa: BLE001 - 统一回给前端显示
-            # 前端只拿到一行 error 文案；这里把堆栈落进 skillkit.log，排障有据
+            # 前端只拿到一行 error 文案；这里把堆栈落进 skilllocker.log，排障有据
             _LOG.exception("api %s 失败", fn.__name__)
             return {"ok": False, "error": "%s: %s" % (type(exc).__name__, exc)}
     wrapper.__name__ = fn.__name__
@@ -472,11 +472,11 @@ def _serialized(fn):
     rescan（delete from skills + 全盘扫描）与 delete_skill / set_agent
     （建删 junction、rmtree）交错时文件系统操作会互相绊倒——比如
     make_junction 撞上对方刚建好的路径就抛 RuntimeError。锁取自
-    skillkit.OPS_LOCK（进程内生效；CLI 是独立进程，跨进程不在此防线内）。
+    skilllocker.OPS_LOCK（进程内生效；CLI 是独立进程，跨进程不在此防线内）。
     win_* / log_ui / copy_path 不碰库，不参与串行化，避免拖慢窗口反馈。
     """
     def wrapper(self, *args, **kwargs):
-        with skillkit.OPS_LOCK:
+        with skilllocker.OPS_LOCK:
             return fn(self, *args, **kwargs)
     wrapper.__name__ = fn.__name__
     return wrapper
@@ -485,10 +485,10 @@ def _serialized(fn):
 def _boards_payload(con, cfg, prune=True):
     """五个桥方法共用的看板回包：快照 →（可选）修剪 meta → 读 meta。
     顺序有讲究：prune 会删行，get_meta 必须发生在它之后。"""
-    boards = skillkit.list_boards(con, cfg)
+    boards = skilllocker.list_boards(con, cfg)
     if prune:
-        skillkit.prune_meta(con, boards)
-    return {"ok": True, "data": boards, "meta": skillkit.get_meta(con)}
+        skilllocker.prune_meta(con, boards)
+    return {"ok": True, "data": boards, "meta": skilllocker.get_meta(con)}
 
 
 class Api:
@@ -497,6 +497,8 @@ class Api:
     def __init__(self):
         self._window = None
         self._maxed = False
+        self._fetch_cancel = None
+        self._fetch_lock = threading.Lock()
 
     def attach(self, window):
         self._window = window
@@ -505,24 +507,24 @@ class Api:
     @_guard
     @_serialized
     def bootstrap(self):
-        con = skillkit.db()
+        con = skilllocker.db()
         try:
-            cfg = skillkit.load_config()
+            cfg = skilllocker.load_config()
             if cfg.get("_load_error"):
-                skillkit.log_event(con, "warn", cfg["_load_error"])
-                # events 表前端取不到（payload 恒 []），必须同时进 skillkit.log
+                skilllocker.log_event(con, "warn", cfg["_load_error"])
+                # events 表前端取不到（payload 恒 []），必须同时进 skilllocker.log
                 _LOG.warning("config: %s", cfg["_load_error"])
                 con.commit()
             # 首屏探测：幂等、毫秒级（读 adapters.json + 每工具一次 isdir）。
             # 必须在 seed_meta 之前：seed 的独有播种依赖 tools 表
-            skillkit.sync_tools_from_adapters(con, cfg)
+            skilllocker.sync_tools_from_adapters(con, cfg)
             # 全新数据库：中央仓库内容从未登记过，自动扫一次（仅 skills 表为空时，
             # 避免每次启动都全量哈希 store）。store 不可读时 rescan 抛错 →
             # _guard 返回 ok:false → 前端启动错误页如实展示，不给演示数据
             if not con.execute("select 1 from skills limit 1").fetchone():
-                skillkit.rescan(con, cfg)
-            skillkit.migrate_folders(con, cfg)
-            skillkit.seed_meta(con, cfg)
+                skilllocker.rescan(con, cfg)
+            skilllocker.migrate_folders(con, cfg)
+            skilllocker.seed_meta(con, cfg)
             return _boards_payload(con, cfg)
         finally:
             con.close()
@@ -530,18 +532,18 @@ class Api:
     @_guard
     @_serialized
     def save_meta(self, scope, key, payload):
-        con = skillkit.db()
+        con = skilllocker.db()
         try:
-            return {"ok": True, "row": skillkit.set_meta(con, scope, key, payload)}
+            return {"ok": True, "row": skilllocker.set_meta(con, scope, key, payload)}
         finally:
             con.close()
 
     @_guard
     @_serialized
     def clear_meta(self, scope, key):
-        con = skillkit.db()
+        con = skilllocker.db()
         try:
-            skillkit.clear_meta(con, scope, key)
+            skilllocker.clear_meta(con, scope, key)
             return {"ok": True}
         finally:
             con.close()
@@ -552,27 +554,27 @@ class Api:
         """彻底删除：shared 删中央实体 + 所有链接；unique 只删该 agent 的副本。"""
         if scope not in ("shared", "unique"):
             raise RuntimeError("未知 scope: %s" % scope)
-        con = skillkit.db()
+        con = skilllocker.db()
         try:
-            cfg = skillkit.load_config()
+            cfg = skilllocker.load_config()
             if scope == "unique":
                 if "/" not in key:
                     raise RuntimeError("独有 skill 的 key 必须带 tool 前缀")
                 tool, name = key.split("/", 1)
-                urow = skillkit.find_unique_row(con, cfg, tool, name)
+                urow = skilllocker.find_unique_row(con, cfg, tool, name)
                 if urow and not urow.get("deletable", True):
                     raise RuntimeError(
                         "这条来自外部来源（%s），由 agent 自己管理，本工具不删除；"
                         "确要删除请打开该目录手动处理" % urow["path"])
-                action = skillkit.remove_unique(con, cfg, tool, name)
+                action = skilllocker.remove_unique(con, cfg, tool, name)
             else:
                 row = con.execute("select name from skills where name=?", (key,)).fetchone()
                 if not row:
                     raise RuntimeError("skill 不存在：%s" % key)
                 central = os.path.join(cfg["store"], key)
-                files, size = skillkit.dir_stats(central)
-                links = skillkit.remove_skill(con, cfg, key, purge=True)
-                skillkit.clear_meta(con, "shared", key)
+                files, size = skilllocker.dir_stats(central)
+                links = skilllocker.remove_skill(con, cfg, key, purge=True)
+                skilllocker.clear_meta(con, "shared", key)
                 action = {"scope": "shared", "key": key, "files": files,
                           "bytes": size, "links": len(links), "central": True,
                           "path": os.path.normpath(central).replace(os.sep, "\\")}
@@ -591,10 +593,10 @@ class Api:
         if "/" not in key:
             raise RuntimeError("独有 skill 的 key 必须带 tool 前缀")
         tool, name = key.split("/", 1)
-        con = skillkit.db()
+        con = skilllocker.db()
         try:
-            cfg = skillkit.load_config()
-            action = skillkit.uninstall_unique(con, cfg, tool, name)
+            cfg = skilllocker.load_config()
+            action = skilllocker.uninstall_unique(con, cfg, tool, name)
             payload = _boards_payload(con, cfg)
             payload["action"] = action
             return payload
@@ -603,11 +605,142 @@ class Api:
 
     @_guard
     @_serialized
-    def reseed_meta(self):
-        con = skillkit.db()
+    def promote_unique(self, key):
+        """独有技能一键转共有：拷入中央仓库、迁移显示名/备注、源副本对齐分发。
+
+        key 规则与 delete_skill / uninstall_unique 一致（tool/name）；哪些行
+        能收（同名覆盖 / foreign-link 不收）由 skilllocker.promote_unique 把关。
+        """
+        if "/" not in key:
+            raise RuntimeError("独有 skill 的 key 必须带 tool 前缀")
+        tool, name = key.split("/", 1)
+        con = skilllocker.db()
         try:
-            cfg = skillkit.load_config()
-            skillkit.reseed_meta(con, cfg)
+            cfg = skilllocker.load_config()
+            action = skilllocker.promote_unique(con, cfg, tool, name)
+            payload = _boards_payload(con, cfg)
+            payload["action"] = action
+            return payload
+        finally:
+            con.close()
+
+    @_guard
+    def choose_dir(self):
+        """原生目录选择（导入弹窗「浏览」用）。create_file_dialog 在 js_api
+        线程阻塞等待用户属预期行为；不碰库，不参与串行化。"""
+        # pywebview ≥5 弃用 FOLDER_DIALOG 常量；新枚举存在就用新 API，旧版回退
+        dlg = getattr(webview, "FileDialog", None)
+        r = self._window.create_file_dialog(
+            dlg.FOLDER if dlg else webview.FOLDER_DIALOG)
+        return {"ok": True, "data": (r[0] if r else "")}
+
+    @_guard
+    def import_preflight(self, src, name=None):
+        """导入前预检：只读（统计 + 同名时一次哈希比对），不碰库不写盘，
+        不参与串行化——与 rescan / import 并发安全（WAL 读不阻塞）。"""
+        cfg = skilllocker.load_config()
+        pre = skilllocker.import_preflight(cfg, src, name)
+        return {"ok": True, "data": pre}
+
+    @_guard
+    @_serialized
+    def import_skill(self, src, name, folder=""):
+        """执行导入：import_dir（原子拷贝 + rescan + log_event）+ 可选归档。
+
+        folder 传非空必须是存在的 folders.id；set_meta 单行 upsert 会新建该
+        skill 的 meta 行，下次 bootstrap 的 seed_meta 对已存在行是 no-op，
+        两不冲突。返回与 bootstrap 同构的 boards/meta（导入含 rescan，计数
+        已刷新），前端只走 applyBootstrap 一条路。"""
+        con = skilllocker.db()
+        try:
+            cfg = skilllocker.load_config()
+            got = skilllocker.import_dir(con, cfg, src, name)
+            if folder:
+                skilllocker.set_meta(con, "shared", got, {"folder": folder})
+            payload = _boards_payload(con, cfg)
+            files, size = skilllocker.dir_stats(os.path.join(cfg["store"], got))
+            payload["action"] = {
+                "name": got,
+                "path": os.path.join(cfg["store"], got).replace(os.sep, "/"),
+                "files": files, "bytes": size, "folder": folder or "",
+            }
+            return payload
+        finally:
+            con.close()
+
+    @_guard
+    def online_search(self, query, limit=20):
+        """skills.sh 在线检索：纯网络只读，不碰库与仓库，不参与串行化。"""
+        rows = skilllocker.online_search(query, limit)
+        return {"ok": True, "data": rows}
+
+    @_guard
+    def online_fetch(self, source, name, branch=None):
+        """在线获取：从 GitHub 下载 skill 到系统临时目录（%TEMP%/skilllocker-dl），
+        不写中央仓库；前端拿 data.path 走标准 import_preflight → import_skill。
+        下载有 180s 总预算：不持 OPS_LOCK、不参与串行化（只写系统临时目录，
+        与 store / 库操作并发安全），失败信息原样回给前端展示。
+        下载期间通过 window.__SK_FETCH_PROGRESS 回传 done/total/bytes；
+        online_fetch_cancel 置位后最多等当前 HTTP 请求返回/超时即退出。"""
+        cancel = threading.Event()
+        with self._fetch_lock:
+            if self._fetch_cancel is not None:
+                raise RuntimeError("已有下载在进行")
+            self._fetch_cancel = cancel
+
+        def progress(done, total, nbytes, path):
+            if not self._window:
+                return
+            try:
+                self._window.evaluate_js(
+                    "window.__SK_FETCH_PROGRESS && window.__SK_FETCH_PROGRESS(%s)"
+                    % json.dumps({"done": done, "total": total, "bytes": nbytes,
+                                  "path": path}, ensure_ascii=False))
+            except Exception:  # noqa: BLE001 - 窗口已关 / 注入失败不影响下载
+                pass
+
+        try:
+            try:
+                data = skilllocker.online_fetch(source, name, branch,
+                                                progress=progress, cancel=cancel)
+            except Exception as exc:  # noqa: BLE001
+                if "已取消" in str(exc):
+                    _LOG.info("online fetch cancelled %s/%s", source, name)
+                    return {"ok": False, "error": "已取消"}
+                raise
+            tm = data.get("timings") or {}
+            _LOG.info("online fetch %s/%s@%s -> %s（%s 清单，%s 文件，清单 %sms / 下载 %sms / 并发 %s）",
+                      source, name, data.get("branch"), data.get("path"),
+                      data.get("listing"), data.get("files"),
+                      tm.get("listing_ms"), tm.get("download_ms"), tm.get("parallel"))
+            return {"ok": True, "data": data}
+        finally:
+            with self._fetch_lock:
+                if self._fetch_cancel is cancel:
+                    self._fetch_cancel = None
+            if self._window:
+                try:
+                    self._window.evaluate_js("window.__SK_FETCH_PROGRESS=null")
+                except Exception:  # noqa: BLE001
+                    pass
+
+    @_guard
+    def online_fetch_cancel(self):
+        """请求取消当前在线获取；实际退出在下一次请求检查点（≤ NET_TIMEOUT）。"""
+        with self._fetch_lock:
+            ev = self._fetch_cancel
+        if ev is not None:
+            ev.set()
+            _LOG.info("online fetch cancel requested")
+        return {"ok": True, "data": {"cancelled": bool(ev)}}
+
+    @_guard
+    @_serialized
+    def reseed_meta(self):
+        con = skilllocker.db()
+        try:
+            cfg = skilllocker.load_config()
+            skilllocker.reseed_meta(con, cfg)
             return _boards_payload(con, cfg, prune=False)
         finally:
             con.close()
@@ -616,11 +749,11 @@ class Api:
     @_guard
     @_serialized
     def folder_create(self, name, color):
-        con = skillkit.db()
+        con = skilllocker.db()
         try:
-            cfg = skillkit.load_config()
-            row = skillkit.folder_create(con, name, color)
-            skillkit.log_event(con, "folder-create", "%s (%s)" % (row["name"], row["color"]))
+            cfg = skilllocker.load_config()
+            row = skilllocker.folder_create(con, name, color)
+            skilllocker.log_event(con, "folder-create", "%s (%s)" % (row["name"], row["color"]))
             con.commit()
             payload = _boards_payload(con, cfg)
             payload["folder"] = row
@@ -631,11 +764,11 @@ class Api:
     @_guard
     @_serialized
     def folder_rename(self, folder_id, name, color):
-        con = skillkit.db()
+        con = skilllocker.db()
         try:
-            cfg = skillkit.load_config()
-            row = skillkit.folder_rename(con, folder_id, name, color)
-            skillkit.log_event(con, "folder-rename",
+            cfg = skilllocker.load_config()
+            row = skilllocker.folder_rename(con, folder_id, name, color)
+            skilllocker.log_event(con, "folder-rename",
                                "%s -> %s (%s)" % (folder_id, row["name"], row["color"]))
             con.commit()
             payload = _boards_payload(con, cfg)
@@ -647,11 +780,11 @@ class Api:
     @_guard
     @_serialized
     def folder_delete(self, folder_id):
-        con = skillkit.db()
+        con = skilllocker.db()
         try:
-            cfg = skillkit.load_config()
-            action = skillkit.folder_delete(con, folder_id)
-            skillkit.log_event(con, "folder-delete",
+            cfg = skilllocker.load_config()
+            action = skilllocker.folder_delete(con, folder_id)
+            skilllocker.log_event(con, "folder-delete",
                                "%s（%d 个 skill 回到未归档）" % (folder_id, action["moved"]))
             con.commit()
             payload = _boards_payload(con, cfg)
@@ -663,29 +796,29 @@ class Api:
     @_guard
     @_serialized
     def diff(self, scope, key):
-        con = skillkit.db()
+        con = skilllocker.db()
         try:
-            cfg = skillkit.load_config()
+            cfg = skilllocker.load_config()
             if scope == "unique":
                 if "/" not in key:
                     raise RuntimeError("独有 skill 的 key 必须带 tool 前缀")
                 tool, name = key.split("/", 1)
             else:
-                name, tool = key, skillkit.find_conflict_tool(con, cfg, key)
+                name, tool = key, skilllocker.find_conflict_tool(con, cfg, key)
                 if not tool:
                     raise RuntimeError("这个 skill 没有同名副本可对照")
-            return {"ok": True, "conflict": skillkit.conflict_detail(con, cfg, tool, name)}
+            return {"ok": True, "conflict": skilllocker.conflict_detail(con, cfg, tool, name)}
         finally:
             con.close()
 
     @_guard
     @_serialized
     def rescan(self):
-        con = skillkit.db()
+        con = skilllocker.db()
         try:
-            cfg = skillkit.load_config()
-            skillkit.sync_tools_from_adapters(con, cfg)
-            count = skillkit.rescan(con, cfg)
+            cfg = skilllocker.load_config()
+            skilllocker.sync_tools_from_adapters(con, cfg)
+            count = skilllocker.rescan(con, cfg)
             payload = _boards_payload(con, cfg)
             payload["scanned"] = count
             return payload
@@ -697,9 +830,9 @@ class Api:
     @_serialized
     def set_agent(self, key, on):
         """智能体分发开关：开=按中央仓库补齐 junction，关=只撤链接不动实体。"""
-        con = skillkit.db()
+        con = skilllocker.db()
         try:
-            cfg = skillkit.load_config()
+            cfg = skilllocker.load_config()
             row = con.execute("select * from tools where key=?", (key,)).fetchone()
             if not row:
                 raise RuntimeError("未知 agent: %s" % key)
@@ -708,7 +841,7 @@ class Api:
             if bool(on) and not row["enabled"]:
                 con.execute("update tools set enabled=1 where key=?", (key,))
                 try:
-                    plan = skillkit.do_sync(con, cfg, only_tools=[key], apply_changes=True)
+                    plan = skilllocker.do_sync(con, cfg, only_tools=[key], apply_changes=True)
                 except Exception:
                     # junction 建失败很常见（权限 / 路径被占用）。enabled=1 已写
                     # 未提交，但 do_sync 内部的 commit 会把它一起带上去 —— 失败时
@@ -722,17 +855,17 @@ class Api:
                 skipped = [p["skill"] for p in plan
                            if p["action"] is None and p["state"] not in
                            ("ok-link", "ok-copy", "off", "conflict-dir", "conflict-file")]
-                skillkit.log_event(con, "agent-on", "%s（建 %d 处）" % (key, changed))
+                skilllocker.log_event(con, "agent-on", "%s（建 %d 处）" % (key, changed))
                 con.commit()
                 action = {"on": True, "changed": changed,
                           "conflicts": conflicts, "skipped": skipped}
             elif not bool(on) and row["enabled"]:
-                removed = skillkit.unlink_tool(con, cfg, key)
-                skillkit.toggle(con, "tools", key, 0)
+                removed = skilllocker.unlink_tool(con, cfg, key)
+                skilllocker.toggle(con, "tools", key, 0)
                 kept = [s["name"] for s in con.execute(
                     "select name from skills order by name")
                     if os.path.lexists(os.path.join(row["skills_dir"], s["name"]))]
-                skillkit.log_event(con, "agent-off", "%s（撤 %d 处，留 %d 处）"
+                skilllocker.log_event(con, "agent-off", "%s（撤 %d 处，留 %d 处）"
                                    % (key, len(removed), len(kept)))
                 con.commit()
                 action = {"on": False, "removed": len(removed), "kept": kept}
@@ -750,8 +883,8 @@ class Api:
     def export_json(self, name, payload):
         if not self._window:
             raise RuntimeError("窗口未就绪")
-        safe = "".join(c for c in str(name or "skillkit-meta.json")
-                       if c.isalnum() or c in "._-") or "skillkit-meta.json"
+        safe = "".join(c for c in str(name or "skilllocker-meta.json")
+                       if c.isalnum() or c in "._-") or "skilllocker-meta.json"
         target = self._window.create_file_dialog(
             webview.SAVE_DIALOG, directory=os.path.join(KIT, ".."),
             save_filename=safe, file_types=("JSON (*.json)",))
@@ -769,12 +902,24 @@ class Api:
         return {"ok": True, "text": str(text)[:2000]}
 
     @_guard
+    def open_url(self, url):
+        """系统浏览器打开外链（导入弹窗在线检索的「页面」按钮）。
+        只放行 skills.sh 与 GitHub 的 https 页面，其余一律拒绝。"""
+        import urllib.parse
+        u = urllib.parse.urlparse(str(url or ""))
+        if u.scheme != "https" or u.netloc.lower() not in (
+                "www.skills.sh", "skills.sh", "github.com", "www.github.com"):
+            raise RuntimeError("不允许打开这个地址：%s" % (url or "（空）"))
+        os.startfile(url)  # noqa: S606 - 白名单内的用户主动跳转
+        return {"ok": True}
+
+    @_guard
     @_serialized
     def open_dir(self, scope, key):
         """只接受 scope+key，路径由库和磁盘现算，避免任意路径注入。"""
-        con = skillkit.db()
+        con = skilllocker.db()
         try:
-            cfg = skillkit.load_config()
+            cfg = skilllocker.load_config()
             if scope == "agent":
                 row = con.execute("select * from tools where key=?", (key,)).fetchone()
                 if not row:
@@ -788,7 +933,7 @@ class Api:
                 tool, name = key.split("/", 1)
                 # 路径一律现查：独有行可能来自 main 之外的 extra 目录或容器，
                 # 不能想当然地按 skills_dir 直拼
-                urow = skillkit.find_unique_row(con, cfg, tool, name)
+                urow = skilllocker.find_unique_row(con, cfg, tool, name)
                 if not urow:
                     raise RuntimeError("独有 skill 不存在或已消失：%s" % key)
                 path = urow["path"]
@@ -904,7 +1049,7 @@ class Api:
 
     @_guard
     def log_ui(self, kind, detail):
-        """前端诊断进统一日志（kit/skillkit.log，RotatingFileHandler 自动轮转）。
+        """前端诊断进统一日志（kit/skilllocker.log，RotatingFileHandler 自动轮转）。
 
         真实鼠标拖不动时，这个日志能说清是「没收到 pointerdown」「没拿到 bounds」
         还是「后端拒绝移动」，不用再猜。logging 线程安全、自带轮转，
@@ -938,7 +1083,7 @@ def build_window(api, hidden=False, noboot=False):
     nc_x, nc_y = _nc_css()
     x, y = _centered_rect(width, height)
     return webview.create_window(
-        "skillkit · Skill Library",
+        "skilllocker · Skill Library",
         INDEX + "?desktop=1" + ("&noboot=1" if noboot else "") + "&v=" + _asset_version(),
         js_api=api,
         width=width + nc_x,
@@ -956,11 +1101,11 @@ def build_window(api, hidden=False, noboot=False):
 
 
 def _report(message):
-    """pythonw 没有控制台：错误进统一日志（kit/skillkit.log），并弹系统提示框。"""
+    """pythonw 没有控制台：错误进统一日志（kit/skilllocker.log），并弹系统提示框。"""
     _LOG.error("%s", message)
     try:
         ctypes.windll.user32.MessageBoxW(
-            ctypes.wintypes.HWND(0), str(message), "skillkit 启动失败", 0x10)
+            ctypes.wintypes.HWND(0), str(message), "skilllocker 启动失败", 0x10)
     except Exception:  # noqa: BLE001 - 非 Windows 或弹窗失败
         try:
             print(message, file=sys.stderr)
@@ -969,7 +1114,7 @@ def _report(message):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="skillkit 桌面端")
+    parser = argparse.ArgumentParser(description="skilllocker 桌面端")
     parser.add_argument("--debug", action="store_true", help="打开 WebView2 调试工具")
     parser.add_argument("--selftest", action="store_true", help="离屏自检后退出")
     args = parser.parse_args()

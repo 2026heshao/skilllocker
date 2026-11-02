@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""skillkit 扫描层：工具表同步（adapters.json）、中央仓库扫描（rescan）、
+"""skilllocker 扫描层：工具表同步（adapters.json）、中央仓库扫描（rescan）、
 独有技能扫描（unique_entries，覆盖 main / extra / `根/**` / foreign-link 四类来源）
 与智能体看板扫描（agent_entries）。
 
-adapters.json 路径等「单测会打补丁」的模块级常量，一律经 skillkit_base 属性
+adapters.json 路径等「单测会打补丁」的模块级常量，一律经 skilllocker_base 属性
 在调用时现读（_base.ADAPTERS_FILE），不做 import 时的值绑定。
 """
 import json
@@ -11,8 +11,8 @@ import os
 import re
 import shutil
 
-import skillkit_base as _base
-from skillkit_base import (  # noqa: F401 - 部分名字经 skillkit 门面再导出
+import skilllocker_base as _base
+from skilllocker_base import (  # noqa: F401 - 部分名字经 skilllocker 门面再导出
     HOME, IGNORE_NAMES, _hash_tree, _tool_mark, dir_stats, has_skill_md,
     is_reparse, link_target, log_event, norm_path, now_ms, ordered_tools,
     parse_frontmatter, sha_tree, target_state)

@@ -2,9 +2,9 @@
 """首次启动（干净机器）全链路回归 · FIRST-RUN-FIX-PLAN.md §5.1。
 
 隔离仿真一台「全新机器」：临时目录假 HOME（装 2 个 agent）+ 假中央仓库 +
-无 config.json / skillkit.db，走 bootstrap → 开关 → 坏盘符 → 坏 adapters 的
-真实代码路径（desktop.Api 桥方法，非绕过）。补丁注意：skillkit_store.HOME
-与 skillkit_boards.HOME 是 from-import 值绑定，只 patch base 不生效。
+无 config.json / skilllocker.db，走 bootstrap → 开关 → 坏盘符 → 坏 adapters 的
+真实代码路径（desktop.Api 桥方法，非绕过）。补丁注意：skilllocker_store.HOME
+与 skilllocker_boards.HOME 是 from-import 值绑定，只 patch base 不生效。
 
 python test_first_run.py（无第三方依赖；junction 用例仅 Windows）
 """
@@ -17,14 +17,14 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import skillkit  # noqa: E402
-import skillkit_base  # noqa: E402
-import skillkit_boards  # noqa: E402
-import skillkit_store  # noqa: E402
+import skilllocker  # noqa: E402
+import skilllocker_base  # noqa: E402
+import skilllocker_boards  # noqa: E402
+import skilllocker_store  # noqa: E402
 
 # 桌面端 _guard 的异常日志没装配 handler 时会打到 stderr（lastResort），
 # 坏路径用例特意触发它：这里静音，别把测试输出淹了
-logging.getLogger("skillkit").addHandler(logging.NullHandler())
+logging.getLogger("skilllocker").addHandler(logging.NullHandler())
 
 CASES = []
 
@@ -69,27 +69,27 @@ def sandbox(td, home=None, store=None, adapters=None, config=None):
               "---\nname: demo-skill\ndescription: demo\n---\nbody\n")
     for root, sub in ((".claude", "skills"), (".cursor", "skills")):
         os.makedirs(os.path.join(home, root, sub), exist_ok=True)
-    olds = (skillkit_base.DB_FILE, skillkit_base.CONFIG_FILE,
-            skillkit_base.ADAPTERS_FILE, skillkit_base.DEFAULT_STORE,
-            skillkit_base.HOME, skillkit_store.HOME, skillkit_boards.HOME)
-    skillkit_base.DB_FILE = os.path.join(td, "skillkit.db")
-    skillkit_base.CONFIG_FILE = os.path.join(td, "config.json")
-    skillkit_base.ADAPTERS_FILE = os.path.join(td, "adapters.json")
-    skillkit_base.DEFAULT_STORE = store
-    skillkit_base.HOME = home
-    skillkit_store.HOME = home   # from-import 值绑定，必须单独补
-    skillkit_boards.HOME = home  # 同上
+    olds = (skilllocker_base.DB_FILE, skilllocker_base.CONFIG_FILE,
+            skilllocker_base.ADAPTERS_FILE, skilllocker_base.DEFAULT_STORE,
+            skilllocker_base.HOME, skilllocker_store.HOME, skilllocker_boards.HOME)
+    skilllocker_base.DB_FILE = os.path.join(td, "skilllocker.db")
+    skilllocker_base.CONFIG_FILE = os.path.join(td, "config.json")
+    skilllocker_base.ADAPTERS_FILE = os.path.join(td, "adapters.json")
+    skilllocker_base.DEFAULT_STORE = store
+    skilllocker_base.HOME = home
+    skilllocker_store.HOME = home   # from-import 值绑定，必须单独补
+    skilllocker_boards.HOME = home  # 同上
     if adapters is not None:  # 传字符串 = 原样写入（构造损坏文件用例）
-        write(skillkit_base.ADAPTERS_FILE,
+        write(skilllocker_base.ADAPTERS_FILE,
               adapters if isinstance(adapters, str) else json.dumps(adapters))
     if config is not None:
-        write(skillkit_base.CONFIG_FILE, json.dumps(config))
+        write(skilllocker_base.CONFIG_FILE, json.dumps(config))
     try:
         yield home, store
     finally:
-        (skillkit_base.DB_FILE, skillkit_base.CONFIG_FILE,
-         skillkit_base.ADAPTERS_FILE, skillkit_base.DEFAULT_STORE,
-         skillkit_base.HOME, skillkit_store.HOME, skillkit_boards.HOME) = olds
+        (skilllocker_base.DB_FILE, skilllocker_base.CONFIG_FILE,
+         skilllocker_base.ADAPTERS_FILE, skilllocker_base.DEFAULT_STORE,
+         skilllocker_base.HOME, skilllocker_store.HOME, skilllocker_boards.HOME) = olds
 
 
 # ---------------------------------------------------------------- 核心链路
@@ -106,8 +106,8 @@ def _():
             assert len(agents) == 2, [a["key"] for a in agents]
             assert all(a["status"] == "off" and not a["enabled"] for a in agents), agents
             assert [s["name"] for s in skills] == ["demo-skill"], skills
-            assert len(res["data"]["folders"]) == len(skillkit.FOLDER_PRESETS)
-            con = skillkit.db()
+            assert len(res["data"]["folders"]) == len(skilllocker.FOLDER_PRESETS)
+            con = skilllocker.db()
             try:
                 rows = {r["key"]: r["enabled"] for r in con.execute("select key,enabled from tools")}
                 assert rows == {"claude_code": 0, "cursor": 0}, rows
@@ -129,12 +129,12 @@ def _():
             assert res["action"]["changed"] >= 1, res["action"]
             link = os.path.join(home, ".claude", "skills", "demo-skill")
             assert os.path.isdir(link), link
-            con = skillkit.db()
+            con = skilllocker.db()
             try:
-                cfg = skillkit.load_config()
+                cfg = skilllocker.load_config()
                 srow = con.execute("select * from skills where name='demo-skill'").fetchone()
                 trow = con.execute("select * from tools where key='claude_code'").fetchone()
-                state, _ = skillkit.target_state(
+                state, _ = skilllocker.target_state(
                     os.path.join(trow["skills_dir"], srow["name"]).replace(os.sep, "/"),
                     cfg, srow, trow)
                 assert state == "ok-link", state
@@ -147,17 +147,17 @@ def _():
 # ---------------------------------------------------------------- 坏路径容错
 @case("first_run: store 指向不存在盘符时 load_config 不抛、留痕")
 def _():
-    bad = "%s:/skillkit/store" % absent_drive()
+    bad = "%s:/skilllocker/store" % absent_drive()
     with tempfile.TemporaryDirectory() as td:
         with sandbox(td, store=bad, config={"store": bad}):
-            cfg = skillkit.load_config()  # 不抛即过
+            cfg = skilllocker.load_config()  # 不抛即过
             assert cfg["store"] == bad, cfg
             assert "不可创建" in cfg.get("_load_error", ""), cfg
 
 
 @case("first_run: bootstrap 对坏 store 返回 ok:false（错误页数据源）")
 def _():
-    bad = "%s:/skillkit/store" % absent_drive()
+    bad = "%s:/skilllocker/store" % absent_drive()
     with tempfile.TemporaryDirectory() as td:
         with sandbox(td, store=bad, adapters=ADAPTERS, config={"store": bad}):
             import desktop
@@ -174,7 +174,7 @@ def _():
             records = []
             h = logging.Handler()
             h.emit = lambda r: records.append(r.getMessage())  # noqa: E731
-            lg = logging.getLogger("skillkit")
+            lg = logging.getLogger("skilllocker")
             lg.addHandler(h)
             try:
                 res = desktop.Api().bootstrap()
@@ -192,10 +192,10 @@ def _():
 def _():
     with tempfile.TemporaryDirectory() as td:
         with sandbox(td, adapters="{not json"):
-            con = skillkit.db()
+            con = skilllocker.db()
             try:
                 try:
-                    skillkit.sync_tools_from_adapters(con, skillkit.load_config())
+                    skilllocker.sync_tools_from_adapters(con, skilllocker.load_config())
                     raise AssertionError("空表 + 坏 adapters 应抛 RuntimeError")
                 except RuntimeError as exc:
                     assert "adapters.json" in str(exc), exc
@@ -208,15 +208,15 @@ def _():
 def _():
     with tempfile.TemporaryDirectory() as td:
         with sandbox(td, adapters=ADAPTERS) as (home, _store):
-            con = skillkit.db()
+            con = skilllocker.db()
             try:
                 # 旧库里的行：enabled=1（老版首次入库语义），链接可能存在
                 con.execute("insert into tools(key,label,skills_dir,detect_dir,detected,enabled,mode) "
                             "values('claude_code','Claude Code',?, '.claude',1,1,'junction')",
                             (os.path.join(home, ".claude", "skills").replace(os.sep, "/"),))
                 con.commit()
-                cfg = skillkit.load_config()
-                skillkit.sync_tools_from_adapters(con, cfg)
+                cfg = skilllocker.load_config()
+                skilllocker.sync_tools_from_adapters(con, cfg)
                 rows = {r["key"]: (r["detected"], r["enabled"])
                         for r in con.execute("select key,detected,enabled from tools")}
                 # 老行 enabled 保持 1（update 分支不碰），新行默认 0
@@ -228,11 +228,11 @@ def _():
 
 @case("first_run: DEFAULT_STORE 以安装目录为基（无 config.json 时）")
 def _():
-    install_root = os.path.dirname(os.path.abspath(skillkit_base.KIT))  # kit/ 上一级
+    install_root = os.path.dirname(os.path.abspath(skilllocker_base.KIT))  # kit/ 上一级
     want = os.path.normpath(os.path.join(install_root, "store")).replace(os.sep, "/")
-    assert skillkit_base.DEFAULT_STORE == want, (
-        skillkit_base.DEFAULT_STORE, want)
-    assert skillkit_base.DEFAULT_STORE.endswith("/store")
+    assert skilllocker_base.DEFAULT_STORE == want, (
+        skilllocker_base.DEFAULT_STORE, want)
+    assert skilllocker_base.DEFAULT_STORE.endswith("/store")
 
 
 @case("first_run: 缺 pywebview → main 弹错并退出码 2（场景 C）")

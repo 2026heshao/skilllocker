@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""skillkit 基础层：常量、SQLite、config、Windows 链接语义、内容解析与统计，
+"""skilllocker 基础层：常量、SQLite、config、Windows 链接语义、内容解析与统计，
 分发状态机基元 target_state，以及分类文件夹的数据层（folders 表 CRUD 与迁移）。
 
-上层模块（见 skillkit.py 的模块地图）单向依赖本层，本层不反向 import，保证无环：
-  skillkit_store  工具表与三类扫描（中央仓库 / 独有 / agent 看板）
-  skillkit_links  分发（matrix / do_sync）与增删（import / unlink / remove / 冲突处置）
-  skillkit_meta   skill_meta（显示名 / 备注 / 分类）的播种与读写
-  skillkit_boards list_boards 一次性快照与冲突对照
+上层模块（见 skilllocker.py 的模块地图）单向依赖本层，本层不反向 import，保证无环：
+  skilllocker_store  工具表与三类扫描（中央仓库 / 独有 / agent 看板）
+  skilllocker_links  分发（matrix / do_sync）与增删（import / unlink / remove / 冲突处置）
+  skilllocker_meta   skill_meta（显示名 / 备注 / 分类）的播种与读写
+  skilllocker_boards list_boards 一次性快照与冲突对照
 
 单测会打补丁的模块级名字（DB_FILE / CONFIG_FILE / ADAPTERS_FILE / EVENTS_KEEP）
-只在本模块内被函数体在调用时现读；跨模块读取一律走 `skillkit_base.X` 属性。
+只在本模块内被函数体在调用时现读；跨模块读取一律走 `skilllocker_base.X` 属性。
 """
 from __future__ import annotations
 
@@ -28,11 +28,11 @@ import time
 KIT = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(KIT, "config.json")
 ADAPTERS_FILE = os.path.join(KIT, "adapters.json")
-DB_FILE = os.path.join(KIT, "skillkit.db")
+DB_FILE = os.path.join(KIT, "skilllocker.db")
 HOME = os.path.expanduser("~")
 IGNORE_NAMES = {".git", ".DS_Store", "Thumbs.db", ".gitignore"}
 # 默认中央仓库跟随安装目录（kit/ 的上一级）。不写死盘符：无 D: 盘的机器
-# 首启也能解析出正确路径；开发机 D:\skillkit 下推导值与旧硬编码一致，零迁移。
+# 首启也能解析出正确路径；开发机 D:\skilllocker 下推导值与旧硬编码一致，零迁移。
 DEFAULT_STORE = os.path.normpath(
     os.path.join(os.path.dirname(KIT), "store")).replace(os.sep, "/")
 APP_VERSION = "0.2.1"
@@ -103,7 +103,10 @@ def db():
         create table if not exists skill_meta(
           scope text not null, key text not null, tool text,
           display_name text, note text, categories text, seed text,
-          updated_at integer, primary key(scope, key));
+          updated_at integer,
+          starred integer not null default 0,
+          starred_at integer,
+          primary key(scope, key));
         create table if not exists folders(
           id text primary key,
           name text not null,
@@ -112,6 +115,13 @@ def db():
           created_at integer);
         """
     )
+    # 收藏列（v0.3.1）：只增不改。pragma 判存在再 alter，放在 db() 而不是
+    # migrate_folders —— CLI / 桌面 / 自检所有入口打开库时就地补齐，成本微秒级。
+    _cols = {r[1] for r in con.execute("pragma table_info(skill_meta)")}
+    if "starred" not in _cols:
+        con.execute("alter table skill_meta add column starred integer not null default 0")
+    if "starred_at" not in _cols:
+        con.execute("alter table skill_meta add column starred_at integer")
     return con
 
 
@@ -149,7 +159,10 @@ def is_reparse(path):
     if _GetFileAttributesW is None:
         return os.path.islink(path)
     attrs = _GetFileAttributesW(str(path))
-    if attrs == _INVALID:
+    # 失败返回 INVALID_FILE_ATTRIBUTES(0xFFFFFFFF)，而 ctypes 默认 restype 是
+    # 带符号 c_int，实际拿到 -1；不补 -1 判断，不存在的路径会被 -1 & _REPARSE
+    # 误判成 reparse point（import_preflight 的死链预检踩中过）
+    if attrs == _INVALID or attrs == -1:
         return False
     return bool(attrs & _REPARSE)
 

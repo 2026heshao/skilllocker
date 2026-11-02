@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""skillkit 元数据层：skill_meta 表（显示名 / 备注 / 分类）的预置播种、
+"""skilllocker 元数据层：skill_meta 表（显示名 / 备注 / 分类）的预置播种、
 读写、清理与导出。scope('shared'|'unique') + key 承载两类 skill；
 共有 key = 目录名，独有 key = tool + '/' + 目录名。
 seed 列记录首次预置分类，用来判定「预置分类不算人工编辑」。
@@ -8,9 +8,9 @@ import datetime
 import json
 import re
 
-from skillkit_base import APP_VERSION, log_event, now_ms  # noqa: F401
-from skillkit_boards import list_boards
-from skillkit_store import unique_entries
+from skilllocker_base import APP_VERSION, log_event, now_ms  # noqa: F401
+from skilllocker_boards import list_boards
+from skilllocker_store import unique_entries
 
 
 def seed_category(name):
@@ -87,16 +87,20 @@ def get_meta(con):
             "scope": r["scope"],
             "tool": r["tool"] or "",
             "updated": int(r["updated_at"] or 0),
+            "starred": bool(r["starred"]),
+            "starredAt": int(r["starred_at"] or 0),
         }
     return out
 
 
 def set_meta(con, scope, key, payload):
-    """写一条人工编辑。payload: {display, note, folder?, tool?}
+    """写一条人工编辑。payload: {display, note, folder?, tool?, starred?}
 
     folder 仅 shared 生效：'' = 移到未归档；字段缺省 = 保留原归属（旧前端 /
     旧脚本不带 folder 时不会误清归属）；不存在的夹 id 直接抛错，宁可失败也
     不静默改错地方。unique 行 folder 恒为 NULL，传了也忽略。
+    starred 仅在 payload 显式携带时写入；starred 1→0 清 starred_at，0→1 打
+    上当前时间 —— 改名 / 备注等普通编辑不携带 starred，不会刷新收藏时间。
     categories 列不再接收写入 —— 读旧值原样写回，回滚到旧代码后仍能读到
     迁移前的多选分类。
     """
@@ -106,8 +110,8 @@ def set_meta(con, scope, key, payload):
     tool = payload.get("tool") or (key.split("/", 1)[0] if scope == "unique" else "")
     display = str(payload.get("display") or "").strip()[:48]
     note = str(payload.get("note") or "")[:400]
-    old = con.execute("select seed, categories, folder_id from skill_meta "
-                      "where scope=? and key=?", (scope, key)).fetchone()
+    old = con.execute("select seed, categories, folder_id, starred, starred_at "
+                      "from skill_meta where scope=? and key=?", (scope, key)).fetchone()
     seed = old["seed"] if old else ""
     cats_json = (old["categories"] if old is not None else None) or "[]"
     if scope == "shared":
@@ -120,14 +124,28 @@ def set_meta(con, scope, key, payload):
             folder = (old["folder_id"] if old is not None else "") or ""
     else:
         folder = ""
+    old_starred = bool(old["starred"]) if old is not None else False
+    old_starred_at = int(old["starred_at"] or 0) if old is not None else 0
+    if "starred" not in payload:
+        starred, starred_at = old_starred, old_starred_at
+    else:
+        starred = bool(payload.get("starred"))
+        if starred and not old_starred:
+            starred_at = now_ms()      # 新收藏：收藏时间只在变星那一刻产生
+        elif not starred and old_starred:
+            starred_at = 0             # 取消收藏：时间一并清掉
+        else:
+            starred_at = old_starred_at
     con.execute("insert or replace into skill_meta"
-                "(scope,key,tool,display_name,note,categories,seed,folder_id,updated_at) "
-                "values(?,?,?,?,?,?,?,?,?)",
+                "(scope,key,tool,display_name,note,categories,seed,folder_id,"
+                "updated_at,starred,starred_at) "
+                "values(?,?,?,?,?,?,?,?,?,?,?)",
                 (scope, key, tool, display, note, cats_json, seed, folder or None,
-                 now_ms()))
+                 now_ms(), 1 if starred else 0, starred_at or None))
     con.commit()
     return {"scope": scope, "key": key, "tool": tool, "display": display,
-            "note": note, "folder": folder, "seed": seed, "updated": now_ms()}
+            "note": note, "folder": folder, "seed": seed, "updated": now_ms(),
+            "starred": starred, "starredAt": starred_at}
 
 
 def clear_meta(con, scope=None, key=None):

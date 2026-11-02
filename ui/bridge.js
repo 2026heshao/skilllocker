@@ -1,5 +1,5 @@
 /* ============================================================
-   skillkit · desktop bridge
+   skilllocker · desktop bridge
    pywebview 注入 window.pywebview.api 后，把 Python 方法包成
    带 {ok:false} 归一化的 Promise；普通浏览器里 ready 直接给 null。
    ============================================================ */
@@ -59,10 +59,16 @@
     rescan: 180000,
     delete_skill: 180000,
     uninstall_unique: 180000,
+    promote_unique: 180000,
     set_agent: 180000,
     reseed_meta: 120000,
     diff: 60000,
-    export_json: 60000
+    export_json: 60000,
+    import_preflight: 60000,
+    import_skill: 180000,
+    choose_dir: 600000,  // 等用户在原生对话框里选目录，不能短
+    online_search: 60000,
+    online_fetch: 240000  // 后端下载预算 180s + 清单解析；后端先超时，避免前端假失败
   };
 
   function call(name) {
@@ -88,7 +94,7 @@
     });
   }
 
-  window.SKILLKIT_BRIDGE = {
+  window.SKILLLOCKER_BRIDGE = {
     ready: ready,
     isDesktop: function () { return !!api; },
     isDesktopShell: function () { return desktopHint; },
@@ -97,6 +103,14 @@
     clearMeta: function (scope, key) { return call('clear_meta', scope, key); },
     deleteSkill: function (scope, key) { return call('delete_skill', scope, key); },
     uninstallUnique: function (key) { return call('uninstall_unique', key); },
+    promoteUnique: function (key) { return call('promote_unique', key); },
+    chooseDir: function () { return call('choose_dir'); },
+    importPreflight: function (src, name) { return call('import_preflight', src, name); },
+    importSkill: function (src, name, folder) { return call('import_skill', src, name, folder); },
+    onlineSearch: function (q, limit) { return call('online_search', q, limit); },
+    onlineFetch: function (source, name) { return call('online_fetch', source, name); },
+    onlineFetchCancel: function () { return call('online_fetch_cancel'); },
+    openUrl: function (url) { return call('open_url', url); },
     reseedMeta: function () { return call('reseed_meta'); },
     folderCreate: function (name, color) { return call('folder_create', name, color); },
     folderRename: function (id, name, color) { return call('folder_rename', id, name, color); },

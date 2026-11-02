@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>skillkit · 分类文件夹高仿真原型</title>
+<title>skilllocker · 分类文件夹高仿真原型</title>
 </head>
 <body>
 <!--SK-FRAGMENT-START-->
 <style>
-/* ============ skillkit 分类文件夹原型 · 全部样式 #sk-app 作用域 ============ */
+/* ============ skilllocker 分类文件夹原型 · 全部样式 #sk-app 作用域 ============ */
 #sk-app {
   --font: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Noto Sans SC", sans-serif;
   --display: "Bahnschrift", "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", sans-serif;
@@ -474,7 +474,7 @@
     <header class="titlebar">
       <div class="brand">
         <div class="logo" aria-hidden="true"><span data-sk-icon="layers"></span></div>
-        <span class="wordmark">skillkit</span>
+        <span class="wordmark">skilllocker</span>
         <span class="brand-divider"></span>
         <span class="brand-sub">CATEGORY FOLDERS · 原型</span>
       </div>
@@ -501,7 +501,7 @@
             <span class="eyebrow">Central Store</span>
             <span class="live"><i></i>LIVE</span>
           </div>
-          <div class="store-path" title="D:\skillkit\store">D:\skillkit\store</div>
+          <div class="store-path" title="D:\skilllocker\store">D:\skilllocker\store</div>
           <div class="store-meta">
             <span><b id="store-count">51</b> skills</span>
             <span>54.4 MB</span>
@@ -621,7 +621,7 @@
     <footer class="statusbar">
       <span class="status-health"><i></i><b id="sb-health">51 共有 · 7 分类</b></span>
       <span class="status-sep"></span>
-      <span class="status-path">D:\skillkit\store</span>
+      <span class="status-path">D:\skilllocker\store</span>
       <span class="status-sep"></span>
       <span>未归档 <b id="sb-unfiled">0</b> 条</span>
       <div class="status-right">
@@ -1070,7 +1070,7 @@
     }).join('');
     chips += '<button class="fold-chip add" data-new-folder-for="' + esc(s.name) + '">' + icon('plus') + '新建分类</button>';
 
-    var path = 'D:\\skillkit\\store\\' + s.name;
+    var path = 'D:\\skilllocker\\store\\' + s.name;
     body.innerHTML =
       '<div class="field-block"><div class="field-label"><span>显示名称</span></div>' +
       '<input class="name-input" id="ins-name" type="text" maxlength="48" value="' + esc(displayOf(s)) + '" spellcheck="false">' +

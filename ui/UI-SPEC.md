@@ -1,11 +1,11 @@
-# skillkit · Skill Library — 桌面端 UI 实现规格
+# skilllocker · Skill Library — 桌面端 UI 实现规格
 
 > ⚠️ **分类系统已升级（v0.2.0）**：「分类（多选 cats）」相关章节已被「分类文件夹 + 卡片网格视图」取代，
 > 实施以 [`SPEC-category-folders.md`](SPEC-category-folders.md) 为准（交互基准：`design-category-folders.html`），
 > 被取代处均带「⚠️ 已取代」标注；未提及部分本规格继续有效。
 >
-> 交付目录：`D:\skillkit\ui\`　设计稿尺寸：1440 × 900（桌面默认窗口 1200 × 760）　最小可用尺寸：1180 × 720
-> 版本：v0.2.0（v0.1.0 基础上落地分类文件夹）　快照时间：2026-10-29 22:16　数据源：`D:\skillkit\store` + `D:\skillkit\kit\skillkit.db`
+> 交付目录：`D:\skilllocker\ui\`　设计稿尺寸：1440 × 900（桌面默认窗口 1200 × 760）　最小可用尺寸：1180 × 720
+> 版本：v0.3.0（v0.2.0 基础上落地导入 skill，见 §0 表 SPEC-skill-import 行）　快照时间：2026-10-29 22:16　数据源：`D:\skilllocker\store` + `D:\skilllocker\kit\skilllocker.db`
 
 ---
 
@@ -15,19 +15,20 @@
 |---|---|---|
 | `index.html` | 窗口骨架 + SVG 图标 sprite | 单文件结构，无 CDN 依赖 |
 | `styles.css` | 全部样式与 token | 浅色 / 深色 / 紧凑 / 降低动效四套状态 |
-| `data.js` | 真实数据快照 | `window.SKILLKIT_DATA`，51 共有 + 2 独有（仅 `file://` 原型模式使用） |
-| `app.js` | 全部交互逻辑 | 双模式：桌面端写 `skillkit.db`，原型写 localStorage |
+| `data.js` | 真实数据快照 | `window.SKILLLOCKER_DATA`，51 共有 + 2 独有（仅 `file://` 原型模式使用） |
+| `app.js` | 全部交互逻辑 | 双模式：桌面端写 `skilllocker.db`，原型写 localStorage |
 | `bridge.js` | pywebview 桥封装 | 只在 `?desktop=1` 下等待 `window.pywebview.api`，否则立即回退 |
 | [`SPEC-boot-animation.md`](SPEC-boot-animation.md) | 启动加载动画实施规格（v0.2.1） | 方案 A · 徽章汇入；交互基准 [`design-boot-animation.html`](design-boot-animation.html)，纯展示层，`bridge.js` / `data.js` 零改动 |
+| [`SPEC-skill-import.md`](SPEC-skill-import.md) | 导入 skill 实施规格（v0.3.0） | 状态机：来源 → 预检命名 → 落库分发；交互基准 [`design-skill-import.html`](design-skill-import.html)；纯新增功能，不改三看板既有逻辑；在线检索 / 获取后端已真实化（其 §10.1） |
 | `UI-SPEC.md` | 本文档 | 尺寸、状态、数据契约、后端对接 |
 
 三种打开方式：
 
 | 方式 | 命令 | 数据来源 |
 |---|---|---|
-| 双击启动（推荐） | `D:\skillkit\启动 skillkit.bat` | `skillkit.db`（`pythonw` 静默启动，无控制台） |
+| 双击启动（推荐） | `D:\skilllocker\启动 skilllocker.bat` | `skilllocker.db`（`pythonw` 静默启动，无控制台） |
 | 原型（浏览器） | 双击 `index.html` | `data.js` 快照 + localStorage |
-| 桌面（真实库） | `python D:\skillkit\kit\desktop.py` | `skillkit.db`（SQLite，编辑即时落库） |
+| 桌面（真实库） | `python D:\skilllocker\kit\desktop.py` | `skilllocker.db`（SQLite，编辑即时落库） |
 
 调试直达某个看板：`index.html?board=unique`／`?board=agents`；桌面壳内部固定带 `?desktop=1`，用于区分两种模式。桌面壳细节见 `kit/DESKTOP.md`。
 
@@ -37,7 +38,7 @@
 
 ```
 ┌──────────────────────────── 标题栏 46 ────────────────────────────┐
-│ Logo skillkit  SKILL LIBRARY │ 全局搜索 Ctrl+K │ LOCAL 主题 窗口键 │
+│ Logo skilllocker  SKILL LIBRARY │ 全局搜索 Ctrl+K │ LOCAL 主题 窗口键 │
 ├──────────┬───────────────────────────────────────┬───────────────┤
 │ 侧栏 216 │ 工作区（flex）                        │ 检查器 344    │
 │ 仓库卡片 │ 顶栏 66：视图分段/标题/排序/密度    │ Skill Detail  │
@@ -123,7 +124,7 @@
 | 层级 | 字号 / 行高 | 字重 | 用在哪 |
 |---|---|---|---|
 | 页面标题 `h1` | 21 / 1.12，字距 -0.025em | 600 | 共有技能 / 独有技能 |
-| 品牌字 | 15 | 600 | 标题栏 skillkit |
+| 品牌字 | 15 | 600 | 标题栏 skilllocker |
 | 看板卡数字 | 26 / 1，字距 -0.03em | 600 | 49 / 2 |
 | 看板卡标题 | 13.5 | 600 | 共有技能 |
 | 行名称 | 13 / 1.3，字距 -0.01em | 600 | skill 名 |
@@ -222,6 +223,7 @@ window: 设计稿 1440 × 900（桌面默认 1200 × 760，min 1180 × 720），
 | 差异块 | `danger-soft` 底 + 22% 红边，圆角 9，含 28 高「查看文件差异」按钮 |
 | 元信息 | 行高 ≥32，左列 58 宽灰标签，右列 mono 10.5 可省略 |
 | 路径盒 | padding 7 / 8，圆角 7，mono，右 22 × 22 复制按钮 |
+| 转共有块 | 仅独有实体行（`kind=unique` 且无同名覆盖）：`success-soft` 底 + 30% 绿边，圆角 10，标题「收进中央仓库」+ 10.5 说明（文件数 / 字节 / 源副本处置：main 来源且开关开着 = 按分发方式对齐，否则源目录不动）+ 整宽 `btn-primary`「转为共有技能」。确认弹窗后走 `promote_unique`（原子拷入中央仓库 + 迁移显示名/备注 + 独有 meta 由 prune 自动清），成功后跳到共有看板并选中新技能。同名覆盖（该走差异处置）与 foreign-link（真身不归本工具管）行不出现此块 |
 | 删除区 | `danger-soft` 底 + 22% 红边，圆角 10；整宽按钮「彻底删除 skill / 删除本地副本 / 卸载」+ 10.5 说明。独有行三选一：deletable（main 实体）→「删除本地副本」（`delete_skill`）；外部行（extra 目录 / 容器子目录）→「卸载（删除外部目录）」、foreign-link →「摘除链接（卸载）」（均为 `uninstall_unique`，二次确认、危险按钮，卸载文案给出完整路径 / 文件数与「agent 可能重新安装」提示） |
 | 空态 | 居中，图标 40，文案 11 |
 
@@ -239,7 +241,7 @@ window: 设计稿 1440 × 900（桌面默认 1200 × 760，min 1180 × 720），
 
 ### 3.7 状态栏（30px）
 
-`● 49 共有 · 2 独有 │ D:\skillkit\store │ 已编辑 0 项 │ 快照 22:16`（字号 10.5）
+`● 49 共有 · 2 独有 │ D:\skilllocker\store │ 已编辑 0 项 │ 快照 22:16`（字号 10.5）
 
 ---
 
@@ -249,7 +251,7 @@ window: 设计稿 1440 × 900（桌面默认 1200 × 760，min 1180 × 720），
 |---|---|
 | 切换看板 | 点看板卡或侧栏导航；同步 `body[data-view]`、标题/副标题、表头第 5 列（分发覆盖 / 来源）、列表、检查器；选中项重置为该看板首行 |
 | 选中行 | 单击任意行 → 检查器渲染该 skill；`↑ / ↓` 键可连续切换（输入框聚焦时禁用） |
-| 拖动窗口（桌面端） | 按住标题栏任意空白（含 skillkit 品牌区）拖动；`pointerdown` 记起点，`pointermove` 按 `screenX/screenY` 绝对位移调 `win_set_bounds`，`pointerup` 补终值；搜索框 / 按钮 / LOCAL 胶囊 / 窗口三键不触发；最大化态先把窗口还原（`win_restore()`）再按还原后的外框继续拖。顶部约 5px（四角 13px）是缩放手柄，按在那里只会缩放，不会移动窗口 |
+| 拖动窗口（桌面端） | 按住标题栏任意空白（含 skilllocker 品牌区）拖动；`pointerdown` 记起点，`pointermove` 按 `screenX/screenY` 绝对位移调 `win_set_bounds`，`pointerup` 补终值；搜索框 / 按钮 / LOCAL 胶囊 / 窗口三键不触发；最大化态先把窗口还原（`win_restore()`）再按还原后的外框继续拖。顶部约 5px（四角 13px）是缩放手柄，按在那里只会缩放，不会移动窗口 |
 | 分发开关（智能体页） | 动作只由原生 `change` 触发，`input.checked` = 目标状态 → `requestAgent(key, checked)`；`click` 只用来拦下事件、不读 `checked`（点击冒到 `document` 时它已被 Chromium 翻转，`label` 还会把点击转发给 `input`，一次按下出现两个 `click`）。关 = 二次确认后撤链接；取消 / 失败时开关回到数据模型的值，界面不撒谎 |
 | 双击标题栏（桌面端） | 双击标题栏空白 = 最大化 / 还原；同上排除交互控件 |
 | 改名 | 输入即写 `meta[key].display`，**即时落盘不去抖**；行内名称、副标题（原目录名）、已编辑计数即时更新，**不整表重渲染**（避免失焦） |
@@ -266,7 +268,7 @@ window: 设计稿 1440 × 900（桌面默认 1200 × 760，min 1180 × 720），
 | 复制路径 | 路径盒按钮 → `navigator.clipboard` + Toast「路径已复制」 |
 | 设置 | `Ctrl+,` 或侧栏入口；主题、密度、动效、显示停用 agent、导出 JSON、清空我的编辑、复制仓库路径、重新探测 |
 | 空态 | 无匹配时隐藏列表体，显示图标 + 「没有匹配的 skill」 + 「清除筛选」 |
-| 启动错误页 | 桌面端 `bootstrap()` 返回 `ok:false`（或桥调用 reject）时进入 `MODE='error'`：全屏 `#boot-error` 覆盖层（z-index 300），含标题「后端启动失败」、错误详情（`err.message`）、指向 `kit\skillkit.log` 的提示与【重试】按钮（`location.reload()`）；**绝不退回内置演示快照冒充真实数据**。仅 `file://` 原型保留只读快照降级 + toast。错误态下 `refresh` 等入口禁用 |
+| 启动错误页 | 桌面端 `bootstrap()` 返回 `ok:false`（或桥调用 reject）时进入 `MODE='error'`：全屏 `#boot-error` 覆盖层（z-index 300），含标题「后端启动失败」、错误详情（`err.message`）、指向 `kit\skilllocker.log` 的提示与【重试】按钮（`location.reload()`）；**绝不退回内置演示快照冒充真实数据**。仅 `file://` 原型保留只读快照降级 + toast。错误态下 `refresh` 等入口禁用 |
 | Esc | 依次关闭弹窗 → ⋯ 菜单 → 清空搜索 → 退出文件夹 |
 | 保存态胶囊 | 隐藏 → 输入中显示「已保存」（`success-soft`），`dirty` 态为 accent |
 
@@ -293,7 +295,7 @@ design|taste|stitch|minimalist|brutalist|brandkit|imagegen|image-to-code|redesig
 | 项 | 规格 |
 |---|---|
 | 容器 | `body > #boot-error`，`position:fixed; inset:0; z-index:300`（盖过 toasts 200），背景 `var(--bg)`，主题 token 自动跟随深色 |
-| 卡片 | 520 宽居中：红色 `!` 图标 → 标题「后端启动失败」→ 副标题 → `<pre>` 错误详情（`err.message`，可滚动，`danger-soft` 底）→ 提示行「详细原因见安装目录 kit\skillkit.log」→【重试】主色按钮 |
+| 卡片 | 520 宽居中：红色 `!` 图标 → 标题「后端启动失败」→ 副标题 → `<pre>` 错误详情（`err.message`，可滚动，`danger-soft` 底）→ 提示行「详细原因见安装目录 kit\skilllocker.log」→【重试】主色按钮 |
 | 重试 | `location.reload()` 重跑整条 boot 链路（后端恢复后自然成功） |
 | 数据 | **不调用 `hydrate`、不渲染任何演示快照数据**；`window.__SK_MODE = 'error'`、`data-mode=error`；`applyBootstrap()` 顶部守卫直接 return（刷新入口禁用） |
 | 降级边界 | 「桌面壳已连上但后端失败」与「桌面壳内 pywebview 注入超时」都走错误页；仅 `file://` 原型保留只读快照 + toast（原有行为） |
@@ -303,7 +305,7 @@ design|taste|stitch|minimalist|brutalist|brandkit|imagegen|image-to-code|redesig
 
 ## 5. 数据契约
 
-### 5.1 `data.js` → `window.SKILLKIT_DATA`
+### 5.1 `data.js` → `window.SKILLLOCKER_DATA`
 
 ```js
 {
@@ -331,14 +333,14 @@ design|taste|stitch|minimalist|brutalist|brandkit|imagegen|image-to-code|redesig
 ### 5.2 localStorage（原型期持久化）
 
 ```js
-// skillkit.library.meta.v1
+// skilllocker.library.meta.v1
 {
   "aihot":      { display:"AI HOT · 检索", note:"…", cats:["search","doc"], seed:"search", updated:1729... },
   "workbuddy/pdf": { display:"", note:"", cats:["doc"], seed:"doc", updated:0 },
   "pdf":        { display:"", note:"", cats:["doc"], seed:"doc", updated:0 }
 }
 
-// skillkit.library.prefs.v1
+// skilllocker.library.prefs.v1
 {
   theme:"light"|"dark", density:"comfortable"|"compact", motion:true,
   showDisabled:true, sort:"name"|"edited", board:"shared"|"unique",
@@ -352,7 +354,7 @@ design|taste|stitch|minimalist|brutalist|brandkit|imagegen|image-to-code|redesig
 
 ---
 
-## 6. 落地到 skillkit 后端
+## 6. 落地到 skilllocker 后端
 
 ### 6.1 数据库增量（建议）
 
@@ -404,7 +406,7 @@ class Api:
     def copy_path(self, path): ...          # 走 pyperclip 或 win32clipboard
 ```
 
-前端把 `app.js` 里 4 个数据入口（`SKILLKIT_DATA`、`localStorage` 读、`localStorage` 写、`openDiff`）替换为 `window.pywebview.api.*` 即可，其余渲染逻辑零改动。
+前端把 `app.js` 里 4 个数据入口（`SKILLLOCKER_DATA`、`localStorage` 读、`localStorage` 写、`openDiff`）替换为 `window.pywebview.api.*` 即可，其余渲染逻辑零改动。
 
 ### 6.4 实际实现（v0.1.0，已完成）
 
@@ -439,7 +441,7 @@ class Api:
 
 验收结果：桌面端 `desktop.py --selftest` **79/79 通过**（新增分类夹数 / 未归档数、网格卡片数、进夹行数、面包屑返回、建夹 / 删夹回落、归属落库、迁移幂等等 11 项文件夹断言）；原型（file://）Playwright 回归 **32 项 + 迁移 7 项 + 三路拖拽与检查器 chip 若干全过，0 条 JS 错误**；单元测试 **20/20**。`ui/data.js` 已补 `folders` 字段。
 
-验收结果：桌面端 `desktop.py --selftest` **52/52 通过**（数据、差异、写库、计数、搜索、设置、智能体三态与开关、整条标题栏拖动、最大化态拖动先还原、8 个缩放手柄、外框 API 读写与最小尺寸兜底、启动尺寸与布局）；自检的期望行数一律从真实 `list_boards()` 取（当前 49 + 2），不写死数字，项数随库内数据浮动。`file://` 原型用 Playwright（系统 Edge）回归通过；开关的建/删链接另用临时库验证（见 `kit/DESKTOP.md` §7.1）；截图见 `D:\skillkit\.screenshots\desktop-*.png`。
+验收结果：桌面端 `desktop.py --selftest` **52/52 通过**（数据、差异、写库、计数、搜索、设置、智能体三态与开关、整条标题栏拖动、最大化态拖动先还原、8 个缩放手柄、外框 API 读写与最小尺寸兜底、启动尺寸与布局）；自检的期望行数一律从真实 `list_boards()` 取（当前 49 + 2），不写死数字，项数随库内数据浮动。`file://` 原型用 Playwright（系统 Edge）回归通过；开关的建/删链接另用临时库验证（见 `kit/DESKTOP.md` §7.1）；截图见 `D:\skilllocker\.screenshots\desktop-*.png`。
 
 ---
 
@@ -491,18 +493,18 @@ class Api:
 | 33–36 | 1180 无溢出、侧栏 192、检查器 292、搜索保留 | ✅ |
 | — | 控制台异常 / 错误日志 | 0 条 |
 
-智能体看板与窗口另由桌面端自检覆盖（`kit/DESKTOP.md` §7.1，当前 92 项）：三态计数、状态筛、开关、未安装禁用、开关方向回归（点开着的开关只弹一个关闭确认框、取消后回到开）、**外部来源徽标与详情行（数量与后端 `external[0].count` 一致）**、序号列（含两位数不溢出）、整条标题栏拖动、最大化态拖动越过阈值先还原、最大化单击不还原（缩小只认双击）、8 个 grip、外框 API 读写与最小尺寸兜底、启动尺寸与详情栏边界；开关的建/删链接用临时库做集成验证，未触碰真实 agent 目录。
+智能体看板与窗口另由桌面端自检覆盖（`kit/DESKTOP.md` §7.1，当前 106 项）：三态计数、状态筛、开关、未安装禁用、开关方向回归（点开着的开关只弹一个关闭确认框、取消后回到开）、**外部来源徽标与详情行（数量与后端 `external[0].count` 一致）**、序号列（含两位数不溢出）、整条标题栏拖动、最大化态拖动越过阈值先还原、最大化单击不还原（缩小只认双击）、8 个 grip、外框 API 读写与最小尺寸兜底、启动尺寸与详情栏边界；开关的建/删链接用临时库做集成验证，未触碰真实 agent 目录。
 
 ---
 
 ## 9. 已知取舍与后续建议
 
-1. **未做的能力（刻意）**：概览 KPI、7×51 矩阵、事件流、在线检索、独立冲突页、工具管理页——本版按「三个看板 + 三项编辑」做减法全部移除，相关能力留在 `skillkit.py`，后续可按需加回。
+1. **未做的能力（刻意）**：概览 KPI、7×51 矩阵、事件流、在线检索、独立冲突页、工具管理页——本版按「三个看板 + 三项编辑」做减法全部移除，相关能力留在 `skilllocker.py`，后续可按需加回。
 2. **停用 agent**：检查器「分发覆盖」仍显示 3 个停用 agent（CodeBuddy / GitHub Copilot / Pi），置灰不可点；设置里可整体隐藏。
 3. **冲突处理入口**：目前只做「查看差异」；`resolve_conflict()` 已有三种处置方向，若要接按钮，建议只暴露 `central-to-local` 与 `ignore`，`local-to-central` 会覆盖中央仓库，需二次确认。
 4. **快照时间**：`data.js` 的 `scanAt` 是生成时刻（22:16），接后端后改为「上次 rescan 时间」，状态栏需要随扫描更新。
 5. **中文排序**：使用 `localeCompare(..., 'zh-Hans-CN')`，`AI HOT` 与 `aihot` 这类同名不同大小写的条目会相邻但不会合并；如需合并，应在数据层做大小写归一。
 6. **桌面壳未做的部分**：不做托盘、开机自启、单实例锁、安装包（PyInstaller）；关闭窗口即退出进程。边界说明见 `kit/DESKTOP.md`。
-7. **`workbuddy/pdf` 冲突已按「两份都留」处理**：`suppressed` 表写入 `ignore` 决策，`skillkit.py verify` 会显示为 `suppressed`（不再报冲突，也不会自动合并）。
+7. **`workbuddy/pdf` 冲突已按「两份都留」处理**：`suppressed` 表写入 `ignore` 决策，`skilllocker.py verify` 会显示为 `suppressed`（不再报冲突，也不会自动合并）。
 8. **窗口默认 1200 × 760 并每次居中**：设计稿 1440 × 900 只作为原型画布；桌面壳 `build_window()` 把居中坐标直接传给 `create_window`，首帧即 1500 × 950 物理 / (210, 35)（本机 125% 缩放），不再有二次摆位；frameless 去边框的差额由 `_nc_css()` 补偿（内容区正好 1200 × 760）。四边/四角缩放由 8 个 grip 在前端算目标矩形、后端 `SetWindowPos` 落窗（不走系统原生缩放循环），最小 1180 × 720；最大化态下 grip 与标题栏拖动均不生效。
 9. **智能体的「未安装」态**：`tools` 表只保留同步过的 adapter；从本机卸载 agent 后再「重新探测」会把它标成 `detected=0`，看板显示「未安装」且开关禁用。没同步过的 adapter 不会凭空出现在列表里。

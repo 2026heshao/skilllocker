@@ -1,8 +1,8 @@
-# skillkit · 分类文件夹功能 — 实施执行文档
+# skilllocker · 分类文件夹功能 — 实施执行文档
 
 > 视觉与交互的**唯一基准**是高仿真原型 `ui/design-category-folders.html`（浏览器直接打开可操作）。
 > 本文档把原型翻译为对现有代码的精确改动：改哪个文件、哪个函数、签名是什么、验收怎么判。
-> 现状基准：`APP_VERSION 0.1.0`（skillkit.py）、`ui/UI-SPEC.md` 所描述的版本。
+> 现状基准：`APP_VERSION 0.1.0`（skilllocker.py）、`ui/UI-SPEC.md` 所描述的版本。
 > 取代关系：UI-SPEC.md 中所有「分类（多选 cats）」相关章节自本功能上线起作废，以本文为准。
 
 ---
@@ -22,7 +22,7 @@
 
 ## 2. 数据模型与迁移
 
-### 2.1 新表 `folders`（加进 `skillkit.db()` 的 executescript）
+### 2.1 新表 `folders`（加进 `skilllocker.db()` 的 executescript）
 
 ```sql
 create table if not exists folders(
@@ -61,7 +61,7 @@ alter table skill_meta add column folder_id text;   -- 仅 shared 行使用；''
 
 ## 3. 后端改动
 
-### 3.1 `kit/skillkit.py`
+### 3.1 `kit/skilllocker.py`
 
 | 函数 | 改动 |
 |---|---|
@@ -85,20 +85,20 @@ alter table skill_meta add column folder_id text;   -- 仅 shared 行使用；''
 # Api 新增三个方法（模式与 set_agent/delete_skill 一致：变更后回整套 boards+meta）
 @_guard
 def folder_create(self, name, color):
-    con = skillkit.db()
+    con = skilllocker.db()
     try:
-        cfg = skillkit.load_config()
-        row = skillkit.folder_create(con, name, color)
-        skillkit.log_event(con, "folder-create", "%s (%s)" % (name, color))
-        boards = skillkit.list_boards(con, cfg); skillkit.prune_meta(con, boards)
-        return {"ok": True, "data": boards, "meta": skillkit.get_meta(con), "folder": row}
+        cfg = skilllocker.load_config()
+        row = skilllocker.folder_create(con, name, color)
+        skilllocker.log_event(con, "folder-create", "%s (%s)" % (name, color))
+        boards = skilllocker.list_boards(con, cfg); skilllocker.prune_meta(con, boards)
+        return {"ok": True, "data": boards, "meta": skilllocker.get_meta(con), "folder": row}
     finally: con.close()
 
 def folder_rename(self, folder_id, name, color)   # 同上，log_event("folder-rename", folder_id)
 def folder_delete(self, folder_id)                # 同上，action={"moved": n}
 ```
 
-`bootstrap()`：`skillkit.seed_meta(...)` 之前插一行 `skillkit.migrate_folders(con, cfg)`。
+`bootstrap()`：`skilllocker.seed_meta(...)` 之前插一行 `skilllocker.migrate_folders(con, cfg)`。
 `rescan()` 不动（新 skill 的 meta 由下次 bootstrap 的 seed_meta 补，与现状一致）。
 
 ### 3.3 自检（`--selftest`）必须同步的四处
@@ -114,7 +114,7 @@ def folder_delete(self, folder_id)                # 同上，action={"moved": n}
 
 ## 4. 桥接层 `ui/bridge.js`
 
-`window.SKILLKIT_BRIDGE` 追加三个包装（紧挨 `reseedMeta` 放）：
+`window.SKILLLOCKER_BRIDGE` 追加三个包装（紧挨 `reseedMeta` 放）：
 
 ```js
 folderCreate: function (name, color) { return call('folder_create', name, color); },
@@ -166,7 +166,7 @@ folderDelete: function (id) { return call('folder_delete', id); },
 | `filterRows()/passesFilters()` | 删 `state.cat` 分支；`fallbackHay()` 的分类文本改为 `folderOf(key).name` |
 | `sortRows()` | 排序键不变（display / updated）；网格文件卡与列表行共用 |
 
-**渲染层**（原型对应函数可直接移植，把 `window.SKILLKIT_DATA` 换成 `SKILLS/FOLDERS` 全局）
+**渲染层**（原型对应函数可直接移植，把 `window.SKILLLOCKER_DATA` 换成 `SKILLS/FOLDERS` 全局）
 
 | 原型函数 | 落地为 | 说明 |
 |---|---|---|

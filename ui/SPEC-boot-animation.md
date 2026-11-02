@@ -1,7 +1,7 @@
-# skillkit · 启动加载动画（方案 A · 徽章汇入）— 实施规格
+# skilllocker · 启动加载动画（方案 A · 徽章汇入）— 实施规格
 
 > 版本：v0.2.1　交互基准：[`design-boot-animation.html`](design-boot-animation.html)（方案 A · 双击打开可重播），动效参数以本文为准
-> 交付目录：`D:\skillkit\ui\`　设计稿尺寸：1440 × 900（桌面默认窗口 1200 × 760，最小 1180 × 720）
+> 交付目录：`D:\skilllocker\ui\`　设计稿尺寸：1440 × 900（桌面默认窗口 1200 × 760，最小 1180 × 720）
 > 关联：`UI-SPEC.md` §2.4（缓动/时长 token）、§7（响应式与状态）、`kit/DESKTOP.md`（桌面壳）
 
 ---
@@ -49,7 +49,7 @@ python 启动                     launch 日志
       <path d="M10.4 8.6 12 12.1" stroke="#fff" stroke-width="1.4" stroke-opacity=".8"></path>
     </svg>
   </div>
-  <div class="boot-word">skillkit</div>
+  <div class="boot-word">skilllocker</div>
   <div class="boot-eyebrow">SKILL LIBRARY · V0.2.1</div>
   <div class="boot-chips" aria-hidden="true"></div>
   <div class="boot-agents" aria-hidden="true"></div>

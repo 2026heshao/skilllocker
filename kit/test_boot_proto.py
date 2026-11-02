@@ -9,7 +9,7 @@ import time
 
 from playwright.sync_api import sync_playwright
 
-URL = "file:///D:/skillkit/ui/index.html"
+URL = "file:///D:/skilllocker/ui/index.html"
 results = []
 
 
@@ -98,7 +98,7 @@ with sync_playwright() as p:
       window.pywebview = { api: {
         bootstrap: function () {
           return Promise.reject(
-            new Error('RuntimeError: 中央仓库目录不存在：Q:/skillkit/store'));
+            new Error('RuntimeError: 中央仓库目录不存在：Q:/skilllocker/store'));
         }
       } };
     """)
@@ -111,7 +111,7 @@ with sync_playwright() as p:
           "%s | %s" % (title, detail[:40]))
     check("重试按钮存在", page3.is_visible("#boot-error-retry"))
     hint = page3.text_content(".boot-error-hint")
-    check("日志提示行", "skillkit.log" in hint, hint.strip()[:50])
+    check("日志提示行", "skilllocker.log" in hint, hint.strip()[:50])
     mode = page3.evaluate("window.__SK_MODE")
     snap_rows = page3.eval_on_selector_all(".row, .file-card, .folder-card:not(.ghost)",
                                            "els => els.length")

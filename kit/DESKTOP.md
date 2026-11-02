@@ -1,14 +1,14 @@
-# skillkit 桌面端 · 使用与实现说明
+# skilllocker 桌面端 · 使用与实现说明
 
 > 版本 v0.1.0　最后更新：2026-10-31
-> 代码位置：`D:\skillkit\kit\desktop.py`（外壳） + `D:\skillkit\kit\skillkit.py`（数据层）
-> 界面位置：`D:\skillkit\ui\`（`index.html` / `styles.css` / `app.js` / `bridge.js` / `data.js`）
+> 代码位置：`D:\skilllocker\kit\desktop.py`（外壳） + `D:\skilllocker\kit\skilllocker.py`（数据层）
+> 界面位置：`D:\skilllocker\ui\`（`index.html` / `styles.css` / `app.js` / `bridge.js` / `data.js`）
 
 ---
 
 ## 1. 它是什么 / 不是什么
 
-**是**：一个无边框的本地窗口（pywebview + Edge WebView2），直接把 `skillkit.db` 里的真实数据渲染成「共有 / 独有 / 智能体」三个看板；改名、备注、分类即时写进 SQLite。
+**是**：一个无边框的本地窗口（pywebview + Edge WebView2），直接把 `skilllocker.db` 里的真实数据渲染成「共有 / 独有 / 智能体」三个看板；改名、备注、分类即时写进 SQLite。
 
 **不是**：不是一个独立发布的桌面应用——**没有**安装包、托盘、开机自启、单实例锁；**没有** HTTP/REST 服务；**没有**任何 mock 数据（界面上的每一行都来自扫描真实仓库与磁盘）。
 
@@ -16,7 +16,7 @@
 
 ### 1.1 智能体看板（本版新增）
 
-左侧第三个看板列出本机已知 agent，状态全部由 `skillkit.list_boards()` 现算，不信任开关本身：
+左侧第三个看板列出本机已知 agent，状态全部由 `skilllocker.list_boards()` 现算，不信任开关本身：
 
 | 状态 | 判定 | 界面 |
 |---|---|---|
@@ -38,7 +38,7 @@
 
 ### 1.2 独有看板（检测口径，2026-10-31 修订）
 
-「独有」= **agent 能加载、但中央仓库没有（或同名但内容不同）的 skill**，由 `skillkit.unique_entries()` 现扫磁盘得出。修订单口径只扫「已启用 agent 的主 skills 目录」，现在覆盖四类来源，行的 `src` 字段标注：
+「独有」= **agent 能加载、但中央仓库没有（或同名但内容不同）的 skill**，由 `skilllocker.unique_entries()` 现扫磁盘得出。修订单口径只扫「已启用 agent 的主 skills 目录」，现在覆盖四类来源，行的 `src` 字段标注：
 
 | src | 来源 | 例子 | 可删副本 |
 |---|---|---|---|
@@ -79,24 +79,24 @@
 | pywebview | 6.2.1（`pip install pywebview`） | 唯一的第三方依赖，用来开窗口；缺失时启动弹窗提示（写日志、退出码 2），不再静默退出 |
 | WebView2 Runtime | 156.0.4314.50（已在本机） | 由 Edge 提供；缺失则需要装 Evergreen Runtime |
 | 屏幕 | 1920 × 1080，工作区 1920 × 1020，缩放 125%（120 DPI） | 影响窗口尺寸计算，见 §6 |
-| 数据库 | `kit\skillkit.db`（SQLite，WAL） | 与 CLI 共用同一个库 |
+| 数据库 | `kit\skilllocker.db`（SQLite，WAL） | 与 CLI 共用同一个库 |
 
 ---
 
 ## 3. 启动方式
 
-**双击启动（推荐）**：`D:\skillkit\启动 skillkit.bat`
+**双击启动（推荐）**：`D:\skilllocker\启动 skilllocker.bat`
 
 - 用 `pythonw.exe` 启动，**没有控制台黑框**；窗口出现的第一帧就已经是 1200 × 760、位于工作区正中——不再先出现在别处再跳过去（建窗时即传入居中的 `x/y`，见 §6）。
 - 启动失败不会静默：错误写进 `kit\launch.log`，并弹出系统提示框。
-- 传参数：在命令行里跑 `"启动 skillkit.bat" --debug` 即可透传给 `desktop.py`。
-- **任务栏行为**：按钮图标取自 `kit\assets\skillkit.ico`（不是 Python 的图标）；窗口在前台时点一下 = 最小化，再点 = 恢复；窗口被别的窗口挡住时第一下是切到前台（Windows 习惯），第二下才最小化。实现见 §6 的「窗口图标 / 最小化位」。
-- **任务栏名称**：用 `D:\skillkit\skillkit.lnk`（或开始菜单里它的副本）启动时显示 `skillkit`（Windows 按快捷方式文件名生成 AppUserModelID）；直接双击 `启动 skillkit.bat` 或跑 `pythonw desktop.py` 时显示 `Python`（AUMID 就是 `pythonw.exe`，名称取自它自己的 FileDescription）。显式设 AUMID 反而会把快捷方式那条「skillkit」弄丢，所以**不要**加显式 AUMID。
+- 传参数：在命令行里跑 `"启动 skilllocker.bat" --debug` 即可透传给 `desktop.py`。
+- **任务栏行为**：按钮图标取自 `kit\assets\skilllocker.ico`（不是 Python 的图标）；窗口在前台时点一下 = 最小化，再点 = 恢复；窗口被别的窗口挡住时第一下是切到前台（Windows 习惯），第二下才最小化。实现见 §6 的「窗口图标 / 最小化位」。
+- **任务栏名称**：用 `D:\skilllocker\skilllocker.lnk`（或开始菜单里它的副本）启动时显示 `skilllocker`（Windows 按快捷方式文件名生成 AppUserModelID）；直接双击 `启动 skilllocker.bat` 或跑 `pythonw desktop.py` 时显示 `Python`（AUMID 就是 `pythonw.exe`，名称取自它自己的 FileDescription）。显式设 AUMID 反而会把快捷方式那条「skilllocker」弄丢，所以**不要**加显式 AUMID。
 
 **命令行启动**：
 
 ```powershell
-cd D:\skillkit\kit
+cd D:\skilllocker\kit
 D:\develop\python\3.12\python.exe desktop.py            # 正常启动（带控制台，便于看日志）
 D:\develop\python\3.12\python.exe desktop.py --debug    # 打开 WebView2 调试面板
 D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完自动退出（见 §7）
@@ -106,7 +106,7 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 
 两种模式靠 URL 上的 `?desktop=1` 区分（桌面壳会自动加上），前端据此决定数据来源。
 
-`启动 skillkit.bat` 里写死了解释器路径 `D:\develop\python\3.12\pythonw.exe`（不依赖 PATH）；换机器/换 Python 目录时改这一行即可。找不到解释器或缺少 `ui\index.html`、`kit\desktop.py` 时会直接弹框说明缺什么。
+`启动 skilllocker.bat` 里写死了解释器路径 `D:\develop\python\3.12\pythonw.exe`（不依赖 PATH）；换机器/换 Python 目录时改这一行即可。找不到解释器或缺少 `ui\index.html`、`kit\desktop.py` 时会直接弹框说明缺什么。
 
 ---
 
@@ -114,8 +114,8 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 
 | 文件 | 职责 | 关键点 |
 |---|---|---|
-| `kit\desktop.py` | 窗口外壳 + `js_api` | 只做「开窗（建窗即定位）/ 转发调用」，业务全在 `skillkit.py` |
-| `kit\skillkit.py` | 扫描、分发、元数据、看板快照 | 本版新增 `skill_meta` 表与 `list_boards / get_meta / set_meta / ...` |
+| `kit\desktop.py` | 窗口外壳 + `js_api` | 只做「开窗（建窗即定位）/ 转发调用」，业务全在 `skilllocker.py` |
+| `kit\skilllocker.py` | 扫描、分发、元数据、看板快照 | 本版新增 `skill_meta` 表与 `list_boards / get_meta / set_meta / ...` |
 | `ui\bridge.js` | 前端唯一与 Python 通信的层 | `?desktop=1` 才等 `pywebviewready`，否则立即返回 `null` |
 | `ui\app.js` | 渲染与交互 | `MODE='db'` 时写库，`'local'` 时写 localStorage |
 | `ui\styles.css` | 样式 | `body.desktop` 下窗口铺满、去圆角与投影 |
@@ -160,7 +160,7 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 - 启动时序（这是「图标不显示 / 点了不最小化」的老根因）：`webview.start(func)` **先起 func 线程、后执行 `guilib.create_window()`**，所以 `on_start` 里立刻查句柄只会拿到 `None`。必须等 `shown` 事件，否则图标与最小化位一次都不会生效。
 - 最小化位会被 WinForms 抹掉：`FormBorderStyle=None` 的窗口本身没有 `WS_MINIMIZEBOX`（任务栏按钮点了只会切前台），手工 `SetWindowLong(GWL_STYLE)` 补上后，WinForms 在最小化/最大化/还原时还会重算样式把这一位去掉。因此 `on_start` 往 `window.events.minimized / maximized / restored` 挂了 `_keep_window_chrome()`（分 0 / 0.15 / 0.5 秒重试三次），状态一变就补回。
 - `WM_SETICON` 的坑：**不要**给 `ICON_SMALL2`（slot 2）设小图。Win11 上实测这一发会把 `ICON_BIG` 一起改成那张小图（`WM_GETICON(1)` 回读到小图句柄），Alt-Tab 的大图标立刻变糊；而 slot 2 不设本来就会回退到 `ICON_SMALL`。现在只设 slot 0 / 1。
-- 本机实测（125%，为 DPI 感知进程）：窗口 `WM_GETICON` 三档分别是「20px 帧 / 40px 帧 / 同小图」；任务栏按钮图标与 `skillkit.ico` 的帧逐像素一致（截图核对过），窗口样式 `0x16030000` 含 `WS_MINIMIZEBOX`；点任务栏按钮两次 = 最小化 → 恢复，且 `WS_MINIMIZEBOX` 一直在。
+- 本机实测（125%，为 DPI 感知进程）：窗口 `WM_GETICON` 三档分别是「20px 帧 / 40px 帧 / 同小图」；任务栏按钮图标与 `skilllocker.ico` 的帧逐像素一致（截图核对过），窗口样式 `0x16030000` 含 `WS_MINIMIZEBOX`；点任务栏按钮两次 = 最小化 → 恢复，且 `WS_MINIMIZEBOX` 一直在。
 - 尺寸补偿：WinForms 会在 `FormBorderStyle=None` 时裁掉标题栏与边框，`create_window` 的宽高是「裁之前」的 Size。`_nc_css()` 用 `SM_CXSIZEFRAME / SM_CYCAPTION / SM_CXPADDEDBORDER` 算出差额（本机 125%：左右 18、上下 47 物理像素），向上取整后加回请求尺寸，首帧外框才正好等于目标值。
 - 本机实测：工作区 1920 × 1020（物理），缩放 1.25，外框 **1500 × 950 物理 = 1200 × 760 CSS**，左上角 (210, 35) 物理 = (168, 28) CSS，中心偏移 0 / 0；启动轨迹只有一条记录，没有二次跳位。
 - 拖动：**整条标题栏**可拖（`.brand`、标题栏空白都可），由前端 `pointerdown` 自己实现，不依赖 pywebview 的 `drag-region`；输入框、按钮、窗口三键、`LOCAL` 胶囊不参与拖动。双击标题栏空白 = 最大化 / 还原（Windows 习惯），双击这些交互控件不会触发。
@@ -179,13 +179,13 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 
 ## 7. 自检与验收
 
-### 7.1 桌面端自检（`--selftest`，离屏窗口，当前 92 项）
+### 7.1 桌面端自检（`--selftest`，离屏窗口，当前 111 项）
 
-**期望值一律现算，不写死库内数据**：共有/独有行数、独有行键集合、序号范围、已编辑条数、已连接 agent 数、store 路径、**分类夹数与未归档数（`boards.folders` / `skill_meta.folder_id`）** 全部取自 `skillkit.list_boards()` / `get_meta()` / `load_config()`。库内增删 skill、冲突收口之后重跑自检仍然成立。
+**期望值一律现算，不写死库内数据**：共有/独有行数、独有行键集合、序号范围、已编辑条数、已连接 agent 数、store 路径、**分类夹数与未归档数（`boards.folders` / `skill_meta.folder_id`）** 全部取自 `skilllocker.list_boards()` / `get_meta()` / `load_config()`。库内增删 skill、冲突收口之后重跑自检仍然成立。
 
-覆盖：模式=db、0 条 JS 错误、共有行数与侧栏计数、独有行数 / 行键集合与后端一致（含 extra / 容器展开 / 外部链接来源，见 §1.2）、独有序号连续 1..N、已编辑条数与 meta 一致（只有显示名 / 备注算编辑，归属夹不算）、**分类夹数、未归档数**、已连接 agent 数、路径来自 `config.json`、选中 `pdf`、列表上方筛选行已移除、**序号列（首行=1、共有序号连续 1..N、第 10 行两位数仍 26×26 不溢出）**、详情栏删除按钮存在、**分类文件夹 11 项**（网格视图卡片数=后端 folders 数、`#grid-new-folder` 虚卡存在、点 `data-folder-card` 进夹后标题=夹名且行数=后端夹内计数、面包屑返回根后 `.folder-grid` 重新出现、临时建夹+归入 pdf 后卡片数 +1、`folder_delete` 后卡片数复原且夹内行 `folder_id` 置空 / moved 计数正确、切列表视图 `.row` 数=sh_total、`set_meta(folder)` 落库与 `''` 复原、全新库上迁移回填一次且二次迁移零改动——自检用的临时库已在 `skillkit.db` 升级时完成真实迁移）、**差异入口按冲突数据分支**（`boards.conflict` 来自独有板的同名覆盖行；共有板差异分支只在 `find_conflict_tool()` 现查到实体冲突时才测，否则核对「共有板无差异按钮」；独有板按 `scope=unique` 核对表头 `CONFLICT · tool / skill` 与弹窗出现）、改名写库（**目标选一条当前没有人工改名/备注的共有 skill，结束后只还原显示名与时间戳——整行 insert-or-replace 会把 folder_id 抹掉**）、已编辑计数 ±1、搜索（只校验「命中 pdf + 列表收窄」，不写死命中条数）与清筛选、非法删除被拒、从 UI 详情栏点击「彻底删除」并确认（临时 skill 的磁盘目录与列表行都消失、自动选中下一条）、设置弹窗文案、深色主题、智能体看板（10 行 / 侧栏 10 / tab 已连接数现算 / 4 个状态筛 / 每行开关 / 未安装开关禁用 / **序号列（首行=1、连续 1..N、≥10 行时第 10 行两位数仍 26×26 不溢出，不足 10 行跳过该项）**；没有未安装行时跳过「未安装调 API 被拒」）、**开关方向回归（点「开」着的开关必须先弹「关闭 … 分发？」确认框、一次点击只弹一个框、取消后开关回到开）**、**外部来源（agent 自己安装的目录如 `~/.agents/skills`：行标题出现「外部 N」标记且 N 与后端 `external[0].count` 一致、详情栏出现「外部来源」行、外部行详情有「卸载」按钮且无「删除副本」按钮；本机没有外部同名实体时整组跳过）**、**原生窗口（5 项：`WS_MINIMIZEBOX` 在、窗口小图标=ico 帧、窗口大图标=ico 帧、`ICON_SMALL2` 回退到小图标、最小化位被抹掉后能自动补回）**、8 个缩放手柄、窗口外框 API 可读（本机回读 1200 × 760 @ 168,28）、**标题栏拖动窗口（合成 pointerdown/move/up，外框应位移 dx=60,dy=40）**、启动尺寸 1180~1200 × 720~760、底部设置按钮与版本号完整可见、详情栏右边界 ≤ 窗口宽、1180 宽无横向溢出、外框写入 `1240×780` 回读一致、写入 `900×500` 被兜底成 `1180×720`；**窗口态测试放最后**（最大化拖动越过阈值先还原再位移、**最大化单击不还原**）——真实最大化过一次后，隐藏窗口的 WebView2 布局会卡在最大化尺寸不再跟随 OS 外框（`innerWidth` 恒 1536），所以这两项排在所有 innerWidth / 布局断言之后，末轮 boot 重载页面拿回干净布局；程序化最大化 / 还原走 `ShowWindow`（pywebview 同名方法带 `@_shown_call`，隐藏窗调用是静默 no-op——不加这一层，自检里最大化永远不生效，最大化拖动会靠普通拖动假通过）并临时禁用 DWM 缩放动画（WebView2 动画期间内容不跟帧，闪烁的根源）。
+覆盖：模式=db、0 条 JS 错误、共有行数与侧栏计数、独有行数 / 行键集合与后端一致（含 extra / 容器展开 / 外部链接来源，见 §1.2）、独有序号连续 1..N、已编辑条数与 meta 一致（只有显示名 / 备注算编辑，归属夹不算）、**分类夹数、未归档数**、已连接 agent 数、路径来自 `config.json`、选中 `pdf`、列表上方筛选行已移除、**序号列（首行=1、共有序号连续 1..N、第 10 行两位数仍 26×26 不溢出）**、详情栏删除按钮存在、**分类文件夹 11 项**（网格视图卡片数=后端 folders 数、`#grid-new-folder` 虚卡存在、点 `data-folder-card` 进夹后标题=夹名且行数=后端夹内计数、面包屑返回根后 `.folder-grid` 重新出现、临时建夹+归入 pdf 后卡片数 +1、`folder_delete` 后卡片数复原且夹内行 `folder_id` 置空 / moved 计数正确、切列表视图 `.row` 数=sh_total、`set_meta(folder)` 落库与 `''` 复原、全新库上迁移回填一次且二次迁移零改动——自检用的临时库已在 `skilllocker.db` 升级时完成真实迁移）、**差异入口按冲突数据分支**（`boards.conflict` 来自独有板的同名覆盖行；共有板差异分支只在 `find_conflict_tool()` 现查到实体冲突时才测，否则核对「共有板无差异按钮」；独有板按 `scope=unique` 核对表头 `CONFLICT · tool / skill` 与弹窗出现）、改名写库（**目标选一条当前没有人工改名/备注的共有 skill，结束后只还原显示名与时间戳——整行 insert-or-replace 会把 folder_id 抹掉**）、已编辑计数 ±1、搜索（只校验「命中 pdf + 列表收窄」，不写死命中条数）与清筛选、非法删除被拒、从 UI 详情栏点击「彻底删除」并确认（临时 skill 的磁盘目录与列表行都消失、自动选中下一条）、设置弹窗文案、深色主题、智能体看板（10 行 / 侧栏 10 / tab 已连接数现算 / 4 个状态筛 / 每行开关 / 未安装开关禁用 / **序号列（首行=1、连续 1..N、≥10 行时第 10 行两位数仍 26×26 不溢出，不足 10 行跳过该项）**；没有未安装行时跳过「未安装调 API 被拒」）、**开关方向回归（点「开」着的开关必须先弹「关闭 … 分发？」确认框、一次点击只弹一个框、取消后开关回到开）**、**外部来源（agent 自己安装的目录如 `~/.agents/skills`：行标题出现「外部 N」标记且 N 与后端 `external[0].count` 一致、详情栏出现「外部来源」行、外部行详情有「卸载」按钮且无「删除副本」按钮；本机没有外部同名实体时整组跳过）**、**原生窗口（5 项：`WS_MINIMIZEBOX` 在、窗口小图标=ico 帧、窗口大图标=ico 帧、`ICON_SMALL2` 回退到小图标、最小化位被抹掉后能自动补回）**、8 个缩放手柄、窗口外框 API 可读（本机回读 1200 × 760 @ 168,28）、**标题栏拖动窗口（合成 pointerdown/move/up，外框应位移 dx=60,dy=40）**、启动尺寸 1180~1200 × 720~760、底部设置按钮与版本号完整可见、详情栏右边界 ≤ 窗口宽、1180 宽无横向溢出、外框写入 `1240×780` 回读一致、写入 `900×500` 被兜底成 `1180×720`、**独有转共有入口（可收编行详情有「转为共有」按钮；同名覆盖 / foreign-link 行不出现）**、**导入 skill 全链路 12 项（SPEC-skill-import.md §7.1 之 6-10：顶栏入口开弹窗且步骤条=选择来源、tempfile 源走真桥预检后 imp-start 可用、步骤条=预检命名且报告卡存在、键入现存名后按钮 disabled+冲突面板、改回合法名恢复可用、执行态 X 不渲染且 Esc 无效、真库落库到完成页、`#store-count`=后端现算值、搜索态下 `.file-card.is-new` 高亮、完成页位置指向新 skill、skills+skill_meta.folder_id 落库、完成态 Esc 可关；结束清临时 skill）**、**在线检索 / 获取 5 项（SPEC-skill-import.md §10.1：全程假网络——patch 门面 `skilllocker.online_search` 与 `_list_repo_files`/`_net_bytes`，桥与 UI 走真实链路；桥直调 `online_fetch` 落系统临时目录且 `listing=github`、结果走标准 `import_preflight` 可过、`open_url` 白名单外域名拒绝（不真开浏览器）、在线 tab 检索假结果渲染成 `.sr-row`、点「获取」→ 预检报告回填 `#imp-name`；结束恢复补丁 + 清临时目录，不写中央仓库）**；**窗口态测试放最后**（最大化拖动越过阈值先还原再位移、**最大化单击不还原**）——真实最大化过一次后，隐藏窗口的 WebView2 布局会卡在最大化尺寸不再跟随 OS 外框（`innerWidth` 恒 1536），所以这两项排在所有 innerWidth / 布局断言之后，末轮 boot 重载页面拿回干净布局；程序化最大化 / 还原走 `ShowWindow`（pywebview 同名方法带 `@_shown_call`，隐藏窗调用是静默 no-op——不加这一层，自检里最大化永远不生效，最大化拖动会靠普通拖动假通过）并临时禁用 DWM 缩放动画（WebView2 动画期间内容不跟帧，闪烁的根源）。
 
-结果：**92/92 PASS，`ERRORS: []`**（本机当前库：51 共有 / 152 独有 / 7 已连接 / 无共有实体冲突 / 7 个分类文件夹，51 条旧分类全部一次性回填进预置夹）。原生窗口那 5 项同时也在一台真实可见窗口（快捷方式启动的实例）上单独核对过：`WM_GETICON` 三档 = 20px 帧 / 40px 帧 / 同小图，样式 `0x16030000`，点任务栏按钮 = 最小化 ↔ 恢复，`WS_MINIMIZEBOX` 全程未丢。
+结果：**111/111 PASS，`ERRORS: []`**（2026-11-01：92 项 + 转共有 2 项 + 导入 12 项 + 在线 5 项；本机当前库 52 共有 / 10 agents 行（7 已连接）/ 7 个分类文件夹，全部现算不写死，具体计数随库变化）。原生窗口那 5 项同时也在一台真实可见窗口（快捷方式启动的实例）上单独核对过：`WM_GETICON` 三档 = 20px 帧 / 40px 帧 / 同小图，样式 `0x16030000`，点任务栏按钮 = 最小化 ↔ 恢复，`WS_MINIMIZEBOX` 全程未丢。
 
 > 旧版自检写死了 `独有 2 行`、`workbuddy/pdf` 的 19 行差异、`分类 7`、`agent 7`、`搜索 pdf 行数=1`，`workbuddy/pdf` 冲突收口成 junction 后这些项必 FAIL；现在已按上面的「现算」方式改写。
 
@@ -203,13 +203,13 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 
 ### 7.3 截图
 
-`D:\skillkit\.screenshots\desktop-shared.png`（共有看板）、`desktop-unique.png`（独有看板）、`desktop-agents.png`（智能体看板）、`desktop-diff.png`（差异弹窗）；同名 `-preview.png` 是 1200 宽缩略图。截图按物理像素 `GetWindowRect` + `ImageGrab` 抓取，与本机 1500 × 950 窗口一致。
+`D:\skilllocker\.screenshots\desktop-shared.png`（共有看板）、`desktop-unique.png`（独有看板）、`desktop-agents.png`（智能体看板）、`desktop-diff.png`（差异弹窗）；同名 `-preview.png` 是 1200 宽缩略图。截图按物理像素 `GetWindowRect` + `ImageGrab` 抓取，与本机 1500 × 950 窗口一致。
 
 放回可重复执行的方式：`--selftest` 自带断言；截图脚本属一次性工具，已从 `kit` 目录移除，需要时可重写（要点：`SetProcessDPIAware` → 按物理像素 `GetWindowRect` → 抓屏）。
 
 ### 7.4 启动脚本实测
 
-`启动 skillkit.bat` 双击等价流程实测：窗口**第一帧**即为 **1500 × 950 物理像素（1200 × 760 CSS）、(168, 28) CSS（物理 (210, 35)）、中心偏移 0 / 0**，启动期间外框轨迹只有一条记录（没有「先出现在别处再跳到中间」的闪烁），随后 30 秒逐秒轮询窗口始终存活、位置尺寸稳定；画面内容为真实数据库的共有看板（侧栏 49 / 2 / 7、详情栏完整、底部状态栏可见）。
+`启动 skilllocker.bat` 双击等价流程实测：窗口**第一帧**即为 **1500 × 950 物理像素（1200 × 760 CSS）、(168, 28) CSS（物理 (210, 35)）、中心偏移 0 / 0**，启动期间外框轨迹只有一条记录（没有「先出现在别处再跳到中间」的闪烁），随后 30 秒逐秒轮询窗口始终存活、位置尺寸稳定；画面内容为真实数据库的共有看板（侧栏 49 / 2 / 7、详情栏完整、底部状态栏可见）。
 
 ### 7.5 拖拽缩放手测（真实鼠标 + 合成指针事件）
 
@@ -237,9 +237,9 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 
 1. **未做**：托盘、开机自启、单实例、安装包、自动更新；`--selftest` 会在隐藏窗口跑（Chromium 会节流 `setTimeout`，所以桌面端写库刻意不走去抖）。
 2. **独有看板的外部行只展示不管理**：`extra` / `foreign-link` / 容器展开来源的行一律 `deletable=false`——UI 不渲染删除按钮，直调 `delete_skill` 也被后端拒绝。这些真身由 agent（ClawHub / codex / Tabbit 等）自己装、自己升级，本工具删了会被装回来或直接弄坏 agent。要把某个外部 skill 收进中央仓库，用 CLI `import <目录>`。
-3. **`workbuddy/pdf` 冲突已收口成 junction**：`store\pdf` 现在是 WorkBuddy 1.0.1 的那份内容（含 `_skillhub_meta.json`），`C:\Users\LENOVO\.workbuddy\skills\pdf` 是指回中央的 junction，所以「独有」里不再有它。改动前的中央目录整份备份在 `D:\skillkit\.scratch\pdf-backup-20261030-222737\`（`central` / `local` 两份，尚未清理）。`suppressed` 表已空，`skillkit.py verify` 不应再报这条冲突。
+3. **`workbuddy/pdf` 冲突已收口成 junction**：`store\pdf` 现在是 WorkBuddy 1.0.1 的那份内容（含 `_skillhub_meta.json`），`C:\Users\LENOVO\.workbuddy\skills\pdf` 是指回中央的 junction，所以「独有」里不再有它。改动前的中央目录整份备份在 `D:\skilllocker\.scratch\pdf-backup-20261030-222737\`（`central` / `local` 两份，尚未清理）。`suppressed` 表已空，`skilllocker.py verify` 不应再报这条冲突。
 4. **设计稿 1440 × 900 只用于原型**：桌面窗口默认 1200 × 760，`≤1340` 断点会收起看板副标题与 tab 小字，列表与详情栏仍完整；最小 1180 × 720 已实测无横向溢出。
-5. **`zoomable=False`、`easy_drag=False`**：缩放内容与 pywebview 自带的拖动区都被刻意关掉。拖动改由前端实现——整条标题栏（含 `.brand`、空白处）`pointerdown` 记起点，`pointermove` 按 `screenX/screenY` 绝对位移调 `win_set_bounds`，`pointerup` 补发终值；搜索框 / 按钮 / LOCAL 胶囊 / 窗口三键不触发。双击标题栏空白切换最大化。改变窗口大小走 8 个 grip。6. **数据库是单文件**：界面开着时另跑 `skillkit.py scan/remove` 也能工作（WAL），但改完建议在界面里点「重新探测」刷新。
+5. **`zoomable=False`、`easy_drag=False`**：缩放内容与 pywebview 自带的拖动区都被刻意关掉。拖动改由前端实现——整条标题栏（含 `.brand`、空白处）`pointerdown` 记起点，`pointermove` 按 `screenX/screenY` 绝对位移调 `win_set_bounds`，`pointerup` 补发终值；搜索框 / 按钮 / LOCAL 胶囊 / 窗口三键不触发。双击标题栏空白切换最大化。改变窗口大小走 8 个 grip。6. **数据库是单文件**：界面开着时另跑 `skilllocker.py scan/remove` 也能工作（WAL），但改完建议在界面里点「重新探测」刷新。
 7. **`pythonw` 下窗口可能以最小化状态出现**：Windows 建窗时给的是 (-32000, -32000)，`on_start()` 先补图标/最小化位，再兜底——检测 `IsIconic` 后 `ShowWindow(SW_RESTORE)`，位置与尺寸在建窗时已正确，不再二次摆位。若手改这段代码，注意别把还原步骤删掉，否则窗口会"看不见但其实在跑"。
 8. **同前缀的 WebView2 工具窗**：枚举窗口时会看到一个 `Chrome_WidgetWin_1`（标题带 `-联想浏览器`）。`_hwnd_by_title()` 只认 `WindowsForms10.*` 主窗口，改选择逻辑时别只看标题。
 9. **缩放是自算矩形，不是系统原生缩放**：8 个 grip 只在 `body.desktop` 下存在；拖动依赖 `setPointerCapture` 在窗口外继续收 `pointermove`，光标离开窗口太远或系统抢走捕获时会提前结束。最大化态（`IsZoomed`）下：grip 缩放直接放弃（需先还原）；标题栏拖动越过 6px 阈值才 `win_restore()` 还原再位移，单击不还原。坐标折算按**系统级 DPI**（`GetDpiForSystem`）写死，跨不同缩放比例的副屏拖动未验证。
@@ -250,7 +250,7 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 
 | 现象 | 原因 | 处理 |
 |---|---|---|
-| 界面显示「后端启动失败」错误页（含错误详情与重试按钮） | 后端 `bootstrap()` 抛错：常见为 store 指向不存在的盘符 / 目录、adapters.json 损坏且工具表为空；或桌面壳内 pywebview 注入超时（WebView2 冷启动过慢，桥未接上） | 看错误详情与 `kit\skillkit.log`；修好 `config.json` 的 `store` 或 `kit\adapters.json` 后点【重试】。这是明确失败，界面**不会**拿内置演示快照冒充真实数据 |
+| 界面显示「后端启动失败」错误页（含错误详情与重试按钮） | 后端 `bootstrap()` 抛错：常见为 store 指向不存在的盘符 / 目录、adapters.json 损坏且工具表为空；或桌面壳内 pywebview 注入超时（WebView2 冷启动过慢，桥未接上） | 看错误详情与 `kit\skilllocker.log`；修好 `config.json` 的 `store` 或 `kit\adapters.json` 后点【重试】。这是明确失败，界面**不会**拿内置演示快照冒充真实数据 |
 | 界面显示「LOCAL」胶囊、编辑没写进数据库（仅 `file://` 直开才会这样） | `bridge.js` 没等到 `window.pywebview`；桌面壳内注入超时已改为启动错误页，不再进只读原型 | 确认是用 `desktop.py` 打开（URL 必须带 `?desktop=1`）；`--debug` 看控制台错误 |
 | 窗口跑到屏幕外 / 右侧被切 | 进程未声明 DPI 感知，或尺寸没按工作区收口 | 确认 `desktop.py` 的 `_make_dpi_aware()`、`_centered_rect()`、`_nc_css()` 未被改动；建窗即居中，`on_start()` 只兜底最小化还原 |
 | 改了 `app.js` / `styles.css`，界面还是旧样子 | WebView2 缓存了 `file://` 资源 | 确认 `desktop.py` 的 `_asset_version()` 仍在 URL 上带 `&v=`，且 `index.html` 用版本号加载资源；必要时重启进程 |
@@ -264,24 +264,25 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 | 打开/重连 agent 时黑窗口连闪（关掉→重连最明显） | `make_junction()` 每次都用 `cmd /c mklink` 建链接；`pythonw` 无控制台，每个控制台子进程都会新分配一个黑窗口，49 个 skill 就是 49 次闪窗 | `_quiet_kwargs()` 已给子进程加 `CREATE_NO_WINDOW` + `SW_HIDE`；实测子进程 `GetConsoleWindow()` 由 `1051536` 变 `0`。另：`cmd` 输出是 ANSI，**不能**用 `text=True`（会 `UnicodeDecodeError`），统一走 `_decode()` |
 | 最大化态单击标题栏，窗口闪动一下缩小成原尺寸 | 旧实现 `winBounds()` 一回来发现 `maximized` 就立刻 `winRestore()`——根本没等用户真的拖动，单击也触发还原；还原又带着 DWM 缩放动画，WebView2 动画期间内容不跟帧，看起来就是「闪动 + 震荡」 | 前端把还原挂起（`moveState.zmax`），位移越过 6px 阈值才 `win_restore()`；单击只收尾不动作，缩小只认双击标题栏（`win_max` 切换）。后端 `win_max` / `win_restore` 程序化切换窗口态时 `DwmSetWindowAttribute(DWMWA_TRANSITIONS_FORCEDISABLED)` 临时关掉缩放动画，瞬移到目标尺寸；并改走 `ShowWindow`（pywebview 同名方法在隐藏窗口上是静默 no-op）。回归项：`--selftest` 的「最大化单击不还原」 |
 | 自检卡住 | 异常抛出后窗口未销毁 | `selftest()` 已用 `try/finally` 保证打印并 `destroy()` |
-| 关闭某个 agent 后（skillkit 显示「已关闭」、目录也空了），**新开会话仍能调用它的 skill** | 该 agent 还有第二条读取路径：Trae CN 除 `~/.trae-cn/skills` 外还读 `~/.agents/skills`（ClawHub / GitHub 安装的真身，见 `~/.agents/.skill-lock.json`）。本工具只管 `skills_dir`，删链接不影响那里 | 看智能体行是否标了「外部 N」、详情栏是否列出 `.agents/skills` 与「N 个内容一致」——有就是如实检测，不是开关失效。要真正失效可以在独有看板对那条 skill 点「卸载」（v0.2 起支持，`uninstall_unique` 永久删除该目录或只摘 foreign-link 链接；agent 更新时可能重新安装） |
+| 导入（在线获取后尤其高发）偶发失败页「PermissionError: [WinError 5] 拒绝访问」指向 `.skpart-* -> store\<名>` | `os.replace` 改名时，刚 copytree 落盘的文件被杀软 / 索引服务短暂握着句柄（Windows 目录树内有任何打开句柄 rename 即被拒）；网络新下载内容首次落盘要全量云查杀，几秒内导入几乎必撞。本地导入的旧文件早有扫描缓存，所以少见 | `_replace_dir()` 已按 `RENAME_BACKOFF`（0.15s→3s 共 5 次 ≈6s）退避重试，瞬时句柄自动通过；重试耗尽才进失败页（临时目录已回滚，可点「重试」）。单测用真实句柄复现（test_unit「rename 重试」3 项） |
+| 关闭某个 agent 后（skilllocker 显示「已关闭」、目录也空了），**新开会话仍能调用它的 skill** | 该 agent 还有第二条读取路径：Trae CN 除 `~/.trae-cn/skills` 外还读 `~/.agents/skills`（ClawHub / GitHub 安装的真身，见 `~/.agents/.skill-lock.json`）。本工具只管 `skills_dir`，删链接不影响那里 | 看智能体行是否标了「外部 N」、详情栏是否列出 `.agents/skills` 与「N 个内容一致」——有就是如实检测，不是开关失效。要真正失效可以在独有看板对那条 skill 点「卸载」（v0.2 起支持，`uninstall_unique` 永久删除该目录或只摘 foreign-link 链接；agent 更新时可能重新安装） |
 
 ---
 
 ## 10. 分发与安装（打包清单）
 
 把本目录 zip 发给别人 / 拷到别的机器时，按此清单打包。**store 默认跟随安装目录**：
-`config.json` 缺失时中央仓库解析为 `<安装目录>\store`（`kit\skillkit_base.py` 的
+`config.json` 缺失时中央仓库解析为 `<安装目录>\store`（`kit\skilllocker_base.py` 的
 `DEFAULT_STORE` 推导，不写死盘符）；想放到别处就带上自己的 `config.json`
 （`{"store": "<路径>"}`），它不入库、随安装分发。
 
 | 处理 | 内容 |
 |---|---|
-| 必含 | `kit\*.py`、`kit\adapters.json`、`kit\assets\`、`ui\`（index.html / app.js / bridge.js / data.js / styles.css）、`启动 skillkit.bat` |
-| 必排除 | `kit\config.json`、`kit\skillkit.db*`、`kit\skillkit.log*`、`kit\desktop_profile\`、`kit\ui-drag.log`、`kit\launch.log`、`store\`、`__pycache__\`（以上均已在 `.gitignore`） |
+| 必含 | `kit\*.py`、`kit\adapters.json`、`kit\assets\`、`ui\`（index.html / app.js / bridge.js / data.js / styles.css）、`启动 skilllocker.bat` |
+| 必排除 | `kit\config.json`、`kit\skilllocker.db*`、`kit\skilllocker.log*`、`kit\desktop_profile\`、`kit\ui-drag.log`、`kit\launch.log`、`store\`、`__pycache__\`（以上均已在 `.gitignore`） |
 | 环境要求 | Windows 10+；Python 3.12（`pythonw.exe` 可用）且已装 pywebview（`pip install pywebview`）+ Edge WebView2 Runtime |
 
-首次启动行为（干净机器：无 `skillkit.db`、无 `config.json`）：`bootstrap()` 自动探测
+首次启动行为（干净机器：无 `skilllocker.db`、无 `config.json`）：`bootstrap()` 自动探测
 本机已装 agent（状态「已关闭」，开关 off）并登记中央仓库 skill 列表；打开任一 agent
 开关即在其 skills 目录建指向 `<安装目录>\store\<skill>` 的 junction。失败路径都有明确
 出口：缺 pywebview → 系统弹窗 + 退出码 2；store 不可用 / adapters.json 损坏 → 界面

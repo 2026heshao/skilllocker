@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""skillkit 桌面端无人值守自检（desktop.py --selftest 的执行体）。
+"""skilllocker 桌面端无人值守自检（desktop.py --selftest 的执行体）。
 
 离屏建一个隐藏窗口，跑完整条 UI 链路（bridge / 原生窗口 chrome / 拖拽缩放 /
 写库与删除安全兜底），逐项断言后输出 SELFTEST n/n 并退出进程。
@@ -10,11 +10,13 @@ import ctypes
 import ctypes.wintypes  # noqa: F401 - GetWindowLongW 等需要 wintypes 结构体
 import json
 import os
+import re
 import shutil
 import sys
+import tempfile
 import time
 
-import skillkit
+import skilllocker
 
 from desktop import (INDEX, KIT, MIN_H, MIN_W, WIN_H, WIN_W, WS_MINIMIZEBOX,
                      _WINDOW_ICONS, _asset_version, _ensure_minimize_box,
@@ -95,11 +97,11 @@ def _selftest_native_window(results):
     got_small = _window_icon(hwnd, 0)
     got_big = _window_icon(hwnd, 1)
     got_small2 = _window_icon(hwnd, 2)
-    results.append(("任务栏小图标=skillkit.ico", bool(expect_small) and got_small == expect_small,
+    results.append(("任务栏小图标=skilllocker.ico", bool(expect_small) and got_small == expect_small,
                     "got=%r expect=%r" % (got_small, expect_small)))
-    results.append(("任务栏大图标=skillkit.ico", bool(expect_big) and got_big == expect_big,
+    results.append(("任务栏大图标=skilllocker.ico", bool(expect_big) and got_big == expect_big,
                     "got=%r expect=%r" % (got_big, expect_big)))
-    results.append(("任务栏小图标2=skillkit.ico", bool(expect_small) and got_small2 == expect_small,
+    results.append(("任务栏小图标2=skilllocker.ico", bool(expect_small) and got_small2 == expect_small,
                     "got=%r expect=%r" % (got_small2, expect_small)))
     # 模拟 WinForms 在状态变化时抹掉最小化位，确保兜底函数能补回
     ctypes.windll.user32.SetWindowLongW(ctypes.wintypes.HWND(hwnd), -16,
@@ -121,9 +123,9 @@ def _edited_count(meta_map):
 def _selftest_body(window, results):
     _selftest_native_window(results)
     # 期望值一律取自真实后端，不写死数字：store 里增删 skill 后自检仍应成立
-    con = skillkit.db()
+    con = skilllocker.db()
     try:
-        boards = skillkit.list_boards(con, skillkit.load_config())
+        boards = skilllocker.list_boards(con, skilllocker.load_config())
     finally:
         con.close()
     sh_total = len(boards["skills"])
@@ -138,10 +140,10 @@ def _selftest_body(window, results):
     # 分类夹数与未归档数一律后端现算：folders 增删后自检仍应成立
     folders_rows = boards.get("folders") or []
     folder_total = len(folders_rows)
-    store_path = skillkit.load_config()["store"].replace("/", "\\")
-    con = skillkit.db()
+    store_path = skilllocker.load_config()["store"].replace("/", "\\")
+    con = skilllocker.db()
     try:
-        meta_map = skillkit.get_meta(con)
+        meta_map = skilllocker.get_meta(con)
     finally:
         con.close()
     unfiled_total = sum(
@@ -216,7 +218,7 @@ def _selftest_body(window, results):
 
     # 4) 进入首个文件夹（data-folder-card）：标题 = 夹名，行数 = 后端夹内计数
     f0 = folders_rows[0]
-    con = skillkit.db()
+    con = skilllocker.db()
     try:
         f0_count = con.execute(
             "select count(*) from skill_meta where scope='shared' and folder_id=?",
@@ -238,11 +240,11 @@ def _selftest_body(window, results):
 
     # 7) 删夹回落：建临时夹 + 归入 pdf → 卡片数 +1；删除 → 卡片数复原、
     #    夹内行 folder_id 置空、moved 计数正确
-    con = skillkit.db()
+    con = skilllocker.db()
     try:
-        tf = skillkit.folder_create(con, "自检夹", "teal")
+        tf = skilllocker.folder_create(con, "自检夹", "teal")
         con.commit()
-        skillkit.set_meta(con, "shared", "pdf", {"folder": tf["id"]})
+        skilllocker.set_meta(con, "shared", "pdf", {"folder": tf["id"]})
     finally:
         con.close()
     _refresh_ui()
@@ -251,9 +253,9 @@ def _selftest_body(window, results):
            "document.querySelectorAll('.folder-card:not(.ghost)').length", folder_total + 1)
     moved = 0
     pdf_row = None
-    con = skillkit.db()
+    con = skilllocker.db()
     try:
-        moved = skillkit.folder_delete(con, tf["id"])["moved"]
+        moved = skilllocker.folder_delete(con, tf["id"])["moved"]
         con.commit()
         pdf_row = con.execute(
             "select folder_id from skill_meta where scope='shared' and key='pdf'").fetchone()
@@ -267,9 +269,9 @@ def _selftest_body(window, results):
                     moved == 1 and bool(pdf_row) and (pdf_row["folder_id"] or "") == "",
                     "moved=%s folder_id=%r" % (moved, pdf_row["folder_id"] if pdf_row else None)))
     # 还原 pdf 原归属（有无都如实写回），UI 与库重新对齐
-    con = skillkit.db()
+    con = skilllocker.db()
     try:
-        skillkit.set_meta(con, "shared", "pdf", {"folder": pdf_old_folder})
+        skilllocker.set_meta(con, "shared", "pdf", {"folder": pdf_old_folder})
     finally:
         con.close()
     _refresh_ui()
@@ -285,12 +287,12 @@ def _selftest_body(window, results):
 
     # 6) 归属落库（纯后端口径）：set_meta(folder) 写 folder_id，'' 复原
     v1 = v2 = None
-    con = skillkit.db()
+    con = skilllocker.db()
     try:
-        skillkit.set_meta(con, "shared", "pdf", {"folder": f0["id"]})
+        skilllocker.set_meta(con, "shared", "pdf", {"folder": f0["id"]})
         v1 = con.execute(
             "select folder_id from skill_meta where scope='shared' and key='pdf'").fetchone()
-        skillkit.set_meta(con, "shared", "pdf", {"folder": ""})
+        skilllocker.set_meta(con, "shared", "pdf", {"folder": ""})
         v2 = con.execute(
             "select folder_id from skill_meta where scope='shared' and key='pdf'").fetchone()
         ok6 = bool(v1) and v1["folder_id"] == f0["id"] and (v2["folder_id"] or "") == ""
@@ -300,14 +302,14 @@ def _selftest_body(window, results):
                     "%r -> %r" % (v1["folder_id"] if v1 else None,
                                   v2["folder_id"] if v2 else None)))
     # #6 把 pdf 归属写成了 ''，这里还原原归属，别吃掉用户的真实数据
-    con = skillkit.db()
+    con = skilllocker.db()
     try:
-        skillkit.set_meta(con, "shared", "pdf", {"folder": pdf_old_folder})
+        skilllocker.set_meta(con, "shared", "pdf", {"folder": pdf_old_folder})
     finally:
         con.close()
 
     # 8) 迁移幂等：全新库（升级前 schema）回填一次，二次迁移不再动任何行
-    import skillkit_base as sk_base
+    import skilllocker_base as sk_base
     tmp_db = os.path.join(KIT, "_selftest_mig.db")
     for suffix in ("", "-wal", "-shm"):
         p = tmp_db + suffix
@@ -322,9 +324,9 @@ def _selftest_body(window, results):
             "categories,seed,updated_at) "
             "values('shared','__selftest_mig__','','','','[\"video\"]','video',0)")
         fcon.commit()
-        n1 = sk_base.migrate_folders(fcon, skillkit.load_config())
+        n1 = sk_base.migrate_folders(fcon, skilllocker.load_config())
         r1 = fcon.execute("select folder_id from skill_meta where key='__selftest_mig__'").fetchone()["folder_id"]
-        n2 = sk_base.migrate_folders(fcon, skillkit.load_config())
+        n2 = sk_base.migrate_folders(fcon, skilllocker.load_config())
         r2 = fcon.execute("select folder_id from skill_meta where key='__selftest_mig__'").fetchone()["folder_id"]
         fcon.close()
         ok8 = n1 == 1 and r1 == "video" and n2 == 0 and r2 == "video"
@@ -401,18 +403,47 @@ def _selftest_body(window, results):
         _check(window, results, "外部行详情有卸载按钮",
                "document.querySelectorAll('[data-uninstall]').length", 1)
 
+    # 一键转共有：实体独有行（kind=unique 且无同名覆盖）详情栏必须有 promote
+    # 入口；同名覆盖 / foreign-link 行不该出现。只断言按钮在，绝不点它 ——
+    # 自检跑的是真库，点了会把真实的独有技能拷进中央仓库。点击会换选中行，
+    # 结束后恢复原选中：后面的差异段还在独有板上按选中行断言。
+    prev_sel = window.evaluate_js(
+        "(function(){var r=document.querySelector('.row.is-selected');"
+        "return r?r.getAttribute('data-key'):null})()")
+    un_prom = [u for u in un_rows if u.get("kind") == "unique" and not u.get("sameName")]
+    if un_prom:
+        p_key = "%s/%s" % (un_prom[0]["tool"], un_prom[0]["name"])
+        window.evaluate_js("document.querySelector('.row[data-key=%s]').click()"
+                           % json.dumps(p_key))
+        time.sleep(0.3)
+        _check(window, results, "可收编行详情有「转为共有」按钮",
+               "document.querySelectorAll('[data-promote]').length", 1)
+    un_blocked = [u for u in un_rows if u.get("sameName") or u.get("kind") == "foreign-link"]
+    if un_blocked:
+        b_key = "%s/%s" % (un_blocked[0]["tool"], un_blocked[0]["name"])
+        window.evaluate_js("document.querySelector('.row[data-key=%s]').click()"
+                           % json.dumps(b_key))
+        time.sleep(0.3)
+        _check(window, results, "覆盖/链接行详情无「转为共有」按钮",
+               "document.querySelectorAll('[data-promote]').length", 0)
+    if prev_sel:
+        window.evaluate_js("var r=document.querySelector('.row[data-key=%s]');if(r)r.click()"
+                           % json.dumps(prev_sel))
+        time.sleep(0.3)
+
     # 差异弹窗（走 Python conflict_detail）：是否有「同名副本」由后端现算——
     # 冲突可能只挂在独有板（如 Trae 内置 skill-creator 与中央同名不同内容），
     # 也可能同时是共有 skill 的实体冲突（如当年的 workbuddy/pdf）。
-    # 共有板分支只在 find_conflict_tool 现查到实体冲突时才测，其余走独有板分支。
+    # 共有板分支在 find_conflict_tool 现查到实体冲突时测弹窗全链路；
+    # 否则切到共有板核对「无实体冲突 → 无差异按钮」，再走独有板分支。
     if conflict:
         c_names = {f["name"] for f in conflict["central"]["files"]}
         c_names |= {f["name"] for f in conflict["local"]["files"]}
         header = "CONFLICT · %s / %s" % (conflict["tool"], conflict["skill"])
-        con2 = skillkit.db()
+        con2 = skilllocker.db()
         try:
-            shared_conflict = skillkit.find_conflict_tool(
-                con2, skillkit.load_config(), conflict["skill"]) is not None
+            shared_conflict = skilllocker.find_conflict_tool(
+                con2, skilllocker.load_config(), conflict["skill"]) is not None
         finally:
             con2.close()
         if shared_conflict:
@@ -433,6 +464,16 @@ def _selftest_body(window, results):
                    "document.querySelector('.modal-eyebrow').textContent", header)
             window.evaluate_js("var b=document.querySelector('[data-close]');if(b)b.click()")
         else:
+            # 实体冲突只挂在独有板（同名覆盖）时，共有板该 skill 的详情不应有
+            # 差异按钮。旧版没切看板就断言，实际查的是独有板当前选中行 —— 上
+            # 面任何一步恰好选中同名行就会误报。这里明确切到共有板选中本尊行。
+            # （共有板此刻必为列表视图：§7.1 末尾已切回；.row 只在列表存在）
+            window.evaluate_js("document.getElementById('nav-shared').click()")
+            time.sleep(0.3)
+            window.evaluate_js(
+                "var r=document.querySelector('.row[data-key=%s]');if(r)r.click()"
+                % json.dumps(conflict["skill"]))
+            time.sleep(0.3)
             _check(window, results, "共有板无实体冲突时不显示差异按钮",
                    "document.querySelectorAll('[data-diff]').length", 0)
 
@@ -484,7 +525,7 @@ def _selftest_body(window, results):
         "var i=document.getElementById('ins-name');"
         "i.value='自检改名';i.dispatchEvent(new Event('input',{bubbles:true}))")
     time.sleep(1.2)
-    con = skillkit.db()
+    con = skilllocker.db()
     row = con.execute("select display_name, updated_at from skill_meta "
                       "where scope='shared' and key=?", (rename_target,)).fetchone()
     ok = bool(row) and row["display_name"] == "自检改名" and (row["updated_at"] or 0) > 0
@@ -498,7 +539,7 @@ def _selftest_body(window, results):
     time.sleep(0.8)
     # 清掉测试写入；原来有元数据就只还原显示名与时间戳（整行 insert-or-replace
     # 会把 folder_id 一并抹掉），原来没有就删掉这一行
-    con = skillkit.db()
+    con = skilllocker.db()
     if old_target:
         con.execute(
             "update skill_meta set display_name=?, updated_at=? where scope='shared' and key=?",
@@ -541,16 +582,16 @@ def _selftest_body(window, results):
 
     # 真实删除：临时造一个 skill，从 UI 详情栏点「彻底删除」→ 确认，磁盘与列表都必须干净
     temp_name = "__selftest_delete__"
-    cfg = skillkit.load_config()
+    cfg = skilllocker.load_config()
     temp_dir = os.path.join(cfg["store"], temp_name)
     try:
         shutil.rmtree(temp_dir, ignore_errors=True)
         os.makedirs(temp_dir, exist_ok=True)
         with open(os.path.join(temp_dir, "SKILL.md"), "w", encoding="utf-8") as fh:
             fh.write("# selftest delete\n")
-        con = skillkit.db()
+        con = skilllocker.db()
         try:
-            skillkit.rescan(con, cfg)
+            skilllocker.rescan(con, cfg)
         finally:
             con.close()
         window.evaluate_js(
@@ -594,7 +635,7 @@ def _selftest_body(window, results):
                            selected, "" if row_present else diag)))
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
-        con = skillkit.db()
+        con = skilllocker.db()
         try:
             con.execute("delete from skills where name=?", (temp_name,))
             con.execute("delete from skill_meta where scope='shared' and key=?", (temp_name,))
@@ -607,6 +648,288 @@ def _selftest_body(window, results):
         _await_js(window, "__SK_R2")
 
 
+    # ============ 导入 skill（SPEC-skill-import.md §7.1 之 6-10）============
+    # tempfile 造源目录（不碰真实 agent 目录），弹窗走真桥预检与真库落库；
+    # 结束按「临时 skill 删除」同一套模式清理磁盘、skills 与 skill_meta。
+    cfg = skilllocker.load_config()
+    imp_src = tempfile.mkdtemp(prefix="sk-imp-src-")
+    imp_name = "sk-import-it"
+    imp_store_dir = os.path.join(cfg["store"], imp_name)
+    try:
+        os.makedirs(os.path.join(imp_src, "scripts"), exist_ok=True)
+        with open(os.path.join(imp_src, "SKILL.md"), "w", encoding="utf-8") as fh:
+            fh.write("---\nname: %s\ndescription: selftest import smoke.\n---\nbody\n"
+                     % imp_name)
+        with open(os.path.join(imp_src, "scripts", "a.py"), "w", encoding="utf-8") as fh:
+            fh.write("x = 1\n")
+        # 上次中断的残留先清掉，保证同名键入断言可复现
+        shutil.rmtree(imp_store_dir, ignore_errors=True)
+        con = skilllocker.db()
+        try:
+            con.execute("delete from skills where name=?", (imp_name,))
+            con.execute("delete from skill_meta where scope='shared' and key=?",
+                        (imp_name,))
+            con.commit()
+            row = con.execute("select name from skills where name<>? order by name "
+                              "limit 1", (imp_name,)).fetchone()
+            # 同名键入用例要的是「合法但被占用」的名字：首个合法名（AI HOT 这类
+            # 带空格的会被前端 validName 先拦，冲突面板根本不出现）
+            existing_name = ""
+            for r in con.execute("select name from skills where name<>? order by name",
+                                 (imp_name,)).fetchall():
+                n = r["name"]
+                if n and n not in (".", "..") and re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*$", n) \
+                        and n == n.rstrip(". ") and ":" not in n:
+                    existing_name = n
+                    break
+            frow = con.execute("select id from folders order by position limit 1").fetchone()
+            folder_id = frow["id"] if frow else ""
+        finally:
+            con.close()
+        window.evaluate_js(
+            "window.__SK_B3=0;window.pywebview.api.bootstrap().then(function(r){"
+            "window.__SK_APP.refresh(r);window.__SK_B3=1})")
+        _await_js(window, "__SK_B3")
+
+        # 8) 入口：点顶栏按钮 → 弹窗出现，步骤条 01=选择来源
+        window.evaluate_js("document.getElementById('btn-import-top').click()")
+        time.sleep(0.3)
+        _check(window, results, "导入弹窗打开且步骤条=选择来源",
+               "(function(){var m=document.querySelector('.imp-modal');"
+               "var s=document.querySelector('.imp-stp.cur');"
+               "return !!m && !!s && s.textContent.indexOf('选择来源')>-1})()", True)
+        # 填路径 → 预检（db 模式走真桥 import_preflight）
+        window.evaluate_js(
+            "document.getElementById('imp-path').value=%s;"
+            "document.querySelector('[data-act=\"imp-use-path\"]').click()"
+            % json.dumps(imp_src))
+        start_ready = False
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            if window.evaluate_js(
+                    "var b=document.querySelector('#modal-root [data-act=\"imp-start\"]');"
+                    "!!b && !b.disabled"):
+                start_ready = True
+                break
+            time.sleep(0.2)
+        results.append(("预检后 imp-start 可用", start_ready,
+                        "ready=%s" % start_ready))
+        _check(window, results, "步骤条=预检命名且报告卡存在",
+               "(function(){var s=[].slice.call(document.querySelectorAll('.imp-stp'))[1];"
+               "return !!s && s.classList.contains('cur')"
+               "&& !!document.querySelector('.imp-modal .rep')})()", True)
+        # 同名键入：按钮 disabled + 冲突面板显示（前端以 SKILLS 现值判定）
+        if existing_name:
+            window.evaluate_js(
+                "var n=document.getElementById('imp-name');"
+                "n.value=%s;n.dispatchEvent(new Event('input',{bubbles:true}))"
+                % json.dumps(existing_name))
+            time.sleep(0.2)
+            _check(window, results, "键入同名后 disabled+冲突面板",
+                   "(function(){var b=document.querySelector('#modal-root [data-act=\"imp-start\"]');"
+                   "var p=document.querySelector('#modal-root [data-role=\"panel-conflict\"]');"
+                   "return !!b && b.disabled && !!p && !p.hidden})()", True)
+        # 键入目标名 → 恢复可用（隐藏窗口无键盘，直接 set value + input 事件）
+        window.evaluate_js(
+            "var n=document.getElementById('imp-name');"
+            "n.value=%s;n.dispatchEvent(new Event('input',{bubbles:true}))"
+            % json.dumps(imp_name))
+        time.sleep(0.2)
+        _check(window, results, "改回合法名后重新可用",
+               "(function(){var b=document.querySelector('#modal-root [data-act=\"imp-start\"]');"
+               "return !!b && !b.disabled"
+               "&& !document.querySelector('#modal-root [data-role=\"panel-conflict\"]:not([hidden])')})()",
+               True)
+        # 选归档夹（仓库有夹才断言 meta 落库）
+        if folder_id:
+            window.evaluate_js(
+                "var c=document.querySelector('.fold-chip[data-f=%s]');if(c)c.click()"
+                % json.dumps(folder_id))
+            time.sleep(0.2)
+        # 9) 执行态不可关：X 不渲染、Esc 无效、弹窗仍在
+        window.evaluate_js(
+            "document.querySelector('#modal-root [data-act=\"imp-start\"]').click()")
+        time.sleep(0.2)
+        no_x = window.evaluate_js(
+            "!!document.querySelector('.imp-modal')"
+            "&& !document.querySelector('.imp-modal .modal-close')")
+        window.evaluate_js(
+            "document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))")
+        time.sleep(0.2)
+        esc_kept = window.evaluate_js("!!document.querySelector('.imp-modal')")
+        results.append(("执行中 Esc 无法关闭", no_x and esc_kept,
+                        "x_hidden=%s esc_kept=%s" % (no_x, esc_kept)))
+        # 等完成页（import_skill 桥 180s 上限，自检给 90s 兜底）
+        done_ok = False
+        deadline = time.time() + 90
+        while time.time() < deadline:
+            if window.evaluate_js("!!document.querySelector('.imp-modal .hero.ok')"):
+                done_ok = True
+                break
+            if window.evaluate_js("!!document.querySelector('.imp-modal .hero.bad')"):
+                break
+            time.sleep(0.3)
+        results.append(("导入执行到完成页", done_ok, "hero_ok=%s" % done_ok))
+        # 10) 完成联动：计数=后端现算、is-new 高亮（共有看板 + 网格视图）
+        con = skilllocker.db()
+        try:
+            backend_count = con.execute("select count(*) from skills").fetchone()[0]
+        finally:
+            con.close()
+        _check(window, results, "完成后 #store-count=后端现算值",
+               "document.getElementById('store-count').textContent", str(backend_count))
+        window.evaluate_js(
+            "document.querySelector('[data-board=\"shared\"]').click();"
+            "var g=document.querySelector('#view-seg [data-view-mode=\"grid\"]');"
+            "if(g)g.click();"
+            "var s=document.getElementById('gsearch');"
+            "s.value=%s;s.dispatchEvent(new Event('input',{bubbles:true}))"
+            % json.dumps(imp_name))
+        time.sleep(0.4)
+        # 网格根层只显示未归档卡：已归档的新卡用搜索结果流断言 is-new
+        _check(window, results, "新导入卡带 is-new 高亮",
+               "!!document.querySelector('.file-card.is-new')", True)
+        # 清搜索并切回列表视图：后续既有断言（pdf 行点击等）依赖列表态 .row
+        window.evaluate_js(
+            "var s=document.getElementById('gsearch');s.value='';"
+            "s.dispatchEvent(new Event('input',{bubbles:true}));"
+            "var l=document.querySelector('#view-seg [data-view-mode=\"list\"]');"
+            "if(l)l.click()")
+        time.sleep(0.3)
+        _check(window, results, "完成页位置指向新 skill",
+               "(function(){var b=document.querySelector('.imp-modal .meta-row b');"
+               "return !!b && b.textContent.indexOf(%s)>-1})()" % json.dumps(imp_name),
+               True)
+        # 6) 落库断言：skills 行 + meta.folder + 磁盘目录 + 关闭弹窗
+        con = skilllocker.db()
+        try:
+            srow = con.execute("select name from skills where name=?",
+                               (imp_name,)).fetchone()
+            mrow = con.execute(
+                "select folder_id from skill_meta where scope='shared' and key=?",
+                (imp_name,)).fetchone()
+        finally:
+            con.close()
+        results.append(("导入落库 skills+meta",
+                        bool(srow)
+                        and (not folder_id or (mrow and mrow["folder_id"] == folder_id))
+                        and os.path.isfile(os.path.join(imp_store_dir, "SKILL.md")),
+                        "row=%s meta=%s disk=%s folder=%s"
+                        % (bool(srow), bool(mrow),
+                           os.path.isfile(os.path.join(imp_store_dir, "SKILL.md")),
+                           folder_id or "-")))
+        window.evaluate_js(
+            "document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))")
+        time.sleep(0.2)
+        _check(window, results, "完成态 Esc 可关闭弹窗",
+               "!document.querySelector('.imp-modal')", True)
+    finally:
+        shutil.rmtree(imp_src, ignore_errors=True)
+        shutil.rmtree(imp_store_dir, ignore_errors=True)
+        con = skilllocker.db()
+        try:
+            con.execute("delete from skills where name=?", (imp_name,))
+            con.execute("delete from skill_meta where scope='shared' and key=?",
+                        (imp_name,))
+            con.commit()
+        finally:
+            con.close()
+        window.evaluate_js(
+            "window.__SK_B4=0;window.pywebview.api.bootstrap().then(function(r){"
+            "window.__SK_APP.refresh(r);window.__SK_B4=1})")
+        _await_js(window, "__SK_B4")
+
+    # ============ 在线检索 / 获取（SPEC-skill-import.md §10.1 已真实化）============
+    # 全程假网络：patch 掉 online_search（桥走 skilllocker 门面引用，必须 patch 门面）
+    # 与 skilllocker_links 的清单 / 下载两处；桥与 UI 走真实链路（检索渲染 → 获取
+    # 下载到 %TEMP% → 标准预检回填），不写中央仓库；结束恢复补丁并清临时目录。
+    import skilllocker_links as _lk
+    _saved_net = (skilllocker.online_search, _lk._list_repo_files, _lk._net_bytes)
+    _onl_dir = None
+    try:
+        skilllocker.online_search = lambda q, limit=20: [{  # noqa: E731
+            "name": "online-selftest", "source": "u/online-selftest", "installs": 1234,
+            "id": "u/online-selftest/online-selftest",
+            "page_url": "https://www.skills.sh/u/online-selftest/online-selftest",
+            "source_url": "https://github.com/u/online-selftest"}]
+        _lk._list_repo_files = lambda s, b=None: ("main", [  # noqa: E731
+            ("skills/online-selftest/SKILL.md", 60),
+            ("skills/online-selftest/scripts/run.py", 6)], "github", "b" * 40)
+        _lk._net_bytes = lambda url, expected_size=None, deadline=None, cancel=None: (  # noqa: E731
+            b"---\nname: online-selftest\ndescription: selftest online fetch.\n---\nbody"
+            if "SKILL.md" in url else b"x = 1\n")
+
+        # 桥直调：获取 → 系统临时目录 + 标准预检可用
+        window.evaluate_js(
+            "window.__SK_ON1=null;window.pywebview.api.online_fetch("
+            "'u/online-selftest','online-selftest').then(function(r){"
+            "window.__SK_ON1=r})")
+        onl = _await_js(window, "__SK_ON1") or {}
+        got = onl.get("data") or {}
+        _onl_dir = (got.get("path") or "").replace("/", os.sep)
+        results.append(("在线获取(假网络)落临时目录",
+                        bool(_onl_dir) and os.path.isdir(_onl_dir)
+                        and got.get("files") == 2 and got.get("listing") == "github",
+                        "ok=%s files=%s listing=%s dir=%s"
+                        % (onl.get("ok"), got.get("files"), got.get("listing"),
+                           bool(_onl_dir))))
+        if _onl_dir:
+            pre = skilllocker.import_preflight(skilllocker.load_config(), _onl_dir,
+                                            got.get("name"))
+            results.append(("在线获取结果可标准预检",
+                            bool(pre.get("ok")) and pre.get("has_skill_md")
+                            and pre.get("files") == 2
+                            and (pre.get("fm") or {}).get("name") == "online-selftest",
+                            "ok=%s md=%s fm=%r" % (pre.get("ok"), pre.get("has_skill_md"),
+                                                   (pre.get("fm") or {}).get("name"))))
+        # open_url 白名单：白名单外域名拒绝（不会真开浏览器）
+        window.evaluate_js(
+            "window.__SK_ON2=null;window.pywebview.api.open_url('https://evil.example/x')"
+            ".then(function(r){window.__SK_ON2=r})")
+        ou = _await_js(window, "__SK_ON2") or {}
+        results.append(("open_url 白名单外拒绝",
+                        ou.get("ok") is False and "不允许" in str(ou.get("error", "")),
+                        json.dumps(ou, ensure_ascii=False)[:100]))
+
+        # UI 链路：在线 tab 检索 → 行渲染 → 获取 → 预检回填
+        window.evaluate_js(
+            "document.getElementById('btn-import-top').click();"
+            "document.querySelector('[data-act=\"imp-tab\"][data-tab=\"online\"]').click()")
+        time.sleep(0.3)
+        window.evaluate_js(
+            "var q=document.getElementById('imp-q');q.value='selftest';"
+            "q.dispatchEvent(new Event('input',{bubbles:true}));"
+            "document.querySelector('[data-act=\"imp-search\"]').click()")
+        row_hit = _poll_js(window,
+                           "!!document.querySelector('#sr-list .sr-row') "
+                           "&& document.querySelector('#sr-list .sr-row').textContent"
+                           ".indexOf('online-selftest')>-1", 8)
+        results.append(("UI 在线检索渲染假结果", bool(row_hit), "hit=%s" % row_hit))
+        window.evaluate_js(
+            "var fb=document.querySelector('#sr-list [data-act=\"imp-fetch\"]');"
+            "if(fb)fb.click()")
+        fill_ok = _poll_js(window,
+                           "!!document.querySelector('.imp-modal .rep') "
+                           "&& !!document.getElementById('imp-name') "
+                           "&& document.getElementById('imp-name').value"
+                           ".indexOf('online-selftest')>-1", 15)
+        results.append(("UI 获取→预检回填", bool(fill_ok), "fill=%s" % fill_ok))
+        window.evaluate_js(
+            "document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))")
+        time.sleep(0.2)
+    finally:
+        skilllocker.online_search, _lk._list_repo_files, _lk._net_bytes = _saved_net
+        if _onl_dir:
+            shutil.rmtree(_onl_dir, ignore_errors=True)
+        # UI「获取」流程也会落一个临时目录（导入语义 = 复制进仓库后残留待清理），
+        # 自检收尾把本次产生的 online-selftest-* 一并清掉
+        try:
+            for _n in os.listdir(_lk._dl_root()):
+                if _n.startswith("online-selftest-"):
+                    shutil.rmtree(os.path.join(_lk._dl_root(), _n), ignore_errors=True)
+        except OSError:
+            pass
+
     # 设置弹窗 + 主题
     window.evaluate_js("document.getElementById('open-settings').click()")
     time.sleep(0.3)
@@ -618,7 +941,7 @@ def _selftest_body(window, results):
     _check(window, results, "深色主题属性生效",
            "document.documentElement.getAttribute('data-theme')", "dark")
 
-    # 智能体看板：三态来自 skillkit.list_boards，开关按真实磁盘链接计数
+    # 智能体看板：三态来自 skilllocker.list_boards，开关按真实磁盘链接计数
     ag_total = len(ag_rows)
 
     window.evaluate_js("document.getElementById('nav-agents').click()")

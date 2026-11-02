@@ -1,12 +1,12 @@
 /* ============================================================
-   skillkit · Skill Library — logic
-   桌面端：bridge.js → pywebview → skillkit.py，数据与编辑直接走 SQLite。
+   skilllocker · Skill Library — logic
+   桌面端：bridge.js → pywebview → skilllocker.py，数据与编辑直接走 SQLite。
    原型：file:// 打开时退回 data.js 快照 + localStorage。
    ============================================================ */
 (function () {
   'use strict';
 
-  var SKB = window.SKILLKIT_BRIDGE || null;
+  var SKB = window.SKILLLOCKER_BRIDGE || null;
   var D = null;
   var MODE = 'local';
   var META = {};
@@ -18,7 +18,7 @@
   var FOLDERS = [];
   var CONFLICT = null;
 
-  var STORE = 'D:\\skillkit\\store';
+  var STORE = 'D:\\skilllocker\\store';
   var SCAN = '22:16';
 
   function hydrate(data) {
@@ -45,8 +45,8 @@
   }
 
   /* ---------------------------------------------------------- storage */
-  var META_KEY = 'skillkit.library.meta.v1';
-  var PREF_KEY = 'skillkit.library.prefs.v1';
+  var META_KEY = 'skilllocker.library.meta.v1';
+  var PREF_KEY = 'skilllocker.library.prefs.v1';
 
   function lsGet(key, fallback) {
     try {
@@ -135,7 +135,7 @@
     });
   }
 
-  // 桌面端：编辑落到 skillkit.db 的 skill_meta 表；原型（file://）：写 localStorage。
+  // 桌面端：编辑落到 skilllocker.db 的 skill_meta 表；原型（file://）：写 localStorage。
   // 写库不做去抖：单机 SQLite 写入很轻，且避免隐藏窗口被节流时丢编辑。
   function scopeOf(key) { return key.indexOf('/') > -1 ? 'unique' : 'shared'; }
 
@@ -166,7 +166,8 @@
       tool: scopeOf(key) === 'unique' ? key.split('/')[0] : '',
       display: m.display || '',
       note: m.note || '',
-      folder: scopeOf(key) === 'shared' ? (m.folder || '') : ''
+      folder: scopeOf(key) === 'shared' ? (m.folder || '') : '',
+      starred: m.starred ? 1 : 0
     };
   }
 
@@ -344,6 +345,36 @@
     }).length;
   }
 
+  /* ---------------------------------------------------------- 收藏（v0.3.1） */
+  // 星标只存 meta（桌面=skill_meta.starred，原型=localStorage 同一张 map），
+  // 不碰文件、不分发；key 随 meta，改名 / 移动分类 / 重链都不丢。
+  function isStarredKey(key) { return !!(meta[key] && meta[key].starred); }
+
+  function starredAtOf(key) { return (meta[key] && meta[key].starredAt) || 0; }
+
+  function starCount() {
+    var n = 0;
+    Object.keys(meta).forEach(function (k) { if (meta[k] && meta[k].starred) n++; });
+    return n;
+  }
+
+  // 收藏视图 = 共有看板里的一个虚拟夹（folder='starred'）：看板机制、面包屑、
+  // Esc 退出全部复用，独有收藏以 agent 分组追加在共有之后。
+  function isStarredView() { return state.board === 'shared' && state.folder === 'starred'; }
+
+  function starredRows() {
+    var s = sortRows(filterRows(sharedRows().filter(function (r) { return isStarredKey(r.key); })));
+    var u = sortRows(filterRows(uniqueRows().filter(function (r) { return isStarredKey(r.key); })));
+    return s.concat(u);
+  }
+
+  function fmtStarredAt(ms) {
+    if (!ms) return '—';
+    var d = new Date(ms);
+    var p = function (n) { return (n < 10 ? '0' : '') + n; };
+    return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+
   function fmtBytes(n) {
     if (!n) return '0 B';
     if (n < 1024) return n + ' B';
@@ -400,7 +431,7 @@
   }
 
   function seedIfNeeded() {
-    if (MODE === 'db') return; // 桌面端由 skillkit.migrate_folders + seed_meta 在首启迁移/播种
+    if (MODE === 'db') return; // 桌面端由 skilllocker.migrate_folders + seed_meta 在首启迁移/播种
     migrateLocalFolders();
     SKILLS.forEach(function (s) {
       var m = meta[s.name];
@@ -427,6 +458,8 @@
         folder: m.folder || '',
         note: m.note || '',
         updated: m.updated || 0,
+        starred: m.starred || 0,
+        starredAt: m.starredAt || 0,
         skill: s,
         conflict: (s.realIn || []).length > 0
       };
@@ -445,6 +478,8 @@
         display: m.display || u.name,
         note: m.note || '',
         updated: m.updated || 0,
+        starred: m.starred || 0,
+        starredAt: m.starredAt || 0,
         entry: u,
         conflict: u.sameName
       };
@@ -452,6 +487,7 @@
   }
 
   function currentRows() {
+    if (isStarredView()) return starredRows();
     if (state.board === 'agents') return agentRows();
     return state.board === 'unique' ? uniqueRows() : sharedRows();
   }
@@ -617,6 +653,15 @@
         if (b.updated !== a.updated) return b.updated - a.updated;
         return a.display.localeCompare(b.display, 'zh-Hans-CN');
       });
+    } else if (prefs.sort === 'starred') {
+      // 收藏优先：星标置顶（收藏时间倒序），其余按名称
+      out.sort(function (a, b) {
+        var sa = a.starred ? 1 : 0;
+        var sb = b.starred ? 1 : 0;
+        if (sa !== sb) return sb - sa;
+        if (sa) return (b.starredAt || 0) - (a.starredAt || 0);
+        return String(a.display).localeCompare(String(b.display), 'zh-Hans-CN');
+      });
     } else {
       out.sort(function (a, b) {
         return String(a.display).localeCompare(String(b.display), 'zh-Hans-CN');
@@ -649,6 +694,8 @@
     document.getElementById('nav-shared').textContent = sharedCount;
     document.getElementById('nav-unique').textContent = uniqueCount;
     document.getElementById('nav-agents').textContent = agentStats.all;
+    document.getElementById('nav-starred-badge').textContent = starCount();
+    document.getElementById('sb-starred').textContent = starCount();
     document.getElementById('stat-agents').textContent = agentStats.connected;
     document.getElementById('stat-edited').textContent = editedCount();
     document.getElementById('stat-folders').textContent = FOLDERS.length;
@@ -683,10 +730,24 @@
     if (state.board === 'shared') {
       colName.textContent = 'SKILL';
       colRight.textContent = '备注';
-      colCover.textContent = '分发覆盖';
       colMid.textContent = '分类';
-      colMid.hidden = inFolder;
-      if (state.folder === 'none') {
+      if (state.folder === 'starred') {
+        // 收藏视图：第 5 列换义为「收藏于」，列头隐藏分类（5 列窄行）
+        colCover.textContent = '收藏于';
+        colMid.hidden = true;
+        var sN = sharedRows().filter(function (r) { return isStarredKey(r.key); }).length;
+        var uN = starCount() - sN;
+        document.getElementById('page-title').textContent = '收藏';
+        document.getElementById('page-sub').textContent =
+          starCount() + ' 个常用 skill（' + sN + ' 共有 + ' + uN + ' 独有）· 星标存在元数据里，改名 / 移动分类都不会丢';
+        emptyTitle.textContent = state.q ? '没有匹配的收藏' : '还没有收藏的 skill';
+        emptySub.textContent = state.q
+          ? '换个关键词，或清除搜索'
+          : '在行尾、卡片角或详情栏点 ☆ 收藏常用技能；共有与独有都汇集在这里直达';
+        footHint.textContent = '点 ☆ 取消收藏即从列表移除 · 排序切「收藏优先」按收藏时间倒序';
+      } else if (state.folder === 'none') {
+        colCover.textContent = '分发覆盖';
+        colMid.hidden = inFolder;
         document.getElementById('page-title').textContent = '未归档';
         document.getElementById('page-sub').textContent =
           unfiled + ' 个 skill 还没放入任何分类 · 拖到侧栏文件夹即可归档';
@@ -694,6 +755,8 @@
         emptySub.textContent = '所有 skill 都已放入分类文件夹';
         footHint.textContent = '点 ⋯ 菜单或直接拖拽侧栏文件夹，把 skill 归档进分类';
       } else if (inFolder) {
+        colCover.textContent = '分发覆盖';
+        colMid.hidden = true;
         var f = folderById(state.folder);
         document.getElementById('page-title').textContent = f ? f.name : '分类文件夹';
         document.getElementById('page-sub').textContent =
@@ -703,10 +766,14 @@
         emptySub.textContent = '回到「全部技能」把 skill 拖进来，或用行菜单移动';
         footHint.textContent = '行菜单 ⋯ 可移动到其他分类；拖到面包屑「全部技能」移出分类';
       } else if (viewOf('shared') === 'grid') {
+        colCover.textContent = '分发覆盖';
+        colMid.hidden = false;
         document.getElementById('page-title').textContent = '共有技能';
         document.getElementById('page-sub').textContent =
           FOLDERS.length + ' 个分类文件夹 · ' + sharedCount + ' 个 skill · 拖拽归档，像资源管理器一样管理';
       } else {
+        colCover.textContent = '分发覆盖';
+        colMid.hidden = false;
         document.getElementById('page-title').textContent = '共有技能';
         document.getElementById('page-sub').textContent =
           sharedCount + ' 个 skill · ' + FOLDERS.length + ' 个分类文件夹 · 点行选中，⋯ 菜单移动分类';
@@ -795,8 +862,16 @@
         else el.removeAttribute('aria-current');
       }
     });
+    // 收藏导航不在 data-board 体系里：金色激活态单独同步
+    var navStarred = document.getElementById('nav-starred');
+    if (navStarred) {
+      navStarred.classList.toggle('active', isStarredView());
+      if (isStarredView()) navStarred.setAttribute('aria-current', 'page');
+      else navStarred.removeAttribute('aria-current');
+    }
 
-    document.getElementById('sort-label').textContent = prefs.sort === 'edited' ? '最近编辑' : '名称 A→Z';
+    document.getElementById('sort-label').textContent =
+      prefs.sort === 'edited' ? '最近编辑' : prefs.sort === 'starred' ? '收藏优先' : '名称 A→Z';
     document.body.classList.toggle('compact', prefs.density === 'compact');
     document.body.classList.toggle('dark', prefs.theme === 'dark');
     document.body.classList.toggle('reduce-motion', !prefs.motion);
@@ -936,10 +1011,15 @@
   function renderList(animate) {
     var all = currentRows();
     var isUnique = state.board === 'unique';
+    var starredView = isStarredView();
     var inFolder = (state.board === 'shared' || isUnique) && !!state.folder;
     var rows;
-    var narrow = false; // 5 列行（进入文件夹的共有行 / 独有看板所有行）
-    if (inFolder) {
+    var narrow = false; // 5 列行（进入文件夹的共有行 / 独有看板所有行 / 收藏视图）
+    if (starredView) {
+      // currentRows 已按收藏过滤 + 当前排序（共有在前、独有按 agent 在后）
+      rows = all;
+      narrow = true;
+    } else if (inFolder) {
       rows = isUnique ? skillsInAgentFolder(state.folder) : skillsInFolder(state.folder);
       narrow = true;
     } else {
@@ -971,6 +1051,9 @@
       body.innerHTML = '';
       body.style.display = 'none';
       empty.hidden = false;
+      // 「清除筛选」只对搜索空态有意义；收藏空 / 文件夹空这类引导空态藏起来
+      var resetBtn = document.getElementById('reset-filter-btn');
+      if (resetBtn) resetBtn.hidden = !state.q;
       updateFoot(0, all.length); // 空态也要刷新脚部计数，别留下「51 条」的旧文案
       return;
     }
@@ -980,6 +1063,8 @@
 
     if (state.board === 'agents') {
       body.innerHTML = renderAgentRows(rows, animate);
+    } else if (starredView) {
+      body.innerHTML = starredGroupedHtml(rows, animate);
     } else if (isUnique && !inFolder) {
       // 独有根列表：按 agent 分组 + 分割线；agent 夹内全是同一 agent，平铺即可
       body.innerHTML = uniqueGroupedHtml(rows, animate);
@@ -990,6 +1075,29 @@
     }
     // 脚部计数：文件夹内没有筛选概念，直接显示条数；其余显示「筛出 x / y」
     updateFoot(rows.length, inFolder ? rows.length : all.length);
+  }
+
+  // 星标按钮：未收藏 hover 显现（行 / 卡父级 hover），已收藏常显金星。
+  // 点击走文档级 [data-star] 委托（先于行选中 return），不会误触发行选中。
+  function starBtnHtml(key) {
+    var on = isStarredKey(key);
+    var tip = on ? '取消收藏' : '收藏';
+    return '<button class="row-star' + (on ? ' on' : '') + '" data-star="' + esc(key) +
+      '" title="' + tip + '" aria-label="' + tip + '">' + icon('star') + '</button>';
+  }
+
+  // 收藏视图列表：共有收藏平铺在前，独有收藏按 agent 分组在后（复用独有
+  // 看板的分割线）；序号跨组连续。rows 已由 starredRows 排好。
+  function starredGroupedHtml(rows, animate) {
+    var html = '';
+    var num = 0;
+    var uRows = [];
+    rows.forEach(function (r) {
+      if (r.board === 'unique') { uRows.push(r); return; }
+      html += skillRowHtml(r, num++, animate, true);
+    });
+    if (uRows.length) html += uniqueGroupedHtml(uRows, animate, num);
+    return html;
   }
 
   // 单条 skill 行（共有 / 独有看板共用）；inFolder = 5 列窄行
@@ -1016,7 +1124,11 @@
       : '<span class="row-note is-empty">添加备注…</span>';
 
     var cover;
-    if (r.board === 'shared') {
+    if (isStarredView()) {
+      // 收藏视图：第 5 列显示收藏时间（取代分发覆盖 / 来源）
+      cover = '<div class="row-cover"><span class="row-starred-at">' +
+        fmtStarredAt(r.starredAt) + '</span></div>';
+    } else if (r.board === 'shared') {
       var segs = ENABLED.map(function (t) {
         var bad = (r.skill.realIn || []).indexOf(t.key) > -1;
         return '<span class="cover-seg ' + (bad ? 'bad' : '') + '" title="' + esc(t.label) + ' · ' + (bad ? '同名冲突' : 'junction') + '"></span>';
@@ -1051,6 +1163,7 @@
       note +
       cover +
       '<span class="row-go">' +
+      starBtnHtml(r.key) +
       (r.board === 'shared'
         ? '<button class="row-more" data-more-skill="' + esc(r.key) + '" title="移动 / 更多操作">' + icon('ellipsis') + '</button>'
         : '') +
@@ -1086,14 +1199,18 @@
       mk = r.entry.mark || mark(r.name);
     } else {
       var f = folderById(r.folder);
-      sub = f ? '已归档 · ' + f.name : '未归档';
+      sub = f ? '已归档 · ' + f.name : (r.skill && r.skill.isNew ? '刚导入' : '未归档');
       mk = mark(r.key);
     }
-    // 独有 skill 不能跨 agent 移动：不设 draggable，也不出 ⋯ 菜单
-    return '<div class="file-card' + (isSel ? ' is-selected' : '') + '" role="button" tabindex="0" data-key="' +
+    // 独有 skill 不能跨 agent 移动：不设 draggable，也不出 ⋯ 菜单；星标两板都给
+    return '<div class="file-card' + (isSel ? ' is-selected' : '') +
+      (isStarredKey(r.key) ? ' is-starred' : '') +
+      (r.board === 'shared' && r.skill && r.skill.isNew ? ' is-new' : '') +
+      '" role="button" tabindex="0" data-key="' +
       esc(r.key) + '"' + (r.board === 'shared' ? ' draggable="true"' : '') + '>' +
       '<span class="fc-mark">' + esc(mk) + '</span>' +
       '<div class="fc-main"><b>' + esc(r.display) + '</b><span>' + esc(sub) + '</span></div>' +
+      starBtnHtml(r.key) +
       (r.board === 'shared'
         ? '<button class="row-more" data-more-skill="' + esc(r.key) + '" title="移动 / 更多操作">' + icon('ellipsis') + '</button>'
         : '') +
@@ -1184,6 +1301,17 @@
         ' 个 skill · 只存在于该 agent 的目录里</span>';
       return parts;
     }
+    if (state.folder === 'starred') {
+      // 收藏视图面包屑：金星胶囊 + 计数 + 清空收藏（两段确认）
+      var sN = sharedRows().filter(function (r) { return isStarredKey(r.key); }).length;
+      parts += '<span class="crumb-here star">' + icon('star') + '收藏</span>';
+      parts += '<span class="crumb-meta">' + sN + ' 共有 + ' + (starCount() - sN) +
+        ' 独有 · ' + (prefs.sort === 'starred' ? '按收藏时间倒序' : '跟随当前排序') + '</span>';
+      parts += '<div class="crumb-actions">' +
+        '<button class="btn btn-sm clear-star" data-clear-starred="1" title="取消全部收藏">' +
+        icon('trash') + '清空收藏</button></div>';
+      return parts;
+    }
     if (state.folder === 'none') {
       parts += '<span class="crumb-here" style="--c:var(--ink-2);--cs:var(--surface-2)">' + icon('inbox') + '未归档</span>';
       parts += '<span class="crumb-meta">' + skillsInFolder('none').length + ' 个 skill 待归档</span>';
@@ -1204,7 +1332,8 @@
   // 插一条 agent 分割线；网格视图与 agent 夹内不走这里（卡片流 / 平铺行）。
   // 组顺序按 UNIQUE 里 agent 的出现顺序（后端扫描顺序）；rows 已按当前排序稳定排好，
   // 分组是稳定划分，不打乱组内次序。分割线不是 .row，行选中与键盘导航不会命中它。
-  function uniqueGroupedHtml(rows, animate) {
+  // startNum：收藏视图里独有组接在共有之后，序号跨组连续（与独有看板同口径）
+  function uniqueGroupedHtml(rows, animate, startNum) {
     var order = [];
     var groups = {};
     UNIQUE.forEach(function (u) {
@@ -1219,7 +1348,7 @@
     });
 
     var html = '';
-    var num = 0;
+    var num = startNum || 0;
     order.forEach(function (tool) {
       var g = groups[tool];
       if (!g.length) return;
@@ -1294,10 +1423,12 @@
     var body = document.getElementById('ins-body');
     var head = document.getElementById('ins-raw-name');
     var saveState = document.getElementById('save-state');
+    var insStar = document.getElementById('ins-star');
 
     if (!r) {
       head.textContent = '—';
       saveState.hidden = true;
+      if (insStar) insStar.hidden = true;
       body.innerHTML = '<div class="ins-empty">' +
         '<div class="empty-icon">' + icon(state.board === 'agents' ? 'bot' : 'pencil') + '</div>' +
         '<b style="font-size:12.5px;color:var(--ink)">' +
@@ -1312,8 +1443,15 @@
 
     saveState.hidden = true;
     if (r.board === 'agents') {
+      if (insStar) insStar.hidden = true; // agent 不是 skill，不参与收藏
       renderAgentInspector(r);
       return;
+    }
+    if (insStar) {
+      insStar.hidden = false;
+      insStar.classList.toggle('on', isStarredKey(r.key));
+      insStar.title = isStarredKey(r.key) ? '取消收藏' : '收藏';
+      insStar.setAttribute('aria-label', insStar.title);
     }
     head.textContent = r.name;
 
@@ -1416,6 +1554,31 @@
       ? '<div class="field-block"><div class="field-label">描述</div><div class="desc-text">' + esc(r.skill.description) + '</div></div>'
       : '';
 
+    // 收藏信息：已收藏给「收藏于」行；未收藏不占版面（头部星标已是入口）
+    var starMetaHtml = isStarredKey(r.key)
+      ? '<div class="field-block"><div class="meta-list">' +
+        '<div class="meta-row star-row"><span>收藏于</span><b>' + fmtStarredAt(starredAtOf(r.key)) + '</b>' +
+        icon('star') + '</div></div></div>'
+      : '';
+
+    // 一键转共有：只给实体独有行（kind=unique）。同名覆盖（中央已有副本，
+    // 该走差异处置）与 foreign-link（真身不归本工具管）不出现入口；
+    // 真正能收哪些由后端 promote_unique 把关，这里只做展示与确认。
+    var promoteHtml = '';
+    if (r.board === 'unique' && r.entry.kind === 'unique' && !r.entry.sameName) {
+      var align = r.entry.src === 'main' && r.entry.agentEnabled !== false;
+      promoteHtml = '<div class="promote-box">' +
+        '<div class="promote-title">' + icon('upload') + '收进中央仓库</div>' +
+        '<p>把整个目录拷贝进中央仓库成为共有技能（' + r.entry.files + ' 个文件 / ' +
+        fmtBytes(r.entry.bytes) + '），之后可统一分发给所有 agent。' +
+        (align
+          ? '「' + esc(r.entry.toolLabel) + '」的分发开关开着，收编后源副本会按分发方式对齐。'
+          : '源目录保留不动，' + esc(r.entry.toolLabel) + ' 不受影响。') +
+        '已写过的显示名与备注会一并带过去。</p>' +
+        '<button class="btn btn-primary" data-promote="1">' + icon('upload') + '转为共有技能</button>' +
+        '</div>';
+    }
+
     body.innerHTML =
       '<div class="field-block">' +
         '<div class="field-label"><span>显示名称</span>' +
@@ -1427,8 +1590,9 @@
       '<div class="field-block">' +
         '<div class="field-label"><span>备注</span></div>' +
         '<textarea class="note-area" id="ins-note" maxlength="400" placeholder="记下这个 skill 的用途、坑、来源…">' + esc(r.note) + '</textarea>' +
-        '<div class="note-meta"><span>自动保存到' + (MODE === 'db' ? ' skillkit.db' : '本机') + '</span><span id="note-count">' + r.note.length + ' / 400</span></div>' +
+        '<div class="note-meta"><span>自动保存到' + (MODE === 'db' ? ' skilllocker.db' : '本机') + '</span><span id="note-count">' + r.note.length + ' / 400</span></div>' +
       '</div>' +
+      starMetaHtml +
       diffHtml +
       '<div class="divider"></div>' +
       '<div class="field-block">' +
@@ -1448,6 +1612,10 @@
         '" data-open-key="' + esc(r.key) + '">' + icon('folder') + '打开目录</button>' +
         '<button class="btn" data-copy="' + esc(path) + '">' + icon('copy') + '复制路径</button>' +
       '</div>' +
+      promoteHtml +
+      (r.board === 'shared' && r.skill && r.skill.isNew
+        ? '<div class="ins-import-hint"><b>刚导入</b> — 还没有分发给任何 agent。到「智能体」看板打开开关，或点顶栏刷新后同步。</div>'
+        : '') +
       (r.board === 'unique' && r.entry.deletable === false
         ? '<div class="agent-hint ext">' + esc(
             r.entry.kind === 'foreign-link'
@@ -1612,6 +1780,92 @@
       });
   }
 
+  /* ---------------------------------------------------------- 收藏动作 */
+  // 收藏 / 取消收藏唯一入口：行尾星、卡片角星、检查器星标、⋯ 菜单、F 键都走这里。
+  // 桌面端随 metaPayload 进 saveMeta 落库（starred_at 由后端只在变星时刻产生）；
+  // 原型端整张 meta map 写 localStorage。
+  function toggleStar(key) {
+    var m = metaOf(key);
+    var on = !m.starred;
+    m.starred = on ? 1 : 0;
+    m.starredAt = on ? Date.now() : 0;
+    saveMeta(key);
+    if (isStarredView() && !on) {
+      // 收藏视图内取消：整行右滑淡出后重渲染（计数 / 空态同步）
+      var el = document.querySelector('.row[data-key="' + cssEscape(key) + '"], .file-card[data-key="' + cssEscape(key) + '"]');
+      if (el) {
+        el.classList.add('row-out');
+        setTimeout(function () { renderChrome(); renderContent(false); renderInspector(); }, 190);
+      } else {
+        renderChrome(); renderContent(false); renderInspector();
+      }
+    } else if (prefs.sort === 'starred') {
+      // 收藏优先排序下行的位置会变：整表重渲染
+      renderChrome(); renderContent(false); renderInspector();
+    } else {
+      patchStar(key);
+      renderChrome();
+      renderInspector(); // 检查器星标态 + 收藏于行
+    }
+    if (on) starFreshPop(key);
+    var label = displayOf(key, key);
+    toast(on ? 'star' : 'info',
+      on ? '已收藏 ' + label : '已取消收藏 ' + label,
+      on ? '收藏夹现有 ' + starCount() + ' 个 · 侧栏 ★ 直达' : '剩余 ' + starCount() + ' 个');
+  }
+
+  // 原位更新某个 key 的星标控件（不整表重渲染，保住输入焦点场景）
+  function patchStar(key) {
+    var on = isStarredKey(key);
+    var sel = '[data-star="' + cssEscape(key) + '"]';
+    Array.prototype.forEach.call(document.querySelectorAll(sel), function (b) {
+      b.classList.toggle('on', on);
+      b.title = on ? '取消收藏' : '收藏';
+      b.setAttribute('aria-label', b.title);
+    });
+    var card = document.querySelector('.file-card[data-key="' + cssEscape(key) + '"]');
+    if (card) card.classList.toggle('is-starred', on);
+  }
+
+  // 重渲染后给「刚点的那颗星」补弹跳 + 光环（旧元素已被重建，动画类要重新挂）
+  function starFreshPop(key) {
+    var el = document.querySelector('.row-star[data-star="' + cssEscape(key) + '"], .fc-star[data-star="' + cssEscape(key) + '"]');
+    if (!el) return;
+    el.classList.add('pop', 'burst');
+    setTimeout(function () { el.classList.remove('pop', 'burst'); }, 520);
+  }
+
+  var clearArmTimer = null;
+  function clearStarredArm(btn) {
+    if (!btn.classList.contains('arm')) {
+      if (!starCount()) { toast('info', '收藏夹本来就是空的', '在行尾点 ☆ 即可收藏'); return; }
+      // 两段确认：2.6s 不点第二下自动回弹，防误触
+      btn.classList.add('arm');
+      btn.innerHTML = icon('alert') + '确认清空？';
+      clearArmTimer = setTimeout(function () { disarmClearStar(btn); }, 2600);
+      return;
+    }
+    clearTimeout(clearArmTimer);
+    var keys = Object.keys(meta).filter(function (k) { return meta[k] && meta[k].starred; });
+    keys.forEach(function (k) {
+      meta[k].starred = 0;
+      meta[k].starredAt = 0;
+      saveMeta(k);
+    });
+    disarmClearStar(btn);
+    renderChrome(); renderContent(false); renderInspector();
+    toast('warn', '已清空 ' + keys.length + ' 个收藏', 'skill 本体不受影响，重新点 ☆ 可再收藏');
+  }
+
+  function disarmClearStar(btn) {
+    btn.classList.remove('arm');
+    btn.innerHTML = icon('trash') + '清空收藏';
+  }
+
+  function cssEscape(s) {
+    return (window.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/"/g, '\\"');
+  }
+
   /* ---------------------------------------------------------- diff modal */
   function openDiff(scope, key) {
     if (MODE === 'db' && SKB) {
@@ -1718,12 +1972,12 @@
         '<div class="divider"></div>' +
         '<div class="setting-row">' +
           '<div class="setting-main"><b>我的编辑</b><span>' + edited + ' 条 skill 有显示名或备注改动，' +
-            (MODE === 'db' ? '存在 skillkit.db 的 skill_meta 表。' : '存在浏览器 localStorage。') + '</span></div>' +
+            (MODE === 'db' ? '存在 skilllocker.db 的 skill_meta 表。' : '存在浏览器 localStorage。') + '</span></div>' +
           '<button class="btn btn-sm" id="set-export">' + icon('download') + '导出 JSON</button>' +
         '</div>' +
         '<div class="setting-row">' +
           '<div class="setting-main"><b>清空我的编辑</b><span>' +
-            (MODE === 'db' ? '清空显示名与备注，归属回到预置分类夹；自建文件夹保留。' : '只清本机 UI 数据，不碰 skillkit.db 与磁盘上的任何 skill。') +
+            (MODE === 'db' ? '清空显示名与备注，归属回到预置分类夹；自建文件夹保留。' : '只清本机 UI 数据，不碰 skilllocker.db 与磁盘上的任何 skill。') +
             '</span></div>' +
           '<button class="btn btn-sm" id="set-clear" style="border-color:color-mix(in srgb,var(--danger) 26%,transparent);color:var(--danger)">' + icon('trash') + '清空</button>' +
         '</div>' +
@@ -1739,9 +1993,9 @@
         '<div class="divider"></div>' +
         '<p style="margin:0;font-size:11px;line-height:1.6;color:var(--ink-3)">' +
           (MODE === 'db'
-            ? '桌面端：pywebview 直接 import skillkit，不启 HTTP。显示名 / 备注 / 归属分类夹写入 skill_meta(scope, key) 表；' +
+            ? '桌面端：pywebview 直接 import skilllocker，不启 HTTP。显示名 / 备注 / 归属分类夹写入 skill_meta(scope, key) 表；' +
               '「清空我的编辑」只清显示名与备注、归属拉回预置夹，自建文件夹保留。'
-            : '原型说明：桌面端用 pywebview 直接 import skillkit，不启 HTTP。这里的改名 / 备注 / 归属只写 localStorage；' +
+            : '原型说明：桌面端用 pywebview 直接 import skilllocker，不启 HTTP。这里的改名 / 备注 / 归属只写 localStorage；' +
               '桌面端对应 skill_meta(scope, key) 表与 set_meta() 写库函数。') +
         '</p>' +
       '</div>' +
@@ -1784,7 +2038,7 @@
         folders: FOLDERS
       };
       if (MODE === 'db' && SKB) {
-        SKB.exportJson('skillkit-meta.json', payload).then(function (res) {
+        SKB.exportJson('skilllocker-meta.json', payload).then(function (res) {
           if (res && res.path) toast('ok', '已导出', res.path);
           else toast('info', '已取消', '没有选择保存位置');
         }).catch(function (err) {
@@ -1792,7 +2046,7 @@
         });
         return;
       }
-      downloadJSON('skillkit-meta.json', payload);
+      downloadJSON('skilllocker-meta.json', payload);
       toast('ok', '已导出', '共 ' + editedCount() + ' 条编辑记录');
     });
 
@@ -1800,8 +2054,8 @@
       confirmModal(
         '清空所有编辑？',
         MODE === 'db'
-          ? '显示名与备注会清空，归属回到预置分类夹；不会改动磁盘上的任何 skill，也不会删除你自建的文件夹。'
-          : '显示名与备注会清空，归属回到预置分类夹；不会改动 skillkit.db 和磁盘上的任何 skill，自建文件夹保留。',
+          ? '显示名与备注会清空，归属回到预置分类夹；收藏保留。不会改动磁盘上的任何 skill，也不会删除你自建的文件夹。'
+          : '显示名与备注会清空，归属回到预置分类夹；收藏保留。不会改动 skilllocker.db 和磁盘上的任何 skill，自建文件夹保留。',
         '清空',
         function () {
           // 先关弹窗再发请求：连点时确认框还在，一次点击会冒出两个 change
@@ -1809,18 +2063,29 @@
           if (MODE === 'db' && SKB) {
             SKB.reseedMeta().then(function (res) {
               applyBootstrap(res);
-              toast('ok', '已清空', '显示名与备注已清空，归属回到预置分类夹');
+              toast('ok', '已清空', '显示名与备注已清空，归属回到预置分类夹，收藏保留');
             }).catch(function (err) {
               toast('bad', '清空失败', String(err && err.message || err));
             });
             return;
           }
+          // 与桌面端 reseed_meta 同口径：只清显示名 / 备注 / 归属，收藏保留
+          var stars = {};
+          Object.keys(meta).forEach(function (k) {
+            if (meta[k] && meta[k].starred) stars[k] = meta[k].starredAt || 0;
+          });
           meta = {};
           lsDel(META_KEY);
           savePrefs();
           seedIfNeeded(); // prefs.folders 保留（自建夹不清），归属按规则重新播种
+          Object.keys(stars).forEach(function (k) {
+            if (!meta[k]) meta[k] = { display: '', note: '', folder: '', updated: 0 };
+            meta[k].starred = 1;
+            meta[k].starredAt = stars[k];
+          });
+          saveMeta();
           renderAll(true);
-          toast('ok', '已清空', '显示名与备注已清空，归属回到预置分类夹');
+          toast('ok', '已清空', '显示名与备注已清空，归属回到预置分类夹，收藏保留');
         }
       );
     });
@@ -1855,13 +2120,16 @@
   // 否则「关闭分发」这类确认框按 Esc 后复选框停在翻转态，界面撒谎
   var modalOnCancel = null;
 
-  function openModal(html) {
+  function openModal(html, opts) {
     var root = document.getElementById('modal-root');
     root.innerHTML = '<div class="overlay" data-overlay="1">' + html + '</div>';
     var overlay = root.firstElementChild;
-    overlay.addEventListener('mousedown', function (e) {
-      if (e.target === overlay) closeModal();
-    });
+    // locked（导入执行中）：遮罩点击不关闭——后端同步执行不可中断，UI 不许撒谎
+    if (!(opts && opts.locked)) {
+      overlay.addEventListener('mousedown', function (e) {
+        if (e.target === overlay) closeModal();
+      });
+    }
     modalOnCancel = null;
     document.body.style.overflow = 'hidden';
   }
@@ -1870,6 +2138,7 @@
     document.getElementById('modal-root').innerHTML = '';
     document.body.style.overflow = '';
     modalOnCancel = null;
+    impClosed(); // 导入弹窗若开着，同步清它的状态与定时器（所有关闭路径都经过这里）
   }
 
   function confirmModal(title, text, okLabel, onOk, opts) {
@@ -1906,8 +2175,8 @@
     var wrap = document.getElementById('toasts');
     var el = document.createElement('div');
     el.className = 'toast';
-    var icons = { ok: 'check', info: 'info', warn: 'alert', bad: 'alert' };
-    var cls = kind === 'ok' ? '' : ' ' + kind;
+    var icons = { ok: 'check', info: 'info', warn: 'alert', bad: 'alert', star: 'star' };
+    var cls = kind === 'ok' ? '' : kind === 'star' ? ' gold' : ' ' + kind;
     el.innerHTML = '<span class="toast-icon' + cls + '">' + icon(icons[kind] || 'info') + '</span>' +
       '<div class="toast-main"><b>' + esc(title) + '</b>' + (text ? '<span>' + esc(text) + '</span>' : '') + '</div>' +
       '<button class="toast-close" aria-label="关闭">' + icon('x') + '</button>';
@@ -2112,6 +2381,879 @@
     }, { danger: true });
   }
 
+  function requestPromote() {
+    // 独有 → 共有的一键收编（右侧栏 promote-box 入口）。前端守卫 + 确认；
+    // 收编范围与源副本处置由后端 promote_unique 决定（同名覆盖 / foreign-link
+    // 行根本不渲染按钮，后端仍会再拦一次）。
+    var r = selectedRow();
+    if (!r || r.board !== 'unique' || r.entry.kind !== 'unique') return;
+    if (MODE !== 'db' || !SKB) {
+      toast('info', '原型模式', '桌面端才会真的把技能拷进中央仓库');
+      return;
+    }
+    var toAlign = r.entry.src === 'main' && r.entry.agentEnabled !== false;
+    var title = '把“' + r.display + '”转为共有技能？';
+    var text = '将把 ' + r.entry.path + ' 拷贝到中央仓库（' + r.entry.files + ' 个文件 / ' +
+      fmtBytes(r.entry.bytes) + '），并纳入统一分发。' +
+      (toAlign
+        ? '「' + r.entry.toolLabel + '」的分发开关开着，源副本会按分发方式对齐。'
+        : '源目录保留不动，' + r.entry.toolLabel + ' 不受影响。') +
+      '显示名与备注会一并带过去。';
+    confirmModal(title, text, '转为共有', function () {
+      closeModal();
+      runProgress(700, function () {
+        SKB.promoteUnique(r.key).then(function (res) {
+          var act = res.action || {};
+          applyBootstrap(res); // 独有行已消失：数据先落，选中自愈
+          if (act.name) {
+            // 转换的终点在共有看板：跳过去选中新技能，让结果可见
+            setState({ board: 'shared', selected: act.name });
+          }
+          toast('ok', '已转为共有技能',
+            '「' + (act.name || r.name) + '」已收进中央仓库' +
+            (act.relinked ? '，' + r.entry.toolLabel + ' 的源副本已转为链接' : ''));
+        }).catch(function (err) {
+          toast('bad', '转换失败', String(err && err.message || err));
+        });
+      });
+    });
+  }
+
+  /* ---------------------------------------------------------- 导入 skill */
+  /* SPEC-skill-import.md：外部目录 → import_preflight 预检 → import_dir 落库。
+     状态机 source → review(扫描/报告) → running → done / error，单弹窗内推进；
+     running 期间一切关闭路径禁用（后端同步执行不可中断，UI 不许撒谎）。 */
+  var imp = { step: null, tab: 'local', demo: null, pre: null, preError: null,
+              name: '', folder: '', q: '', pathText: '', timers: [],
+              runState: {}, runPct: 0, lastAction: null, lastError: '', browsing: false,
+              online: null, onlineBusy: false, fetchName: null,
+              fetchDone: 0, fetchTotal: 0 };
+
+  function impClearTimers() {
+    imp.timers.forEach(function (t) { clearTimeout(t); });
+    imp.timers = [];
+  }
+  function impLater(fn, ms) { imp.timers.push(setTimeout(fn, ms)); }
+
+  // 所有关闭路径（Esc / 遮罩 / X / cancel）经 closeModal → 这里统一收尸，
+  // 防止 imp.step 残留把 Esc 链或拖拽遮罩卡死
+  function impClosed() {
+    if (!imp.step) return;
+    impClearTimers();
+    imp.step = null;
+    imp.pre = null;
+    imp.preError = null;
+    imp.demo = null;
+    imp.runState = {};
+    imp.runPct = 0;
+    imp.lastAction = null;
+    imp.lastError = '';
+    imp.onlineBusy = false;
+    if (imp.fetchName && impIsDb()) {
+      try { SKB.onlineFetchCancel().catch(function () {}); } catch (e) {}
+    }
+    imp.fetchName = null;
+    imp.fetchDone = 0;
+    imp.fetchTotal = 0;
+    window.__SK_FETCH_PROGRESS = null;
+    hideDropOv();
+  }
+
+  function impClose() {
+    if (imp.step === 'running') return; // 执行中不可关：Esc/遮罩/X 全部无效
+    closeModal();
+  }
+
+  function baseNameOf(p) {
+    var s = String(p || '').replace(/[\\/]+$/, '');
+    var i = Math.max(s.lastIndexOf('\\'), s.lastIndexOf('/'));
+    return i > -1 ? s.slice(i + 1) : s;
+  }
+
+  // 前端与后端 check_skill_name 同一口径：单层目录名 + Windows 保留名 +
+  // 尾点尾空格 + 冒号（name_error 只在键入名 == 预检名时用后端原句）
+  function validName(n) {
+    if (!n || n === '.' || n === '..') return false;
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(n)) return false;
+    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(n)) return false;
+    if (n !== n.replace(/[. ]+$/, '') || n.indexOf(':') > -1) return false;
+    return true;
+  }
+  var IMP_NAME_ERR = '只能用字母、数字、点、连字符，不能以点/空格结尾，且不能含路径分隔符或冒号';
+
+  function storeHas(n) {
+    var t = String(n || '').toLowerCase();
+    return SKILLS.some(function (s) { return String(s.name).toLowerCase() === t; });
+  }
+
+  function suggestNames(base) {
+    var b = String(base || 'skill').replace(/[\\/:*?"<>|. ]+$/g, '').replace(/[\\/:*?"<>|]/g, '').slice(0, 40) || 'skill';
+    var d = new Date();
+    var stamp = d.getFullYear() + ('0' + (d.getMonth() + 1)).slice(-2) + ('0' + d.getDate()).slice(-2);
+    return [b + '-2', b + '-' + stamp, b + '-import'].filter(function (n) { return !storeHas(n); });
+  }
+
+  function impHash8(s) {
+    var h = 5381, i;
+    s = String(s || '');
+    for (i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+    return ('00000000' + h.toString(16)).slice(-8);
+  }
+
+  // ---- 原型模式（file://）的内置演示数据：形状与后端 import_preflight 一致 ----
+  var IMP_DEMOS = {
+    ok: { ok: true, src: 'D:\\downloads\\video-shotcraft-pro', resolved: null,
+      name: 'video-shotcraft-pro', name_error: '', has_skill_md: true,
+      fm: { name: 'video-shotcraft-pro', description: '按分镜卡创建电影感产品视频：分镜 → 运镜 → 台词 → 渲染（社区增强版）。' },
+      files: 12, bytes: 88473, tree: ['SKILL.md', 'references/ ×4', 'scripts/ ×2', 'assets/ ×3'], conflict: 'none' },
+    warn: { ok: true, src: 'C:\\Users\\LENOVO\\Desktop\\my-prompt-pack', resolved: null,
+      name: 'my-prompt-pack', name_error: '', has_skill_md: false, fm: null,
+      files: 3, bytes: 9318, tree: ['prompt.md', 'README.md', 'examples/'], conflict: 'none' },
+    dup: { ok: true, src: 'C:\\Users\\LENOVO\\.claude\\skills\\pdf', resolved: 'D:\\ClaudeCode\\.claude\\skills\\pdf',
+      name: 'pdf', name_error: '', has_skill_md: true,
+      fm: { name: 'pdf', description: 'PDF 读取 / 拆分 / 合并 / 表单全流程。' },
+      files: 9, bytes: 131072, tree: ['SKILL.md', 'scripts/ ×5', 'references/ ×2'], conflict: 'same-name' },
+    same: { ok: true, src: 'D:\\backup\\store-mirror\\remotion-render', resolved: null,
+      name: 'remotion-render', name_error: '', has_skill_md: true,
+      fm: { name: 'remotion-render', description: '导出 Remotion 视频。' },
+      files: 4, bytes: 12083, tree: ['SKILL.md', 'scripts/render.mjs'], conflict: 'same-content', hash8: '1a2b3c4d' },
+    fail: { ok: true, src: 'E:\\usb-backup\\agent-browser', resolved: null,
+      name: 'agent-browser', name_error: '', has_skill_md: true,
+      fm: { name: 'agent-browser', description: '让 agent 操控真实浏览器：导航、点击、截屏与表单。' },
+      files: 15, bytes: 215552, tree: ['SKILL.md', 'scripts/ ×6', 'references/ ×3'], conflict: 'none', failRun: true }
+  };
+  var IMP_ONLINE = [
+    { name: 'skill-creator', source: 'anthropics/skills', installs: '48.2k' },
+    { name: 'agent-browser', source: 'vercel-labs/agent-browser', installs: '21.3k' },
+    { name: 'slidev-export', source: 'anteri/slidev-tools', installs: '6.8k' },
+    { name: 'pdf-toolkit', source: 'moejoy/pdf-toolkit', installs: '3.1k' }
+  ];
+  function impDemoFromName(name, base) {
+    return { ok: true, src: (base || 'C:\\Users\\LENOVO\\Downloads') + '\\' + name, resolved: null,
+      name: name, name_error: '', has_skill_md: true,
+      fm: { name: name, description: '（演示）解析自 SKILL.md frontmatter 的描述文本。' },
+      files: 8, bytes: 43008, tree: ['SKILL.md', 'references/ ×2', 'scripts/'],
+      conflict: storeHas(name) ? 'same-name' : 'none' };
+  }
+
+  function impIsDb() { return MODE === 'db' && SKB; }
+
+  // skills.sh 的 installs 是原始数字（220593）；原型示例数据是 '48.2k' 字符串
+  function fmtInstalls(n) {
+    if (n == null || n === '') return '—';
+    var v = Number(n);
+    if (!isFinite(v)) return String(n);
+    if (v >= 1000) return (Math.round(v / 100) / 10).toString().replace(/\.0$/, '') + 'k';
+    return String(v);
+  }
+
+  function impOnlineSearch() {
+    if (!impIsDb() || imp.onlineBusy) return;
+    var q = String(imp.q || '').trim();
+    if (!q) { toast('warn', '先输入关键词', '如 remotion、pdf、browser'); return; }
+    imp.onlineBusy = true;
+    impRender();
+    SKB.onlineSearch(q).then(function (res) {
+      imp.onlineBusy = false;
+      if (!imp.step) return; // 弹窗已关：结果留到下次打开再用
+      imp.online = (res && res.data) || [];
+      impRender();
+      var el = document.getElementById('imp-q');
+      if (el) { el.focus(); }
+      if (!imp.online.length) toast('info', '没有命中', 'skills.sh 上没有找到「' + q + '」，换个关键词试试');
+    }).catch(function (err) {
+      imp.onlineBusy = false;
+      if (imp.step) impRender();
+      toast('bad', '在线检索失败', String(err && err.message || err) + ' — 检查网络后可重试');
+    });
+  }
+
+  // 键入名的冲突判定：== 预检名 → 信预检（含 same-content / hash8 与 name_error）；
+  // 改了名 → 前端用 SKILLS 现值判同名（同内容只有后端能证，改了名视为不同源）
+  function impValidate() {
+    var n = imp.name;
+    var out = { ok: false, nameErr: '', conflict: false, same: false };
+    if (!imp.pre) return out;
+    if (!n) { out.nameErr = '名称不能为空'; return out; }
+    if (!validName(n)) { out.nameErr = IMP_NAME_ERR; return out; }
+    var preNameEq = imp.pre.name && n.toLowerCase() === String(imp.pre.name).toLowerCase();
+    if (preNameEq && imp.pre.name_error) { out.nameErr = imp.pre.name_error; return out; }
+    var cf = preNameEq ? (imp.pre.conflict || 'none') : (storeHas(n) ? 'same-name' : 'none');
+    if (cf === 'same-content') out.same = true;
+    else if (cf === 'same-name') out.conflict = true;
+    else out.ok = true;
+    return out;
+  }
+
+  /* ---------- 渲染 ---------- */
+  function impStepsHtml(cur) {
+    var defs = [['1', '选择来源'], ['2', '预检命名'], ['3', '导入完成']];
+    var order = ['source', 'review', 'finish'];
+    var ci = order.indexOf(cur);
+    return '<div class="imp-steps">' + defs.map(function (d, i) {
+      var st = i < ci ? ' done' : (i === ci ? ' cur' : '');
+      return '<span class="imp-stp' + st + '"><i></i>' + d[0] + ' · ' + d[1] + '</span>';
+    }).join('') + '</div>';
+  }
+  function impHead(title, stepKey, closable) {
+    return '<div class="modal-head"><span class="modal-eyebrow">IMPORT SKILL</span>' +
+      '<h2>' + esc(title) + '</h2>' + impStepsHtml(stepKey) +
+      (closable ? '<button class="modal-close" data-act="imp-close" aria-label="关闭">' + icon('x') + '</button>' : '') +
+      '</div>';
+  }
+
+  function impSourceHtml() {
+    var isDb = impIsDb();
+    var tabLocal =
+      '<div data-src-pane="local"' + (imp.tab === 'local' ? '' : ' hidden') + '>' +
+        '<div class="dz" id="imp-dz" data-act="imp-dz" role="button" tabindex="0">' +
+          '<span class="dz-ic">' + icon('upload') + '</span>' +
+          '<b>把文件夹拖到这里</b>' +
+          '<span>松手后自动预检 — 也可以直接拖进主窗口任意位置</span>' +
+        '</div>' +
+        '<div class="imp-label"><span>来源路径</span><span style="letter-spacing:0">桌面端「浏览」调原生目录选择</span></div>' +
+        '<div class="path-row">' +
+          '<input class="path-input" id="imp-path" type="text" value="' + esc(imp.pathText || '') + '" placeholder="D:\\downloads\\my-skill\\" spellcheck="false" aria-label="来源路径">' +
+          '<button class="btn" data-act="imp-browse">' + icon('folder-open') + '浏览…</button>' +
+          '<button class="btn btn-primary" data-act="imp-use-path">预检</button>' +
+        '</div>' +
+        (isDb ? '' :
+          '<div class="demo-strip"><span class="demo-cap">原型直达</span>' +
+            '<button class="demo-chip" data-act="imp-demo" data-demo="ok">' + icon('check') + '标准 skill</button>' +
+            '<button class="demo-chip" data-act="imp-demo" data-demo="warn">' + icon('alert') + '缺 SKILL.md</button>' +
+            '<button class="demo-chip" data-act="imp-demo" data-demo="dup">' + icon('bad') + '同名冲突</button>' +
+            '<button class="demo-chip" data-act="imp-demo" data-demo="same">' + icon('info') + '同名·内容一致</button>' +
+            '<button class="demo-chip" data-act="imp-demo" data-demo="fail">' + icon('spin') + '写入失败演练</button>' +
+          '</div>') +
+      '</div>';
+    var onlineRows = impIsDb() ? (imp.online || []) : IMP_ONLINE;
+    var rows = onlineRows.map(function (r, i) {
+      var busy = imp.fetchName === (r.name + '|' + (r.source || ''));
+      return '<div class="sr-row">' +
+        '<span class="fc-mark">' + esc(mark(r.name)) + '</span>' +
+        '<span class="sr-main"><b>' + esc(r.name) + '</b><span>' + esc(r.source || 'skills.sh') + ' · skills.sh</span></span>' +
+        '<span class="sr-inst">' + icon('download') + esc(fmtInstalls(r.installs)) + '</span>' +
+        '<button class="btn btn-sm btn-ghost" data-act="imp-online-page" data-i="' + i + '">' + icon('ext-link') + '页面</button>' +
+        (busy ? '<button class="btn btn-sm btn-ghost" data-act="imp-fetch-cancel">取消</button>' : '') +
+        '<button class="btn btn-sm btn-primary" data-act="imp-fetch" data-i="' + i + '"' +
+          (imp.fetchName ? ' disabled' : '') + '>' +
+          (busy
+            ? '<span class="icon" style="display:inline-flex;animation:sk-spin 0.9s linear infinite">' + icon('spin') + '</span>'
+              + '<span class="sk-fetch-label">'
+              + (imp.fetchTotal ? '下载 ' + imp.fetchDone + '/' + imp.fetchTotal : '解析中')
+              + '</span>'
+            : '获取') +
+        '</button>' +
+        '</div>';
+    }).join('');
+    var onlineEmpty = (impIsDb() && !onlineRows.length)
+      ? '<div class="sr-row" style="justify-content:center;min-height:44px"><span style="color:var(--ink-3)">输入关键词搜索 skills.sh 社区索引，如 remotion、pdf、browser</span></div>'
+      : '';
+    var tabOnline =
+      '<div data-src-pane="online"' + (imp.tab === 'online' ? '' : ' hidden') + '>' +
+        '<div class="path-row">' +
+          '<input class="path-input" id="imp-q" type="text" value="' + esc(imp.q) + '" placeholder="搜索 skills.sh，如 remotion、pdf…" spellcheck="false" aria-label="搜索 skills.sh">' +
+          '<button class="btn" data-act="imp-search"' + (imp.onlineBusy ? ' disabled' : '') + '>' +
+            (imp.onlineBusy
+              ? '<span class="icon" style="display:inline-flex;animation:sk-spin 0.9s linear infinite">' + icon('spin') + '</span>搜索中'
+              : icon('search') + '搜索') +
+          '</button>' +
+        '</div>' +
+        '<div class="sr-list" id="sr-list">' + rows + onlineEmpty + '</div>' +
+        '<div class="note-bar info">' + icon('info') +
+          '<span><b>「获取」= 先下载到临时目录，再走标准预检导入。</b>下载失败可重试，不会直接写仓库。</span></div>' +
+      '</div>';
+    return impHead('把 skill 导入中央仓库', 'source', true) +
+      '<div class="modal-body">' +
+        '<div class="src-tabs">' +
+          '<button class="src-tab' + (imp.tab === 'local' ? ' on' : '') + '" data-act="imp-tab" data-tab="local">' +
+            '<span class="st-top">' + icon('hard-drive') + '本地文件夹</span>' +
+            '<span class="st-sub">磁盘 / U 盘 / 其他 agent 的 skills 目录</span></button>' +
+          '<button class="src-tab' + (imp.tab === 'online' ? ' on' : '') + '" data-act="imp-tab" data-tab="online">' +
+            '<span class="st-top">' + icon('globe') + '在线检索</span>' +
+            '<span class="st-sub">skills.sh 社区索引<span class="mini-badge">需联网</span></span></button>' +
+        '</div>' +
+        tabLocal + tabOnline +
+      '</div>' +
+      '<div class="modal-foot"><span class="foot-note">导入 = 复制进中央仓库，不改源目录</span>' +
+      '<button class="btn" data-act="imp-close">取消</button></div>';
+  }
+
+  function impConflictPanelHtml(name, show) {
+    return '<div class="panel danger" data-role="panel-conflict"' + (show ? '' : ' hidden') + '>' +
+      '<div class="panel-t">' + icon('bad') + '<span>中央仓库已有同名 skill：<span class="pv-name">' + esc(name) + '</span></span></div>' +
+      '<p>继续导入会失败（import_dir 拒绝同名）。换一个名字，或先到共有看板处理现有的同名 skill。</p>' +
+      '<div class="sug-chips">' + suggestNames(name).map(function (n) {
+        return '<button class="sug-chip" data-act="imp-sug" data-name="' + esc(n) + '">' + esc(n) + '</button>';
+      }).join('') + '</div></div>';
+  }
+  function impSamePanelHtml(name, show) {
+    return '<div class="panel same" data-role="panel-same"' + (show ? '' : ' hidden') + '>' +
+      '<div class="panel-t">' + icon('ok') + '<span>仓库已有同名且内容完全一致</span></div>' +
+      '<p>全部文件哈希一致（<span class="r-mono">' + impHash8(name) + '</span>…），无需重复导入。若想覆盖，请先删除仓库中的同名 skill。</p>' +
+      '<button class="btn btn-sm" data-act="imp-skip">知道了，跳过</button></div>';
+  }
+  function impNameErrHtml(txt) {
+    return '<div class="field-err" data-role="name-err"' + (txt ? '' : ' hidden') + '>' + icon('alert') + '<span>' + esc(txt || '') + '</span></div>';
+  }
+  function impNameHelpHtml(show) {
+    return '<div class="field-help" data-role="name-help"' + (show ? '' : ' hidden') + '>仅限单层目录名：字母 / 数字 / 点 / 连字符，不能含路径分隔符（与 import_dir 同一规则）。</div>';
+  }
+
+  function impReviewHtml() {
+    var srcPath = (imp.demo && imp.demo.path) || '';
+    var srcLine = '<div class="src-row-line">' + icon('folder') + '<code title="' + esc(srcPath) + '">' + esc(srcPath) + '</code>' +
+      (imp.pre && imp.pre.resolved ? '<span class="res-pill" title="源是链接，已解析到真实目录">' + icon('link') + '已解析链接</span>' : '') +
+      '<button class="btn btn-sm btn-ghost" data-act="imp-back">' + icon('arrow-left') + '重新选择</button></div>';
+    if (!imp.pre) {
+      return impHead('预检与命名', 'review', true) +
+        '<div class="modal-body">' + srcLine +
+        '<div class="hero" style="padding-bottom:14px"><span class="hero-ic" style="background:var(--surface-2);color:var(--ink-3)"><span style="display:inline-flex;' +
+        (document.body.classList.contains('reduce-motion') ? '' : 'animation:sk-spin 0.9s linear infinite;') + '">' + icon('spin') + '</span></span>' +
+        '<b style="font-size:13px">正在扫描来源目录</b><span>解析 SKILL.md · 统计文件数与大小 · 比对同名冲突…</span></div>' +
+        '</div><div class="modal-foot"><button class="btn" data-act="imp-close">取消</button></div>';
+    }
+    if (imp.pre.ok === false || imp.preError) {
+      var reason = esc(imp.preError || imp.pre.reason || '预检失败');
+      return impHead('预检与命名', 'review', true) +
+        '<div class="modal-body">' + srcLine +
+          '<div class="hero bad"><span class="hero-ic">' + icon('bad') + '</span>' +
+            '<h3 style="font-size:14px">预检未通过</h3><span>' + reason + '</span></div>' +
+          '<div class="note-bar warn" style="margin-top:12px">' + icon('alert') +
+            '<span><b>仓库没有变化。</b>确认来源后点「重新选择」换一个目录。</span></div>' +
+        '</div>' +
+        '<div class="modal-foot"><span class="foot-note">预检失败</span>' +
+          '<button class="btn" data-act="imp-close">取消</button>' +
+          '<button class="btn btn-primary" data-act="imp-back">' + icon('arrow-left') + '重新选择</button></div>';
+    }
+    var d = imp.pre;
+    var fmRows =
+      '<div class="rep-row"><span>SKILL.md</span><div>' + (d.has_skill_md
+        ? '<span class="r-mono" style="color:var(--success);display:inline-flex;align-items:center;gap:5px">' + icon('ok') + '已解析 frontmatter</span>'
+        : '<span class="r-mono" style="color:var(--warning);display:inline-flex;align-items:center;gap:5px">' + icon('alert') + '未找到</span>') + '</div></div>' +
+      (d.fm ? '<div class="rep-row"><span>名称</span><div><span class="r-mono">' + esc(d.fm.name) + '</span></div></div>' +
+        '<div class="rep-row"><span>描述</span><div><div class="r-desc">' + esc(d.fm.description) + '</div></div></div>' : '') +
+      '<div class="rep-row"><span>规模</span><div><span class="r-mono">' + d.files + ' 个文件 · ' + fmtBytes(d.bytes) + '</span></div></div>' +
+      '<div class="rep-row"><span>结构</span><div><div class="rep-chips">' +
+        (d.tree || []).map(function (t) { return '<span class="fc-chip">' + esc(t) + '</span>'; }).join('') + '</div></div></div>';
+    var report = '<div class="rep">' + fmRows + '</div>';
+    if (!d.has_skill_md) {
+      report += '<div class="note-bar warn">' + icon('alert') +
+        '<span><b>未找到 SKILL.md</b> — 这个目录大概率不是标准 skill，agent 可能不识别。仍可导入，建议先确认来源。</span></div>';
+    }
+    if (d.resolved) {
+      report += '<div class="note-bar info">' + icon('link') +
+        '<span><b>源是链接（junction / symlink），已解析到真实目录：</b><span style="font-family:var(--mono);font-size:10.5px">' + esc(d.resolved) + '</span>。导入复制的是真实内容，链接本身不受影响。</span></div>';
+    }
+    var v = impValidate();
+    var nameBlock =
+      '<div class="imp-label"><span>Skill 名称（仓库目录名）</span><span style="letter-spacing:0;text-transform:none">默认取目录名</span></div>' +
+      '<div class="name-wrap"><input class="imp-input' + (v.nameErr ? ' err' : '') + '" id="imp-name" type="text" value="' + esc(imp.name) + '" spellcheck="false" aria-label="Skill 名称"></div>' +
+      impNameErrHtml(v.nameErr) + impNameHelpHtml(!v.nameErr) +
+      impConflictPanelHtml(imp.name, v.conflict) + impSamePanelHtml(imp.name, v.same);
+    var folderChips = ['<button class="fold-chip dashed' + (imp.folder === '' ? ' on' : '') + '" data-act="imp-folder" data-f="">' +
+      icon('inbox') + '未归档</button>'].concat(FOLDERS.map(function (f) {
+        return '<button class="fold-chip' + (imp.folder === f.id ? ' on' : '') + '" data-act="imp-folder" data-f="' + esc(f.id) + '" style="' + catVars(f.color) + '">' +
+          '<span class="catdot"></span>' + esc(f.name) + '</button>';
+      })).join('');
+    var canGo = v.ok && !v.conflict && !v.same;
+    return impHead('预检与命名', 'review', true) +
+      '<div class="modal-body">' + srcLine + report +
+        nameBlock +
+        '<div class="dest-box">' + icon('hard-drive') + '<span>目标位置&nbsp;</span><b>' + esc(STORE + '\\' + (imp.name || '…')) + '</b></div>' +
+        '<div class="imp-label" style="margin-top:13px"><span>导入后归档（可选）</span><span style="letter-spacing:0;text-transform:none">也可以之后拖拽归档</span></div>' +
+        '<div class="fold-picker">' + folderChips + '</div>' +
+        '<div class="flow-hint"><b>复制</b> 到 .skpart 临时目录' + icon('chevron-right') + '<b>原子改名</b>落库' +
+          icon('chevron-right') + '<b>重新扫描</b>' + icon('chevron-right') + '到「智能体」页分发</div>' +
+      '</div>' +
+      '<div class="modal-foot"><span class="foot-note">' + (d.has_skill_md ? '预检通过' : '带警告：缺 SKILL.md') + '</span>' +
+        '<button class="btn" data-act="imp-close">取消</button>' +
+        '<button class="btn btn-primary" data-act="imp-start"' + (canGo ? '' : ' disabled') + '>' + icon('download') + '导入到仓库</button></div>';
+  }
+
+  function impRunningHtml() {
+    var steps = [
+      { id: 'copy', label: '复制到临时目录', small: '.skpart-' + impHash8(imp.name).slice(0, 4) + '…' },
+      { id: 'rename', label: '原子改名落库', small: 'os.replace' },
+      { id: 'scan', label: '重新扫描并注册', small: 'rescan()' }
+    ];
+    var st = imp.runState || {};
+    var rows = steps.map(function (s) {
+      var cls = st[s.id] || '';
+      var ic = cls === 'ok' ? icon('ok') : icon('spin');
+      return '<div class="run-step ' + cls + '"><span class="run-ic">' + ic + '</span><span>' + s.label + '</span><small>' + s.small + '</small></div>';
+    }).join('');
+    return impHead('正在导入', 'review', false) +
+      '<div class="modal-body"><div class="src-row-line">' + icon('folder') + '<code>' + esc((imp.demo && imp.demo.path) || '') + '</code></div>' +
+      '<div class="run-steps" style="margin-top:12px">' + rows + '</div>' +
+      '<div class="imp-prog"><i id="imp-prog-i" style="width:' + (imp.runPct || 0) + '%"></i></div>' +
+      '<div class="field-help" style="margin-top:9px">执行期间不能关闭窗口或再次修改名称；失败会回滚临时目录，仓库保持原样。</div>' +
+      '</div><div class="modal-foot"><button class="btn" disabled>执行中…</button></div>';
+  }
+
+  function impDoneHtml() {
+    var act = imp.lastAction || {};
+    var f = folderById(imp.folder);
+    var row = null;
+    for (var i = 0; i < SKILLS.length; i++) if (SKILLS[i].name === act.name) row = SKILLS[i];
+    var linked = row && row.agents ? row.agents.length : 0;
+    return impHead('导入完成', 'finish', false) +
+      '<div class="modal-body">' +
+        '<div class="hero ok"><span class="hero-ic">' + icon('ok') + '</span>' +
+          '<h3>' + esc(act.name || imp.name) + '</h3><span>已进入中央仓库，等待分发给 agent</span></div>' +
+        '<div class="meta-list" style="margin-top:12px">' +
+          '<div class="meta-row"><span>位置</span><b>' + esc(act.path || (STORE + '\\' + imp.name)) + '</b></div>' +
+          '<div class="meta-row"><span>规模</span><b>' + (act.files != null ? act.files + ' 个文件 · ' + fmtBytes(act.bytes) : '—') + '</b></div>' +
+          '<div class="meta-row"><span>归档</span><b>' + (f ? esc(f.name) : '未归档（可拖拽归档）') + '</b></div>' +
+          '<div class="meta-row"><span>分发</span><b>' + linked + '/' + ENABLED.length + ' agent' + (linked ? '' : ' — 未同步') + '</b></div>' +
+        '</div>' +
+        '<div class="cta-row">' +
+          '<button class="btn" data-act="imp-finish">完成</button>' +
+          '<button class="btn btn-primary" data-act="imp-agents">' + icon('bot') + '去分发</button>' +
+        '</div>' +
+      '</div>';
+  }
+
+  function impErrorHtml() {
+    return impHead('导入失败', 'finish', false) +
+      '<div class="modal-body">' +
+        '<div class="hero bad"><span class="hero-ic">' + icon('bad') + '</span>' +
+          '<h3 style="font-size:14px">写入中央仓库失败</h3><span>' + esc(imp.lastError || '未知错误') + '</span></div>' +
+        '<div class="note-bar warn" style="margin-top:12px">' + icon('alert') +
+          '<span><b>仓库没有变化。</b>临时目录 .skpart-* 已回滚；可以重试、换来源，或检查目标磁盘。</span></div>' +
+        '<div class="cta-row">' +
+          '<button class="btn" data-act="imp-back">' + icon('arrow-left') + '返回修改</button>' +
+          '<button class="btn btn-primary" data-act="imp-retry">' + icon('refresh') + '重试</button>' +
+        '</div>' +
+      '</div>';
+  }
+
+  function impRender() {
+    var html = imp.step === 'source' ? impSourceHtml()
+      : imp.step === 'review' ? impReviewHtml()
+      : imp.step === 'running' ? impRunningHtml()
+      : imp.step === 'done' ? impDoneHtml()
+      : impErrorHtml();
+    openModal('<div class="modal imp-modal" role="dialog" aria-modal="true" aria-label="导入 skill">' + html + '</div>',
+      { locked: imp.step === 'running' });
+    var dz = document.getElementById('imp-dz');
+    if (dz) {
+      dz.addEventListener('dragover', function (e) {
+        e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; dz.classList.add('hot');
+      });
+      dz.addEventListener('dragleave', function () { dz.classList.remove('hot'); });
+      dz.addEventListener('drop', function (e) {
+        e.preventDefault(); e.stopPropagation(); dz.classList.remove('hot'); impHandleFileDrop(e);
+      });
+    }
+    var nameInput = document.getElementById('imp-name');
+    if (nameInput) nameInput.focus();
+  }
+
+  function impOpen(step) {
+    impClearTimers();
+    imp.step = step || 'source';
+    impRender();
+  }
+
+  /* ---------- 预检 / 执行 ---------- */
+  function impGoPreflight(src, nameHint) {
+    src = String(src || '').trim();
+    if (!src) { toast('warn', '先填来源路径', '或把文件夹拖进来'); return; }
+    impClearTimers();
+    imp.demo = { path: src };
+    imp.pre = null;
+    imp.preError = null;
+    imp.name = nameHint || baseNameOf(src);
+    imp.folder = '';
+    imp.q = '';
+    imp.step = 'review';
+    impRender();
+    if (impIsDb()) {
+      SKB.importPreflight(src).then(function (res) {
+        // 用户可能已「重新选择」或改了路径：过期回包直接丢弃
+        if (imp.step !== 'review' || !imp.demo || imp.demo.path !== src) return;
+        imp.pre = res.data || null;
+        if (imp.pre && imp.pre.ok === false) imp.preError = imp.pre.reason || '预检失败';
+        impRender();
+      }).catch(function (err) {
+        if (imp.step !== 'review' || !imp.demo || imp.demo.path !== src) return;
+        imp.preError = String(err && err.message || err);
+        impRender();
+      });
+      return;
+    }
+    impLater(function () {
+      if (imp.step !== 'review' || !imp.demo || imp.demo.path !== src) return;
+      imp.pre = impDemoFromName(imp.name);
+      imp.pre.src = src;
+      impRender();
+    }, 620);
+  }
+
+  function impLoadDemo(key, base) {
+    var pre = key instanceof Object ? key : IMP_DEMOS[key];
+    if (!pre) return;
+    impClearTimers();
+    imp.demo = { path: pre.src };
+    imp.pre = null;
+    imp.name = (pre.fm && pre.fm.name) || baseNameOf(pre.src);
+    imp.folder = '';
+    imp.q = '';
+    imp.step = 'review';
+    impRender();
+    impLater(function () {
+      if (imp.step !== 'review') return;
+      imp.pre = pre;
+      impRender();
+    }, 620);
+  }
+
+  function impMarkImported(nm) {
+    if (!nm) return;
+    for (var i = 0; i < SKILLS.length; i++) {
+      if (SKILLS[i].name === nm) SKILLS[i].isNew = true;
+    }
+  }
+
+  function impStartRun() {
+    var src = imp.demo && imp.demo.path;
+    if (!src || !imp.pre) return;
+    var v = impValidate();
+    if (!v.ok || v.conflict || v.same) return;
+    imp.step = 'running';
+    imp.runState = { copy: 'doing' };
+    imp.runPct = 8;
+    impRender();
+    if (impIsDb()) {
+      SKB.importSkill(src, imp.name, imp.folder).then(function (res) {
+        var finished = imp.step === 'running'; // 被强关过就只落数据，不再弹完成页
+        imp.runState = { copy: 'ok', rename: 'ok', scan: 'ok' };
+        imp.runPct = 100;
+        imp.lastAction = res.action || { name: imp.name, path: STORE + '\\' + imp.name,
+          files: 0, bytes: 0, folder: imp.folder || '' };
+        applyBootstrap(res); // 返回即含新 boards+meta（rescan 已在后端跑完）
+        impMarkImported(imp.lastAction.name);
+        state.folder = null;
+        state.selected = imp.lastAction.name || imp.name;
+        renderChrome(); renderContent(false); renderInspector();
+        if (finished) { imp.step = 'done'; impRender(); }
+        toast('ok', '已导入中央仓库', (imp.lastAction.name || imp.name) + ' · ' +
+          imp.lastAction.files + ' 个文件 · ' + (imp.folder ? '已归档' : '未归档'));
+      }).catch(function (err) {
+        imp.lastError = String(err && err.message || err);
+        if (imp.step === 'running') { imp.step = 'error'; impRender(); }
+        else toast('bad', '导入失败', imp.lastError);
+      });
+      return;
+    }
+    // 原型模式：三段 setTimeout 动画 + 内存插入（不写真实仓库，toast 明示）
+    var set = function (id, cls) { imp.runState[id] = cls; };
+    impLater(function () { set('copy', 'ok'); imp.runPct = 42; impRender(); }, 780);
+    impLater(function () { set('rename', 'doing'); impRender(); }, 900);
+    impLater(function () { set('rename', 'ok'); imp.runPct = 68; impRender(); }, 1560);
+    impLater(function () { set('scan', 'doing'); impRender(); }, 1700);
+    impLater(function () { set('scan', 'ok'); imp.runPct = 100; impRender(); }, 2350);
+    impLater(function () {
+      if (imp.pre && imp.pre.failRun) { imp.step = 'error'; impRender(); return; }
+      var name = imp.name;
+      var pre = imp.pre || {};
+      SKILLS.unshift({ name: name, label: (pre.fm && pre.fm.name) || name,
+        description: (pre.fm && pre.fm.description) || '', isNew: true });
+      metaOf(name).folder = imp.folder || '';
+      state.folder = null;
+      state.selected = name;
+      imp.lastAction = { name: name, path: STORE + '\\' + name,
+        files: pre.files || 0, bytes: pre.bytes || 0, folder: imp.folder || '' };
+      imp.step = 'done';
+      renderAll();
+      impRender();
+      toast('ok', '已导入（原型模式）', name + ' · 数据来自内置快照，未写真实仓库');
+    }, 2650);
+  }
+
+  /* ---------- 弹窗内事件（委托在 #modal-root 上，重渲染不重挂） ---------- */
+  function impModalClick(e) {
+    var t = e.target.closest('[data-act]');
+    if (!t) return;
+    var act = t.getAttribute('data-act');
+    if (act === 'imp-overlay') { if (e.target === t && imp.step !== 'running') impClose(); return; }
+    if (act === 'imp-close') { impClose(); return; }
+    if (act === 'imp-tab') { imp.tab = t.getAttribute('data-tab'); impRender(); return; }
+    if (act === 'imp-browse') {
+      if (impIsDb()) {
+        if (imp.browsing) return;
+        imp.browsing = true;
+        SKB.chooseDir().then(function (res) {
+          imp.browsing = false;
+          var p = res && res.data;
+          if (!p) return; // 用户取消
+          imp.pathText = p;
+          var inp = document.getElementById('imp-path');
+          if (inp) inp.value = p;
+          impGoPreflight(p);
+        }).catch(function (err) {
+          imp.browsing = false;
+          toast('bad', '选择目录失败', String(err && err.message || err));
+        });
+      } else {
+        toast('info', '原型环境没有原生目录选择', '桌面端此处调 chooseDir()；下面给了一排示例直达');
+      }
+      return;
+    }
+    if (act === 'imp-use-path') {
+      var inp = document.getElementById('imp-path');
+      var p = inp ? inp.value.trim() : '';
+      if (!p) { toast('warn', '先填来源路径', '或点下方示例直达'); return; }
+      impGoPreflight(p);
+      return;
+    }
+    if (act === 'imp-demo') { impLoadDemo(t.getAttribute('data-demo')); return; }
+    if (act === 'imp-dz') { toast('info', '拖文件夹到这里', '或填路径点「预检」；原型可点下方示例直达'); return; }
+    if (act === 'imp-search') {
+      if (impIsDb()) { impOnlineSearch(); return; }
+      var list = document.getElementById('sr-list');
+      if (list) list.style.opacity = '0.45';
+      impLater(function () { impRender(); }, 420);
+      return;
+    }
+    if (act === 'imp-online-page') {
+      var pageRows = impIsDb() ? (imp.online || []) : IMP_ONLINE;
+      var prow = pageRows[parseInt(t.getAttribute('data-i'), 10)];
+      if (impIsDb() && prow && prow.page_url) {
+        SKB.openUrl(prow.page_url).catch(function (err) {
+          toast('bad', '打开页面失败', String(err && err.message || err));
+        });
+      } else {
+        toast('info', '外链（原型不跳转）', '桌面端用系统浏览器打开 skills.sh 页面');
+      }
+      return;
+    }
+    if (act === 'imp-fetch-cancel') {
+      t.disabled = true;
+      SKB.onlineFetchCancel().then(function (res) {
+        var ok = res && res.data && res.data.cancelled;
+        toast(ok ? 'info' : 'warn', ok ? '正在取消' : '没有进行中的下载',
+          ok ? '当前请求结束后停止，仓库不会变化' : '');
+      }).catch(function (err) {
+        toast('bad', '取消失败', String(err && err.message || err));
+      });
+      return;
+    }
+    if (act === 'imp-fetch') {
+      var fetchRows = impIsDb() ? (imp.online || []) : IMP_ONLINE;
+      var row = fetchRows[parseInt(t.getAttribute('data-i'), 10)];
+      if (!row) return;
+      if (imp.fetchName) return; // 一次只跑一个下载
+      if (!impIsDb()) {
+        // 原型演示：假下载 1.1s → 内置预检数据
+        t.disabled = true;
+        t.innerHTML = '<span class="icon" style="display:inline-flex;animation:sk-spin 0.9s linear infinite">' + icon('spin') + '</span>下载中';
+        impLater(function () {
+          impLoadDemo(impDemoFromName(row.name, '%TEMP%\\skilllocker-dl'));
+          toast('ok', '已下载到临时目录', row.name + ' — 继续预检命名');
+        }, 1100);
+        return;
+      }
+      imp.fetchName = row.name + '|' + (row.source || '');
+      imp.fetchDone = 0;
+      imp.fetchTotal = 0;
+      window.__SK_FETCH_PROGRESS = function (p) {
+        imp.fetchDone = p.done || 0;
+        imp.fetchTotal = p.total || 0;
+        if (!imp.step || !imp.fetchName) return;
+        // 只改文本节点，不重渲染整个弹窗：每来一个进度就 impRender() 会让
+        // WebView 整窗重绘，用户看到的是「每加一个文件闪一下」。
+        var lbl = document.querySelector('#sr-list .sk-fetch-label');
+        if (lbl) {
+          lbl.textContent = imp.fetchTotal
+            ? '下载 ' + imp.fetchDone + '/' + imp.fetchTotal : '解析中';
+        }
+      };
+      impRender();
+      SKB.onlineFetch(row.source, row.name).then(function (res) {
+        var d = (res && res.data) || {};
+        var ms = d.timings && +d.timings.total_ms;
+        imp.fetchName = null;
+        imp.fetchDone = 0;
+        imp.fetchTotal = 0;
+        window.__SK_FETCH_PROGRESS = null;
+        if (!imp.step) return;
+        toast('ok', '已下载到临时目录',
+          (d.name || row.name) + ' · ' + (d.files || 0) + ' 个文件'
+          + (ms > 0 ? ' · ' + (ms / 1000).toFixed(1) + 's' : '') + ' — 继续预检');
+        impGoPreflight(d.path, d.name || row.name);
+      }).catch(function (err) {
+        var msg = String(err && err.message || err);
+        var cancelled = msg.indexOf('已取消') >= 0;
+        imp.fetchName = null;
+        imp.fetchDone = 0;
+        imp.fetchTotal = 0;
+        window.__SK_FETCH_PROGRESS = null;
+        if (imp.step) impRender();
+        if (cancelled) toast('info', '已取消', '仓库没有变化，可重新获取');
+        else toast('bad', '下载失败', msg + ' — 仓库没有变化，可重试');
+      });
+      return;
+    }
+    if (act === 'imp-back') { impClearTimers(); imp.step = 'source'; imp.pre = null; imp.preError = null; impRender(); return; }
+    if (act === 'imp-sug') {
+      var n = t.getAttribute('data-name');
+      imp.name = n;
+      var ni = document.getElementById('imp-name');
+      if (ni) ni.value = n;
+      impRender();
+      return;
+    }
+    if (act === 'imp-skip') { impClose(); toast('info', '已跳过', '仓库里的同名 skill 内容一致，无需导入'); return; }
+    if (act === 'imp-folder') { imp.folder = t.getAttribute('data-f'); impRender(); return; }
+    if (act === 'imp-start' || act === 'imp-retry') { impStartRun(); return; }
+    if (act === 'imp-finish') { impClose(); return; }
+    if (act === 'imp-agents') {
+      impClose();
+      setBoard('agents');
+      toast('info', '已切到智能体', '「' + (imp.lastAction && imp.lastAction.name || imp.name) + '」待分发：打开各 agent 的开关后点刷新同步');
+      return;
+    }
+  }
+
+  function impModalInput(e) {
+    if (e.target.id === 'imp-name') {
+      // 键入时只做原位更新，绝不整弹窗重渲染（会丢焦点 / 光标 / IME 组合态）
+      imp.name = e.target.value;
+      var v = impValidate();
+      e.target.classList.toggle('err', !!v.nameErr);
+      var errEl = document.querySelector('#modal-root [data-role="name-err"]');
+      if (errEl) {
+        errEl.hidden = !v.nameErr;
+        var esp = errEl.querySelector('span');
+        if (esp) esp.textContent = v.nameErr || '';
+      }
+      var helpEl = document.querySelector('#modal-root [data-role="name-help"]');
+      if (helpEl) helpEl.hidden = !!v.nameErr;
+      var cp = document.querySelector('#modal-root [data-role="panel-conflict"]');
+      if (cp) {
+        cp.hidden = !v.conflict;
+        if (v.conflict) {
+          cp.outerHTML = impConflictPanelHtml(imp.name, true);
+        }
+      }
+      var sp = document.querySelector('#modal-root [data-role="panel-same"]');
+      if (sp) {
+        sp.hidden = !v.same;
+        if (v.same) {
+          var h = sp.querySelector('.r-mono');
+          if (h) h.textContent = impHash8(imp.name);
+        }
+      }
+      var dest = document.querySelector('#modal-root .dest-box b');
+      if (dest) dest.textContent = STORE + '\\' + (imp.name || '…');
+      var startBtn = document.querySelector('#modal-root [data-act="imp-start"]');
+      if (startBtn) startBtn.disabled = !(v.ok && !v.conflict && !v.same);
+      return;
+    }
+    if (e.target.id === 'imp-path') { imp.pathText = e.target.value; return; }
+    if (e.target.id === 'imp-q') { imp.q = e.target.value; return; }
+  }
+
+  function impModalKeydown(e) {
+    if (e.target.id === 'imp-path' && e.key === 'Enter') {
+      var btn = document.querySelector('#modal-root [data-act="imp-use-path"]');
+      if (btn) btn.click();
+    }
+    if (e.target.id === 'imp-q' && e.key === 'Enter') {
+      var sb = document.querySelector('#modal-root [data-act="imp-search"]');
+      if (sb) sb.click();
+    }
+  }
+
+  /* ---------- 全窗拖拽（三级路径降级，拿不到路径绝不假装有） ---------- */
+  var dropOv = null, dragDepth = 0;
+  function impHasFiles(e) {
+    return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') > -1;
+  }
+  function impShowDropOv() {
+    if (dropOv || imp.step === 'running') return;
+    dropOv = document.createElement('div');
+    dropOv.className = 'drop-ov';
+    dropOv.innerHTML = '<div class="drop-card"><span class="dz-ic">' + icon('upload') + '</span>' +
+      '<b>松手，导入到 skilllocker</b><span>文件夹会被复制进中央仓库，源目录不动</span></div>';
+    document.body.appendChild(dropOv);
+  }
+  function hideDropOv() {
+    dragDepth = 0;
+    if (dropOv) { dropOv.remove(); dropOv = null; }
+  }
+  function impDropPayload(e) {
+    var dt = e.dataTransfer;
+    if (!dt) return null;
+    try {
+      // 1) File.path（pywebview / Electron 系注入的全路径）
+      if (dt.files && dt.files.length && dt.files[0].path) return { path: String(dt.files[0].path) };
+    } catch (err) {}
+    try {
+      // 2) pywebview 自定义 mime：部分平台给全路径数组
+      var raw = dt.getData('application/x-pywebview-drag-drop') || dt.getData('pywebview-drag-drop');
+      if (raw) {
+        var arr = JSON.parse(raw);
+        if (arr && arr.length && arr[0]) return { path: String(arr[0]) };
+      }
+    } catch (err) {}
+    // 3) 只有名字（WebView2 安全限制）——如实降级，不假装有路径
+    var name = '';
+    try {
+      if (dt.files && dt.files.length) name = dt.files[0].name;
+      else if (dt.items && dt.items.length && dt.items[0].getAsFile) {
+        var f = dt.items[0].getAsFile();
+        if (f) name = f.name;
+      }
+    } catch (err) {}
+    return name ? { name: name } : null;
+  }
+  function impHandleFileDrop(e) {
+    if (!impHasFiles(e)) return;
+    var got = impDropPayload(e);
+    hideDropOv();
+    if (imp.step === 'running') return;
+    if (!got) { toast('warn', '没有识别到文件夹', '请改用「浏览」选择目录'); return; }
+    if (!document.getElementById('modal-root').firstElementChild) impOpen('source');
+    if (imp.step !== 'source') return;
+    if (got.path) {
+      impGoPreflight(got.path);
+      toast('info', '已捕获拖入的目录', baseNameOf(got.path) + ' — 进入预检');
+    } else {
+      toast('warn', '拖拽只拿到了名字：' + got.name,
+        '浏览器安全限制拿不到完整路径 —— 请把路径粘贴到下面，或点「浏览」选择');
+      var inp = document.getElementById('imp-path');
+      if (inp) inp.focus();
+    }
+  }
+  function bindImportDragAndDrop() {
+    document.addEventListener('dragenter', function (e) {
+      // 弹窗开着用弹窗内投放区；执行中不显示遮罩（导入不可打断的暗示之一）
+      if (!impHasFiles(e) || imp.step === 'running') return;
+      if (document.getElementById('modal-root').firstElementChild) return;
+      dragDepth++;
+      impShowDropOv();
+    });
+    document.addEventListener('dragleave', function () {
+      if (!dropOv) return;
+      dragDepth--;
+      if (dragDepth <= 0) hideDropOv();
+    });
+    document.addEventListener('dragover', function (e) {
+      if (dropOv) e.preventDefault(); // 允许 drop：遮罩在场时接管整窗
+    });
+    document.addEventListener('drop', function (e) {
+      // 内部行拖拽归档（bindDragAndDrop）不归这里管；只接外部文件投递
+      if (!impHasFiles(e)) return;
+      if (!dropOv && !document.getElementById('imp-dz')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      impHandleFileDrop(e);
+    });
+  }
+
   function resetKey(key) {
     // 「还原」只清显示名 / 备注；归属文件夹保持不动（不再删整行）
     var m = metaOf(key);
@@ -2164,7 +3306,7 @@
   }
 
   function setSort() {
-    prefs.sort = prefs.sort === 'name' ? 'edited' : 'name';
+    prefs.sort = prefs.sort === 'name' ? 'edited' : prefs.sort === 'edited' ? 'starred' : 'name';
     savePrefs();
     renderChrome();
     renderContent(false);
@@ -2307,7 +3449,8 @@
     ctxEl.innerHTML = items.map(function (it) {
       if (it === '-') return '<div class="ctx-sep"></div>';
       if (it.label === '移动到…') return '<div class="ctx-label">移动到…</div>';
-      return '<button class="ctx-item' + (it.danger ? ' danger' : '') + (it.disabled ? ' current' : '') +
+      return '<button class="ctx-item' + (it.danger ? ' danger' : '') + (it.gold ? ' star-item' : '') +
+        (it.disabled ? ' current' : '') +
         '" data-ctx="' + esc(it.act || '') + '"' + (it.arg ? ' data-arg="' + esc(it.arg) + '"' : '') + '>' +
         (it.dot ? '<span class="catdot" style="--c:' + it.dot + '"></span>' : icon(it.ic || 'folder')) +
         esc(it.label) + (it.badge ? '<b>' + esc(it.badge) + '</b>' : '') + '</button>';
@@ -2322,7 +3465,10 @@
     if (scopeOf(key) !== 'shared') return;
     ctxSkill = key;
     var cur = (meta[key] && meta[key].folder) || '';
-    var items = [{ label: '移动到…', ic: 'folder' }];
+    var items = [
+      { label: isStarredKey(key) ? '取消收藏' : '收藏', ic: 'star', act: 'star', gold: true },
+      { label: '移动到…', ic: 'folder' }
+    ];
     FOLDERS.forEach(function (f) {
       items.push({
         label: f.name, dot: COLORS[f.color][0], act: 'move', arg: f.id,
@@ -2538,7 +3684,7 @@
   // 才还原窗口跟随光标；单击 / 轻微抖动不还原 —— 缩小只认双击标题栏。
   var DRAG_RESTORE_PX = 6;
 
-  // 诊断：真实手拖出问题时，kit/skillkit.log 能说清断在哪一步
+  // 诊断：真实手拖出问题时，kit/skilllocker.log 能说清断在哪一步
   function uiLog(kind, payload) {
     if (MODE !== 'db' || !SKB || !SKB.logUi) return;
     try { SKB.logUi(kind, JSON.stringify(payload || {})); } catch (err) {}
@@ -2661,6 +3807,15 @@
   /* ---------------------------------------------------------- events */
   function bind() {
     bindDragAndDrop();
+    bindImportDragAndDrop();
+
+    // 导入弹窗（SPEC-skill-import.md）：顶栏入口 + 弹窗内事件委托 + Ctrl+I
+    var impTop = document.getElementById('btn-import-top');
+    if (impTop) impTop.addEventListener('click', function () { impOpen('source'); });
+    var mroot = document.getElementById('modal-root');
+    mroot.addEventListener('click', impModalClick);
+    mroot.addEventListener('input', impModalInput);
+    mroot.addEventListener('keydown', impModalKeydown);
 
     document.addEventListener('pointerdown', function (e) {
       var grip = e.target.closest && e.target.closest('[data-resize]');
@@ -2796,12 +3951,29 @@
           ctxSkill = null;
           if (act === 'move' && arg && skillKey) assignSkill(skillKey, arg);
           if (act === 'unfile' && skillKey) assignSkill(skillKey, '');
+          if (act === 'star' && skillKey) toggleStar(skillKey);
           if (act === 'rename' && arg) folderModal('edit', arg);
           if (act === 'recolor' && arg) folderModal('edit', arg);
           if (act === 'del' && arg) confirmDeleteFolder(folderById(arg));
           return;
         }
         if (!t.closest('.ctx-menu')) closeCtx();
+      }
+
+      // ---- 收藏（v0.3.1）----
+      // 星标按钮（行尾 / 卡片角）：先于行选中 return，不会误选行
+      var starBtn = t.closest('[data-star]');
+      if (starBtn) { toggleStar(starBtn.getAttribute('data-star')); return; }
+      // 检查器星标（常驻按钮，跟随当前选中行）
+      if (t.closest('#ins-star')) { if (state.selected) toggleStar(state.selected); return; }
+      // 面包屑「清空收藏」：两段确认
+      var clearBtn = t.closest('[data-clear-starred]');
+      if (clearBtn) { clearStarredArm(clearBtn); return; }
+      // 侧栏「收藏」导航：跨看板入口，永远落回共有看板的收藏虚拟夹
+      if (t.closest('#nav-starred')) {
+        if (state.board !== 'shared') setState({ board: 'shared', folder: 'starred' });
+        else openFolder('starred');
+        return;
       }
 
       var boardEl = t.closest('[data-board]');
@@ -2885,6 +4057,7 @@
 
       if (t.closest('[data-delete]')) { requestDelete(); return; }
       if (t.closest('[data-uninstall]')) { requestUninstall(); return; }
+      if (t.closest('[data-promote]')) { requestPromote(); return; }
 
       if (t.closest('[data-close]')) { closeModal(); return; }
       if (t.closest('.modal-close')) { closeModal(); return; }
@@ -3029,6 +4202,22 @@
         openSettings();
         return;
       }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') {
+        // Ctrl+I：导入 skill（SPEC-skill-import.md，与 Ctrl+K 并列）
+        e.preventDefault();
+        impOpen('source');
+        return;
+      }
+      if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        // F：收藏 / 取消当前选中行；输入框里打字不触发（IME / 光标优先）
+        var aeF = document.activeElement;
+        if (aeF && (aeF.tagName === 'INPUT' || aeF.tagName === 'TEXTAREA')) return;
+        if (state.selected && state.board !== 'agents') {
+          e.preventDefault();
+          toggleStar(state.selected);
+        }
+        return;
+      }
       if (e.key === 'Enter') {
         if (e.target && e.target.id === 'fm-name') {
           var ok = document.getElementById('fm-ok');
@@ -3037,6 +4226,12 @@
         return;
       }
       if (e.key === 'Escape') {
+        // 导入弹窗优先：非 running → 关；running → 一切关闭路径禁用，
+        // 连下面的通用 modal-root 检查都不能进（后端不可中断，UI 不许撒谎）
+        if (imp.step) {
+          if (imp.step !== 'running') impClose();
+          return;
+        }
         // Esc 链：弹窗 → ⋯ 菜单 → 清搜索 → 退出文件夹
         if (document.getElementById('modal-root').firstElementChild) {
           var onCancel = modalOnCancel;
@@ -3310,7 +4505,7 @@
       reduce = reduceMotion();
       if (reduce) return;   // 即时模式：静态层留到 R + 200ms，由 ready/fail 收尾
       // file:// 原型（无 desktop=1）：满速 1× 编排（可展示），不加速。
-      // 判据不能用 !SKB —— bridge.js 在原型下也导出 SKILLKIT_BRIDGE（ready 为 null）
+      // 判据不能用 !SKB —— bridge.js 在原型下也导出 SKILLLOCKER_BRIDGE（ready 为 null）
       fullSpeed = !/[?&]desktop=1/.test(location.search);
       phEl = el.querySelector('.boot-ph');
       cntEl = el.querySelector('.boot-cnt');
@@ -3318,7 +4513,7 @@
       fillEl = el.querySelector('.boot-track i');
       chipsEl = el.querySelector('.boot-chips');
       agentsEl = el.querySelector('.boot-agents');
-      applyData(window.SKILLKIT_DATA || {});
+      applyData(window.SKILLLOCKER_DATA || {});
       chips = parseSeq;     // chip 流用快照预跑，真实数据到手后不回换（规格 §10.1）
       renderMarks();
       setCnt(0);
@@ -3390,7 +4585,7 @@
     document.documentElement.setAttribute('data-mode', MODE);
     window.__SK_MODE = MODE;
     window.__SK_READY = true;
-    // 启动留痕：skillkit.log 里没有 boot 行 = 跑的还是旧进程/旧代码，先别怀疑拖动逻辑
+    // 启动留痕：skilllocker.log 里没有 boot 行 = 跑的还是旧进程/旧代码，先别怀疑拖动逻辑
     uiLog('boot', { mode: MODE, vw: window.innerWidth, vh: window.innerHeight });
   }
 
@@ -3439,9 +4634,9 @@
       '<div class="boot-error-card">' +
         '<div class="boot-error-icon">!</div>' +
         '<h1>后端启动失败</h1>' +
-        '<p class="boot-error-sub">skillkit 后端在初始化时出错，界面无法连接真实数据库。</p>' +
+        '<p class="boot-error-sub">skilllocker 后端在初始化时出错，界面无法连接真实数据库。</p>' +
         '<pre class="boot-error-detail">' + esc(detail) + '</pre>' +
-        '<p class="boot-error-hint">详细原因见安装目录 <b>kit\\skillkit.log</b>；' +
+        '<p class="boot-error-hint">详细原因见安装目录 <b>kit\\skilllocker.log</b>；' +
         '排除后点「重试」重新加载。</p>' +
         '<button id="boot-error-retry" type="button">重试</button>' +
       '</div>';
@@ -3453,7 +4648,7 @@
 
   function boot() {
     BootFX.begin(); // 编排时钟起点＝脚本执行（首帧前）；noboot / reduce-motion 在这里分叉
-    if (!SKB) { bootLocal(window.SKILLKIT_DATA); return; }
+    if (!SKB) { bootLocal(window.SKILLLOCKER_DATA); return; }
     SKB.ready.then(function (api) {
       if (!api) {
         BootFX.fail();
@@ -3465,7 +4660,7 @@
             + "通常是 WebView2 冷启动过慢，点「重试」重新加载"));
           return;
         }
-        bootLocal(window.SKILLKIT_DATA);
+        bootLocal(window.SKILLLOCKER_DATA);
         return;
       }
       MODE = 'db';
@@ -3485,7 +4680,7 @@
         // 非桌面原型（file:// 直开）：保留只读快照降级 + toast
         MODE = 'local';
         toast('bad', '后端连接失败', String(err && err.message || err) + '，已退回内置快照');
-        bootLocal(window.SKILLKIT_DATA);
+        bootLocal(window.SKILLLOCKER_DATA);
       });
     });
   }

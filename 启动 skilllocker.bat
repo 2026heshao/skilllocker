@@ -1,17 +1,17 @@
 @echo off
 rem ============================================================
-rem  skillkit desktop launcher
+rem  skilllocker desktop launcher
 rem  double-click to start. Extra args are forwarded, e.g.
 rem      launcher.bat --debug
 rem  Prefers the pinned pythonw.exe; falls back to whatever
 rem  pythonw is on PATH so the script survives being copied to
 rem  another machine. Uses pythonw: no console window. Startup
-rem  errors are written to kit\skillkit.log (rotating) and shown
+rem  errors are written to kit\skilllocker.log (rotating) and shown
 rem  in a message box.
 rem ============================================================
 setlocal
 set "KIT=%~dp0kit"
-set "LOG=%KIT%\skillkit.log"
+set "LOG=%KIT%\skilllocker.log"
 set "PYW=D:\develop\python\3.12\pythonw.exe"
 
 if exist "%PYW%" goto run
@@ -32,7 +32,7 @@ goto run
 
 :nopython
 >>"%LOG%" echo [%DATE% %TIME%] Missing Python: %PYW% and no usable pythonw.exe in PATH
-powershell -NoProfile -WindowStyle Hidden -Command "Add-Type -AssemblyName PresentationFramework; [System.Windows.MessageBox]::Show('未找到可用的 Python：需要 D:\develop\python\3.12\pythonw.exe，或 PATH 里一个非 WindowsApps 的 pythonw.exe','skillkit')"
+powershell -NoProfile -WindowStyle Hidden -Command "Add-Type -AssemblyName PresentationFramework; [System.Windows.MessageBox]::Show('未找到可用的 Python：需要 D:\develop\python\3.12\pythonw.exe，或 PATH 里一个非 WindowsApps 的 pythonw.exe','skilllocker')"
 exit /b 1
 
 :run
@@ -45,5 +45,5 @@ exit /b 0
 
 :nofile
 >>"%LOG%" echo [%DATE% %TIME%] Missing ui\index.html or kit\desktop.py under %~dp0
-powershell -NoProfile -WindowStyle Hidden -Command "Add-Type -AssemblyName PresentationFramework; [System.Windows.MessageBox]::Show('Missing ui\index.html or kit\desktop.py','skillkit')"
+powershell -NoProfile -WindowStyle Hidden -Command "Add-Type -AssemblyName PresentationFramework; [System.Windows.MessageBox]::Show('Missing ui\index.html or kit\desktop.py','skilllocker')"
 exit /b 1

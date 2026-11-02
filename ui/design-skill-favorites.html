@@ -1,0 +1,1509 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>skilllocker · 收藏功能高仿真原型</title>
+<style>
+/* 仅独立打开时的舞台背景（内联 fragment 会剥掉本块） */
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px;
+  background: #0a0e16 radial-gradient(900px 500px at 20% 0%, #10182a 0%, transparent 60%),
+              radial-gradient(800px 460px at 90% 100%, #0d1a20 0%, transparent 55%); }
+</style>
+</head>
+<body>
+<svg id="sk-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Z"></path><path d="m3 12 9 5 9-5M3 16.5l9 5 9-5"></path></symbol>
+  <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8Z"></path><path d="M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8Z"></path></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3.2l2.66 5.4 5.94.86-4.3 4.2 1.02 5.94L12 16.76l-5.32 2.84 1.02-5.94-4.3-4.2 5.94-.86L12 3.2Z"></path></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"></path></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"></path></symbol>
+  <symbol id="i-maximize" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="1"></rect></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M19 14.5A7.5 7.5 0 0 1 9.5 5a7.5 7.5 0 1 0 9.5 9.5Z"></path></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"></path></symbol>
+  <symbol id="i-sort" viewBox="0 0 24 24"><path d="M7 4v16M4 17l3 3 3-3M14 4h6M14 10h5M14 16h3"></path></symbol>
+  <symbol id="i-rows" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="6" rx="2"></rect><rect x="4" y="14" width="16" height="6" rx="2"></rect></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"></rect><rect x="14" y="3" width="7" height="7" rx="2"></rect><rect x="3" y="14" width="7" height="7" rx="2"></rect><rect x="14" y="14" width="7" height="7" rx="2"></rect></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path></symbol>
+  <symbol id="i-folder-open" viewBox="0 0 24 24"><path d="M6 14l1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5c0-1.1.9-2 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2"></path></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14-4"></path><path d="M4 13a8 8 0 0 0 14 4"></path><path d="M4 4v4h4M20 20v-4h-4"></path></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M15.5 4.5 19.5 8.5 8 20H4v-4L15.5 4.5Z"></path></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"></path></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2.6 20h18.8L12 3Z"></path><path d="M12 8v5M12 16.5v.6"></path></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-8 8"></path><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"></path></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"></path><path d="M9 11v5M15 11v5"></path></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"></path><circle cx="9" cy="6" r="2"></circle><circle cx="15" cy="12" r="2"></circle><circle cx="8" cy="18" r="2"></circle></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v6M12 7v.5"></path></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"></path></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></symbol>
+  <symbol id="i-ellipsis" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></symbol>
+  <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="11" rx="3"></rect><path d="M12 8V5M11 3.6h2M8 12v2M16 12v2M3.5 11.5v4M20.5 11.5v4"></path></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></symbol>
+  <symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"></ellipse><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"></path><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"></path></symbol>
+</svg>
+
+<!--SK-FRAGMENT-START-->
+<style>
+/* ============ skilllocker 收藏功能原型 · 全部样式 #sk-app 作用域 ============ */
+#sk-app {
+  --font: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Noto Sans SC", sans-serif;
+  --display: "Bahnschrift", "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  --mono: "Cascadia Mono", "Consolas", "SFMono-Regular", monospace;
+  --sidebar-w: 216px;
+  --inspector-w: 344px;
+  --titlebar-h: 46px;
+  --topbar-h: 66px;
+  --statusbar-h: 30px;
+  --page-pad: 20px;
+  --row-h: 60px;
+  --bg: #f3f6fb;
+  --surface: #ffffff;
+  --surface-2: #f7f9fd;
+  --surface-3: #edf1f8;
+  --ink: #0b1020;
+  --ink-2: rgba(11, 16, 32, 0.62);
+  --ink-3: rgba(11, 16, 32, 0.40);
+  --ink-4: rgba(11, 16, 32, 0.24);
+  --line: rgba(14, 22, 40, 0.075);
+  --line-strong: rgba(14, 22, 40, 0.14);
+  --accent: #2e63f6;
+  --accent-soft: #e9efff;
+  --accent-ink: #1b3fc0;
+  --success: #0e9f6e;
+  --success-soft: #e7f7f0;
+  --warning: #c07a09;
+  --warning-soft: #fbf2e1;
+  --danger: #d93a3f;
+  --danger-soft: #fdeced;
+  --violet: #6f56e3;
+  --violet-soft: #f0edfe;
+  --rose: #d2406f;
+  --rose-soft: #fdecf2;
+  --teal: #0a8f96;
+  --teal-soft: #e6f6f6;
+  --slate: #51607a;
+  --slate-soft: #eef1f6;
+  --shadow-1: 0 1px 2px rgba(10, 16, 30, 0.04), 0 10px 26px rgba(10, 16, 30, 0.05);
+  --shadow-2: 0 2px 6px rgba(10, 16, 30, 0.06), 0 20px 44px rgba(10, 16, 30, 0.10);
+  --shadow-3: 0 30px 90px rgba(4, 8, 18, 0.30);
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --fast: 120ms;
+  --base: 180ms;
+  --slow: 300ms;
+
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  position: relative;
+  width: min(1440px, 100%);
+}
+#sk-app.theme-dark {
+  --bg: #080b12;
+  --surface: #111722;
+  --surface-2: #151d2a;
+  --surface-3: #1d2635;
+  --ink: #ffffff;
+  --ink-2: rgba(255, 255, 255, 0.64);
+  --ink-3: rgba(255, 255, 255, 0.42);
+  --ink-4: rgba(255, 255, 255, 0.24);
+  --line: rgba(255, 255, 255, 0.075);
+  --line-strong: rgba(255, 255, 255, 0.15);
+  --accent: #7c9dff;
+  --accent-soft: rgba(78, 116, 255, 0.16);
+  --accent-ink: #b9c9ff;
+  --success: #3dd68c;
+  --success-soft: rgba(61, 214, 140, 0.13);
+  --warning: #f4b740;
+  --warning-soft: rgba(244, 183, 64, 0.13);
+  --danger: #ff6b6b;
+  --danger-soft: rgba(255, 107, 107, 0.14);
+  --violet: #a78bfa;
+  --violet-soft: rgba(167, 139, 250, 0.14);
+  --rose: #ff7aa6;
+  --rose-soft: rgba(255, 122, 166, 0.14);
+  --teal: #46d4d8;
+  --teal-soft: rgba(70, 212, 216, 0.13);
+  --slate: #9fb0c9;
+  --slate-soft: rgba(159, 176, 201, 0.13);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.24), 0 10px 26px rgba(0, 0, 0, 0.28);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.28), 0 20px 44px rgba(0, 0, 0, 0.34);
+  --shadow-3: 0 30px 90px rgba(0, 0, 0, 0.55);
+}
+#sk-app *, #sk-app *::before, #sk-app *::after { box-sizing: border-box; }
+#sk-app button, #sk-app input, #sk-app textarea, #sk-app select { font: inherit; color: inherit; }
+#sk-app [hidden] { display: none !important; }
+#sk-app button { border: 0; background: none; cursor: pointer; }
+#sk-app button:disabled { cursor: not-allowed; opacity: 0.45; }
+#sk-app input::placeholder, #sk-app textarea::placeholder { color: var(--ink-4); }
+#sk-app textarea { resize: vertical; }
+#sk-app svg { flex: none; }
+#sk-app ::selection { background: color-mix(in srgb, var(--accent) 26%, transparent); }
+#sk-app :focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 2px; }
+
+/* ---------- 窗口 ---------- */
+#sk-app .window {
+  min-height: 640px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--bg);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.09), 0 44px 120px rgba(0, 0, 0, 0.45);
+}
+
+/* ---------- 图标 / 按钮 ---------- */
+#sk-app .icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+#sk-app .icon-btn { width: 30px; height: 30px; border-radius: 8px; border: 1px solid transparent; display: grid; place-items: center; color: var(--ink-2); transition: background var(--fast), color var(--fast), border-color var(--fast), transform var(--fast); }
+#sk-app .icon-btn:hover { background: var(--surface-2); color: var(--ink); border-color: var(--line); }
+#sk-app .icon-btn:active { transform: scale(0.95); }
+#sk-app .icon-btn.is-busy { pointer-events: none; color: var(--ink-3); }
+#sk-app .icon-btn.is-busy .icon { animation: sk-spin 0.9s linear infinite; }
+@keyframes sk-spin { to { transform: rotate(360deg); } }
+#sk-app .btn { height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); font-size: 12px; font-weight: 550; display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; transition: background var(--fast), border-color var(--fast), transform var(--fast); }
+#sk-app .btn:hover { background: var(--surface-2); border-color: color-mix(in srgb, var(--ink) 18%, transparent); transform: translateY(-1px); }
+#sk-app .btn:active { transform: translateY(0) scale(0.985); }
+#sk-app .btn .icon { width: 14px; height: 14px; }
+#sk-app .btn-sm { height: 28px; padding: 0 10px; font-size: 11.5px; border-radius: 7px; }
+#sk-app .btn-primary { border-color: transparent; color: #fff; background: linear-gradient(180deg, #3d74ff 0%, #2e63f6 100%); box-shadow: 0 6px 16px rgba(46, 99, 246, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.22); }
+#sk-app .btn-primary:hover { filter: brightness(1.05); border-color: transparent; }
+#sk-app .btn-ghost { background: transparent; border-color: transparent; color: var(--ink-2); }
+#sk-app .btn-ghost:hover { background: var(--surface-2); color: var(--ink); border-color: transparent; }
+#sk-app .eyebrow { font-size: 10.5px; line-height: 1; letter-spacing: 0.16em; color: var(--ink-3); font-weight: 600; text-transform: uppercase; }
+
+/* ---------- 标题栏 ---------- */
+#sk-app .titlebar { height: var(--titlebar-h); flex: 0 0 var(--titlebar-h); display: flex; align-items: center; padding-left: 14px; position: relative; z-index: 30; background: color-mix(in srgb, var(--surface) 86%, transparent); border-bottom: 1px solid var(--line); backdrop-filter: blur(20px) saturate(140%); }
+#sk-app .brand { display: flex; align-items: center; gap: 9px; min-width: 0; }
+#sk-app .logo { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; background: linear-gradient(135deg, #3d7bff 0%, #2e63f6 46%, #12c2cf 100%); box-shadow: 0 5px 12px rgba(46, 99, 246, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.42); }
+#sk-app .logo .icon { width: 14px; height: 14px; color: #fff; }
+#sk-app .wordmark { font-family: var(--display); font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+#sk-app .brand-divider { width: 1px; height: 16px; background: var(--line-strong); margin: 0 2px; }
+#sk-app .brand-sub { font-size: 11px; letter-spacing: 0.16em; color: var(--ink-3); white-space: nowrap; }
+#sk-app .gsearch { position: relative; width: 300px; height: 30px; flex: 0 0 300px; margin: 0 16px; }
+#sk-app .gsearch .icon { position: absolute; left: 9px; top: 50%; width: 14px; height: 14px; transform: translateY(-50%); color: var(--ink-3); pointer-events: none; }
+#sk-app .gsearch input { width: 100%; height: 100%; padding: 0 44px 0 29px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font-size: 12px; outline: none; transition: border-color var(--fast), background var(--fast), box-shadow var(--fast); }
+#sk-app .gsearch input:focus { border-color: color-mix(in srgb, var(--accent) 46%, transparent); background: var(--surface); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
+#sk-app .gsearch .kbd { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); height: 19px; padding: 0 5px; border-radius: 5px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-3); font-family: var(--mono); font-size: 10px; display: flex; align-items: center; pointer-events: none; }
+#sk-app .title-actions { margin-left: auto; display: flex; align-items: center; gap: 3px; height: 100%; }
+#sk-app .local-pill { height: 20px; padding: 0 7px; display: flex; align-items: center; gap: 5px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-3); font-size: 10px; letter-spacing: 0.10em; margin-right: 6px; }
+#sk-app .local-pill i { width: 5px; height: 5px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 2px var(--success-soft); }
+#sk-app .win-controls { display: flex; height: var(--titlebar-h); margin-left: 6px; }
+#sk-app .win-btn { width: 46px; height: var(--titlebar-h); display: grid; place-items: center; color: var(--ink-2); transition: background var(--fast), color var(--fast); }
+#sk-app .win-btn:hover { background: var(--surface-3); color: var(--ink); }
+#sk-app .win-btn.close:hover { background: #e5484d; color: #fff; }
+#sk-app .win-btn .icon { width: 12px; height: 12px; }
+
+/* ---------- 侧栏 ---------- */
+#sk-app .app-body { flex: 1; min-height: 0; display: flex; }
+#sk-app .sidebar { width: var(--sidebar-w); flex: 0 0 var(--sidebar-w); min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 12px 10px 16px; border-right: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 72%, var(--surface)); position: relative; }
+#sk-app .store-card { padding: 11px; border-radius: 12px; border: 1px solid var(--line); background: radial-gradient(170px 80px at 100% 0%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 72%), linear-gradient(155deg, var(--surface), var(--surface-2)); box-shadow: var(--shadow-1); }
+#sk-app .store-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+#sk-app .live { display: flex; align-items: center; gap: 4px; font-size: 9.5px; letter-spacing: 0.12em; color: var(--ink-3); }
+#sk-app .live i { width: 4px; height: 4px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 2px var(--success-soft); }
+#sk-app .store-path { margin-top: 8px; font-family: var(--mono); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#sk-app .store-meta { display: flex; align-items: center; justify-content: space-between; margin-top: 5px; font-size: 11px; color: var(--ink-3); }
+#sk-app .store-meta b { font-family: var(--display); font-size: 14px; color: var(--ink); font-weight: 600; margin-right: 2px; }
+#sk-app .health-track { height: 4px; margin-top: 9px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, var(--warning) 34%, var(--surface-3)); }
+#sk-app .health-track span { display: block; height: 100%; width: 96%; border-radius: 2px; background: linear-gradient(90deg, #12b981, #0e9f6e); }
+#sk-app .import-cta { width: 100%; height: 36px; border-radius: 10px; border: 1px solid transparent; color: #fff; font-size: 12.5px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 7px; background: linear-gradient(180deg, #3d74ff 0%, #2e63f6 100%); box-shadow: 0 8px 18px rgba(46, 99, 246, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.22); transition: filter var(--fast), transform var(--fast); }
+#sk-app .import-cta:hover { filter: brightness(1.06); }
+#sk-app .import-cta:active { transform: scale(0.985); }
+#sk-app .import-cta .icon { width: 15px; height: 15px; }
+#sk-app .nav-label { margin: 4px 6px 5px; font-size: 10.5px; letter-spacing: 0.15em; color: var(--ink-3); font-weight: 600; text-transform: uppercase; }
+#sk-app .nav { display: flex; flex-direction: column; gap: 2px; }
+#sk-app .nav-item { height: 40px; width: 100%; display: flex; align-items: center; gap: 9px; padding: 0 9px; border-radius: 9px; color: var(--ink); font-size: 12.5px; font-weight: 500; text-align: left; position: relative; transition: background var(--fast), box-shadow var(--fast), transform var(--fast); }
+#sk-app .nav-item .icon { width: 15px; height: 15px; color: var(--ink-2); }
+#sk-app .nav-item:hover { background: var(--surface-2); }
+#sk-app .nav-item.active { background: var(--accent-soft); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
+#sk-app .nav-item.active .icon { color: var(--accent); }
+#sk-app .nav-item:active { transform: scale(0.985); }
+#sk-app .nav-badge { margin-left: auto; min-width: 20px; height: 18px; padding: 0 5px; border-radius: 6px; background: var(--surface-3); color: var(--ink-2); font-family: var(--display); font-size: 11px; font-weight: 600; display: grid; place-items: center; }
+/* 收藏导航：金色系（复用 warning token），激活态 = 金底 + 左侧金条 */
+#sk-app .nav-item.star-nav.active { background: var(--warning-soft); box-shadow: inset 3px 0 0 var(--warning); }
+#sk-app .nav-item.star-nav.active .icon { color: var(--warning); }
+#sk-app .nav-item.star-nav.active .nav-badge { background: color-mix(in srgb, var(--warning) 22%, var(--surface)); color: var(--warning); }
+#sk-app .nav-item.star-nav .nav-badge { font-variant-numeric: tabular-nums; }
+#sk-app .nav-item.cat-nav { height: 32px; font-size: 12px; gap: 8px; padding: 0 9px; border-radius: 8px; }
+#sk-app .nav-item.cat-nav .nav-badge { height: 17px; min-width: 18px; font-size: 10.5px; }
+#sk-app .catdot { width: 7px; height: 7px; border-radius: 2px; background: var(--c, var(--ink-3)); flex: none; }
+#sk-app .side-stat { margin-top: 2px; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); display: grid; grid-template-columns: 1fr 1fr; gap: 8px 6px; }
+#sk-app .side-stat b { display: block; font-family: var(--display); font-size: 16px; line-height: 1.1; font-weight: 600; letter-spacing: -0.02em; }
+#sk-app .side-stat span { display: block; margin-top: 1px; font-size: 10px; color: var(--ink-3); white-space: nowrap; }
+#sk-app .sidebar-foot { margin-top: auto; flex: none; display: flex; flex-direction: column; gap: 7px; padding-bottom: 2px; }
+#sk-app .settings-btn { height: 32px; padding: 0 9px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-2); transition: background var(--fast), color var(--fast); }
+#sk-app .settings-btn:hover { background: var(--surface-3); color: var(--ink); }
+#sk-app .settings-btn kbd { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--ink-3); border: 1px solid var(--line); border-radius: 4px; padding: 0 3px; }
+#sk-app .version { font-size: 10.5px; color: var(--ink-3); text-align: center; letter-spacing: 0.03em; }
+
+/* ---------- 工作区 ---------- */
+#sk-app .workspace { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
+#sk-app .topbar { height: var(--topbar-h); flex: 0 0 var(--topbar-h); display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 var(--page-pad); border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 86%, transparent); backdrop-filter: blur(14px); position: relative; z-index: 5; }
+#sk-app .topbar-title { min-width: 0; }
+#sk-app .topbar-title h1 { margin: 0; font-family: var(--display); font-size: 21px; line-height: 1.12; letter-spacing: -0.025em; font-weight: 600; white-space: nowrap; display: flex; align-items: center; gap: 8px; }
+#sk-app .topbar-title p { margin: 3px 0 0; font-size: 11.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#sk-app .page-star { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; background: var(--warning-soft); color: var(--warning); }
+#sk-app .page-star .icon { width: 16px; height: 16px; }
+#sk-app .topbar-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+#sk-app .boards-wrap { padding: 14px var(--page-pad) 0; flex: none; }
+#sk-app .boards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+#sk-app .board-tab { height: 80px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow-1); display: flex; align-items: center; gap: 11px; padding: 0 14px; text-align: left; position: relative; overflow: hidden; transition: transform var(--base), box-shadow var(--base), border-color var(--base), background var(--base); }
+#sk-app .board-tab::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: transparent; }
+#sk-app .board-tab:hover { transform: translateY(-1px); box-shadow: var(--shadow-2); border-color: var(--line-strong); }
+#sk-app .board-tab.active { border-color: color-mix(in srgb, var(--accent) 34%, transparent); background: radial-gradient(240px 90px at 100% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 72%), linear-gradient(150deg, var(--surface) 30%, color-mix(in srgb, var(--accent-soft) 70%, var(--surface)) 100%); }
+#sk-app .board-tab.active::after { background: linear-gradient(90deg, var(--accent), color-mix(in srgb, #12c2cf 62%, var(--accent))); }
+#sk-app .tab-icon { width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--line); flex: none; }
+#sk-app .tab-icon .icon { width: 18px; height: 18px; }
+#sk-app .board-tab.active .tab-icon { background: var(--accent); color: #fff; border-color: transparent; box-shadow: 0 8px 18px rgba(46, 99, 246, 0.24); }
+#sk-app .tab-main { min-width: 0; flex: 1; }
+#sk-app .tab-title { display: flex; align-items: baseline; gap: 7px; white-space: nowrap; }
+#sk-app .tab-title b { font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; }
+#sk-app .tab-title em { font-family: var(--display); font-size: 11.5px; font-style: normal; color: var(--ink-3); }
+#sk-app .tab-sub { display: block; margin-top: 3px; font-size: 11px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#sk-app .tab-num { font-family: var(--display); font-size: 26px; line-height: 1; font-weight: 600; letter-spacing: -0.03em; flex: none; }
+#sk-app .board-tab.active .tab-num { color: var(--accent); }
+#sk-app .content { flex: 1; min-height: 0; overflow: auto; padding: 14px var(--page-pad) 16px; scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; display: flex; flex-direction: column; }
+#sk-app .segmented { display: inline-flex; padding: 2px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); gap: 1px; flex: none; }
+#sk-app .segmented button { height: 26px; padding: 0 9px; border-radius: 6px; font-size: 11px; font-weight: 550; color: var(--ink-2); display: inline-flex; align-items: center; gap: 5px; transition: background var(--fast), color var(--fast), box-shadow var(--fast); }
+#sk-app .segmented button .icon { width: 12px; height: 12px; }
+#sk-app .segmented button:hover { color: var(--ink); }
+#sk-app .segmented button.active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.10); }
+#sk-app .sort-btn { height: 26px; padding: 0 8px; border-radius: 7px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); font-size: 11px; display: inline-flex; align-items: center; gap: 4px; }
+#sk-app .sort-btn:hover { background: var(--surface-2); color: var(--ink); }
+#sk-app .sort-btn .icon { width: 12px; height: 12px; }
+
+/* ---------- 面包屑 / 列表 / 卡片 ---------- */
+#sk-app .crumb-bar { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-bottom: 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow-1); }
+#sk-app .crumb-root { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 7px; font-size: 12px; font-weight: 550; color: var(--ink-2); transition: background var(--fast), color var(--fast); }
+#sk-app .crumb-root:hover { background: var(--surface-2); color: var(--ink); }
+#sk-app .crumb-root .icon { width: 13px; height: 13px; }
+#sk-app .crumb-sep { color: var(--ink-4); display: grid; place-items: center; }
+#sk-app .crumb-sep .icon { width: 12px; height: 12px; }
+#sk-app .crumb-here { display: inline-flex; align-items: center; gap: 7px; padding: 4px 9px; border-radius: 7px; background: var(--cs); color: var(--c); font-size: 12.5px; font-weight: 650; }
+#sk-app .crumb-here .icon { width: 14px; height: 14px; }
+/* 收藏面包屑：金星胶囊（crumb-here 的 warning 变体） */
+#sk-app .crumb-here.crumb-star { background: var(--warning-soft); color: var(--warning); }
+#sk-app .crumb-meta { font-size: 11px; color: var(--ink-3); }
+#sk-app .crumb-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+#sk-app .btn.clear-star.arm { border-color: color-mix(in srgb, var(--danger) 46%, transparent); background: var(--danger-soft); color: var(--danger); font-weight: 600; }
+#sk-app .list-card { flex: 1; min-height: 0; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow-1); display: flex; flex-direction: column; overflow: hidden; }
+#sk-app .list-head, #sk-app .row { display: grid; grid-template-columns: 34px minmax(196px, 1.3fr) 168px minmax(150px, 1fr) 132px 76px; align-items: center; gap: 10px; padding: 0 14px; }
+#sk-app .list-head { height: 36px; flex: none; border-bottom: 1px solid var(--line); background: var(--surface-2); font-size: 10px; letter-spacing: 0.12em; color: var(--ink-3); font-weight: 600; text-transform: uppercase; }
+#sk-app .list-body { flex: 1; min-height: 0; overflow: auto; max-height: 500px; scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
+#sk-app .row { height: var(--row-h); border-bottom: 1px solid var(--line); position: relative; cursor: pointer; transition: background var(--fast); animation: rowIn 220ms var(--ease) both; }
+#sk-app .row::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: transparent; transition: background var(--fast); }
+#sk-app .row:hover { background: var(--surface-2); }
+#sk-app .row.is-selected { background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+#sk-app .row.is-selected::before { background: var(--accent); }
+#sk-app .row.is-conflict::before { background: var(--danger); }
+#sk-app .row.is-conflict.is-selected { background: color-mix(in srgb, var(--danger) 7%, var(--surface)); }
+/* 收藏视图里取消收藏：整行右滑淡出后移除 */
+#sk-app .row.row-out { animation: rowCollapse 200ms var(--ease) forwards; pointer-events: none; }
+@keyframes rowCollapse { to { opacity: 0; transform: translateX(16px); } }
+/* 独有收藏分组（复用智能体看板的 sticky 分割线） */
+#sk-app .agent-divider { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 14px; background: var(--surface-2); border-bottom: 1px solid var(--line); }
+#sk-app .agent-divider .ad-mark { flex: none; width: 18px; height: 18px; border-radius: 6px; background: var(--surface-3); color: var(--ink-2); font-family: var(--display); font-size: 9px; font-weight: 600; display: grid; place-items: center; text-transform: uppercase; }
+#sk-app .agent-divider .ad-name { flex: none; font-size: 11.5px; font-weight: 700; color: var(--ink-2); }
+#sk-app .agent-divider .ad-count { flex: none; font-family: var(--mono); font-size: 9.5px; color: var(--ink-3); }
+#sk-app .agent-divider .ad-line { flex: 1; height: 1px; background: var(--line); }
+#sk-app .row-num { font-family: var(--display); font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--ink-3); }
+#sk-app .row.is-selected .row-num { color: var(--accent); }
+#sk-app .row-main { min-width: 0; }
+#sk-app .row-name { display: block; font-size: 13px; line-height: 1.3; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#sk-app .row-label { display: block; font-family: var(--mono); font-size: 9.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+#sk-app .cat { height: 20px; padding: 0 6px; border-radius: 5px; font-size: 10px; font-weight: 550; display: inline-flex; align-items: center; gap: 4px; background: var(--cs); color: var(--c); white-space: nowrap; max-width: 100%; }
+#sk-app .cat i { width: 4px; height: 4px; border-radius: 2px; background: var(--c); flex: none; }
+#sk-app .cat.none { background: transparent; color: var(--ink-4); border: 1px dashed var(--line-strong); height: 19px; }
+#sk-app .agent-chip { height: 20px; padding: 0 6px; border-radius: 5px; background: var(--violet-soft); color: var(--violet); font-size: 10px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+#sk-app .row-note { min-width: 0; font-size: 11px; line-height: 1.4; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#sk-app .row-note.is-empty { color: var(--ink-4); }
+#sk-app .row-cover { display: flex; align-items: center; gap: 7px; min-width: 0; }
+#sk-app .cover-bar { display: flex; align-items: center; gap: 2px; }
+#sk-app .cover-seg { width: 9px; height: 7px; border-radius: 2px; background: var(--success); }
+#sk-app .cover-seg.bad { background: var(--danger); }
+#sk-app .cover-text { font-family: var(--display); font-size: 11.5px; color: var(--ink-2); }
+#sk-app .cover-text.bad { color: var(--danger); }
+#sk-app .row-starred-at { font-family: var(--mono); font-size: 10.5px; color: var(--ink-2); white-space: nowrap; }
+#sk-app .row-end { display: flex; align-items: center; justify-content: flex-end; gap: 2px; }
+#sk-app .row-go { display: flex; align-items: center; justify-content: flex-end; color: var(--ink-4); }
+#sk-app .row:hover .row-go { color: var(--ink-2); }
+#sk-app .row-go .icon { width: 12px; height: 12px; }
+#sk-app .row-more { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; color: var(--ink-3); opacity: 0; transition: opacity var(--fast), background var(--fast); }
+#sk-app .row:hover .row-more, #sk-app .file-card:hover .row-more, #sk-app .row-more.show { opacity: 1; }
+#sk-app .row-more:hover { background: var(--surface-3); color: var(--ink); }
+#sk-app .row-more .icon { width: 14px; height: 14px; }
+
+/* ---------- ★ 星标按钮（本原型的核心组件） ----------
+   未收藏：行/卡片 hover 才显现（opacity 0 → 1），空心灰星；
+   已收藏：常显金色实心星；点击 starPop 弹跳 + starBurst 金色光环 */
+#sk-app .row-star, #sk-app .fc-star, #sk-app .ins-star {
+  width: 24px; height: 24px; border-radius: 7px;
+  display: grid; place-items: center;
+  color: var(--ink-4); opacity: 0; position: relative;
+  transition: opacity var(--fast), background var(--fast), color var(--fast);
+}
+#sk-app .row:hover .row-star, #sk-app .file-card:hover .fc-star,
+#sk-app .row-star.on, #sk-app .fc-star.on, #sk-app .ins-star { opacity: 1; }
+#sk-app .row-star:hover, #sk-app .fc-star:hover, #sk-app .ins-star:hover { background: var(--warning-soft); color: var(--warning); }
+#sk-app .row-star.on, #sk-app .fc-star.on, #sk-app .ins-star.on { color: var(--warning); }
+#sk-app .row-star.on .icon, #sk-app .fc-star.on .icon, #sk-app .ins-star.on .icon { fill: currentColor; stroke-width: 1.5; }
+#sk-app .row-star .icon, #sk-app .fc-star .icon, #sk-app .ins-star .icon { width: 14px; height: 14px; }
+/* 检查器星标是常驻按钮（无父级 hover 揭示），未收藏也要见描边：墨色提一档保证可视 */
+#sk-app .ins-star { color: var(--ink-3); }
+#sk-app .fc-star { flex: none; }
+#sk-app .row-star.pop .icon, #sk-app .fc-star.pop .icon, #sk-app .ins-star.pop .icon { animation: starPop 320ms var(--spring); }
+@keyframes starPop { 0% { transform: scale(0.55) rotate(-12deg); } 55% { transform: scale(1.32) rotate(6deg); } 100% { transform: scale(1) rotate(0); } }
+#sk-app .row-star.burst::after, #sk-app .fc-star.burst::after, #sk-app .ins-star.burst::after {
+  content: ""; position: absolute; inset: -2px; border-radius: 9px; pointer-events: none;
+  animation: starBurst 460ms var(--ease) forwards;
+}
+@keyframes starBurst { from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--warning) 42%, transparent); } to { box-shadow: 0 0 0 10px transparent; } }
+
+#sk-app .empty { flex: 1; min-height: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; padding: 30px; text-align: center; color: var(--ink-3); }
+#sk-app .empty-icon { width: 44px; height: 44px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); display: grid; place-items: center; color: var(--ink-3); }
+#sk-app .empty-icon .icon { width: 20px; height: 20px; }
+#sk-app .empty-icon.gold { background: var(--warning-soft); color: var(--warning); border-color: color-mix(in srgb, var(--warning) 26%, transparent); }
+#sk-app .empty-icon.gold .icon { fill: currentColor; stroke-width: 1.4; }
+#sk-app .empty b { font-size: 13px; color: var(--ink); font-weight: 600; }
+#sk-app .empty span { font-size: 11px; max-width: 340px; line-height: 1.55; }
+#sk-app .empty .btn { margin-top: 7px; }
+#sk-app .list-foot { flex: none; height: 36px; padding: 0 14px; border-top: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--ink-3); background: var(--surface-2); }
+#sk-app .list-foot .hint { display: flex; align-items: center; gap: 5px; }
+#sk-app .list-foot .hint .icon { width: 12px; height: 12px; }
+#sk-app .folder-scroll { flex: 1; min-height: 0; }
+#sk-app .folder-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(236px, 1fr)); gap: 12px; }
+#sk-app .grid-sect { display: flex; align-items: baseline; gap: 8px; margin: 16px 2px 9px; }
+#sk-app .grid-sect:first-child { margin-top: 2px; }
+#sk-app .grid-sect b { font-family: var(--display); font-size: 13px; font-weight: 650; letter-spacing: -0.01em; }
+#sk-app .grid-sect span { font-size: 11px; color: var(--ink-3); }
+#sk-app .grid-sect .count-text { margin-left: auto; font-size: 11px; white-space: nowrap; }
+#sk-app .file-card { position: relative; display: flex; align-items: center; gap: 9px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); box-shadow: var(--shadow-1); cursor: pointer; text-align: left; transition: border-color var(--fast), box-shadow var(--fast), transform var(--fast); animation: rowIn 220ms var(--ease) both; }
+#sk-app .file-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-2); border-color: var(--line-strong); }
+#sk-app .file-card.is-selected { border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: color-mix(in srgb, var(--accent) 5%, var(--surface)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent); }
+/* 网格卡片里的收藏态：金色描边 + 角标常显 */
+#sk-app .file-card.is-starred { border-color: color-mix(in srgb, var(--warning) 36%, transparent); }
+#sk-app .file-card.is-starred .fc-mark { background: var(--warning-soft); color: var(--warning); }
+#sk-app .fc-mark { width: 26px; height: 26px; border-radius: 8px; background: var(--surface-3); color: var(--ink-2); font-family: var(--display); font-size: 10px; font-weight: 600; display: grid; place-items: center; text-transform: uppercase; flex: none; }
+#sk-app .fc-main { min-width: 0; flex: 1; }
+#sk-app .fc-main b { display: block; font-size: 12.5px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#sk-app .fc-main span { display: block; margin-top: 1px; font-family: var(--mono); font-size: 9.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- 检查器 ---------- */
+#sk-app .inspector { width: var(--inspector-w); flex: 0 0 var(--inspector-w); min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 55%, var(--surface)); position: relative; }
+#sk-app .ins-head { height: var(--topbar-h); flex: 0 0 var(--topbar-h); padding: 0 16px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
+#sk-app .ins-head-main { min-width: 0; flex: 1; }
+#sk-app .ins-head h2 { margin: 3px 0 0; font-family: var(--mono); font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#sk-app .ins-star { width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface); flex: none; }
+#sk-app .ins-star.on { border-color: color-mix(in srgb, var(--warning) 34%, transparent); background: var(--warning-soft); }
+#sk-app .ins-star.pop { border-color: color-mix(in srgb, var(--warning) 34%, transparent); }
+#sk-app .ins-body { flex: 1; min-height: 0; overflow: auto; padding: 14px 16px 16px; scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
+#sk-app .field-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; font-size: 10.5px; letter-spacing: 0.10em; color: var(--ink-3); font-weight: 600; text-transform: uppercase; }
+#sk-app .field { margin-bottom: 14px; }
+#sk-app .ins-input { width: 100%; height: 40px; padding: 0 11px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface); font-size: 14px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); outline: none; transition: border-color var(--fast), box-shadow var(--fast); }
+#sk-app .ins-input:focus { border-color: color-mix(in srgb, var(--accent) 46%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 11%, transparent); }
+#sk-app .ins-area { width: 100%; min-height: 84px; padding: 9px 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface); font-size: 11.5px; line-height: 1.6; color: var(--ink); outline: none; transition: border-color var(--fast), box-shadow var(--fast); }
+#sk-app .ins-area:focus { border-color: color-mix(in srgb, var(--accent) 46%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 11%, transparent); }
+#sk-app .count-row { margin-top: 4px; text-align: right; font-family: var(--mono); font-size: 9.5px; color: var(--ink-4); }
+#sk-app .fold-picker { display: flex; flex-wrap: wrap; gap: 4px; }
+#sk-app .fold-chip { height: 26px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); font-size: 11px; display: inline-flex; align-items: center; gap: 5px; transition: background var(--fast), border-color var(--fast), color var(--fast); }
+#sk-app .fold-chip .catdot { width: 7px; height: 7px; }
+#sk-app .fold-chip:hover { border-color: var(--line-strong); color: var(--ink); }
+#sk-app .fold-chip.on { background: var(--cs, var(--surface-2)); border-color: color-mix(in srgb, var(--c, var(--ink)) 30%, transparent); color: var(--c, var(--ink)); font-weight: 600; }
+#sk-app .fold-chip.dashed { border-style: dashed; color: var(--ink-3); }
+#sk-app .meta-list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+#sk-app .meta-row { min-height: 32px; padding: 6px 9px; display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--line); background: var(--surface); font-size: 11px; }
+#sk-app .meta-row:first-child { border-top: 0; }
+#sk-app .meta-row span:first-child { width: 58px; flex: none; color: var(--ink-3); font-size: 10.5px; }
+#sk-app .meta-row b { flex: 1; min-width: 0; font-family: var(--mono); font-size: 10.5px; font-weight: 400; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#sk-app .meta-row.star-row { background: color-mix(in srgb, var(--warning-soft) 55%, var(--surface)); }
+#sk-app .meta-row.star-row b { color: var(--warning); }
+#sk-app .meta-row .agent-chip { flex: none; }
+#sk-app .path-box { display: flex; align-items: center; gap: 6px; padding: 7px 8px; border-radius: 7px; border: 1px solid var(--line); background: var(--surface); font-family: var(--mono); font-size: 10px; color: var(--ink-2); }
+#sk-app .path-box b { flex: 1; min-width: 0; font-weight: 400; word-break: break-all; }
+#sk-app .path-box button { width: 22px; height: 22px; border-radius: 5px; display: grid; place-items: center; color: var(--ink-3); flex: none; }
+#sk-app .path-box button:hover { background: var(--surface-3); color: var(--ink); }
+#sk-app .path-box .icon { width: 10px; height: 10px; }
+#sk-app .ins-empty { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; color: var(--ink-3); padding: 30px; }
+#sk-app .ins-empty .empty-icon { width: 40px; height: 40px; }
+#sk-app .ins-fav-hint { margin-top: 14px; padding: 11px; border-radius: 10px; border: 1px dashed color-mix(in srgb, var(--warning) 34%, transparent); background: color-mix(in srgb, var(--warning-soft) 55%, transparent); font-size: 11px; line-height: 1.55; color: var(--ink-2); }
+#sk-app .ins-fav-hint b { color: var(--warning); }
+#sk-app .save-state { display: inline-flex; align-items: center; gap: 4px; height: 21px; padding: 0 8px; border-radius: 10px; background: var(--success-soft); color: var(--success); font-size: 10.5px; font-weight: 600; flex: none; }
+#sk-app .save-state .icon { width: 11px; height: 11px; }
+
+/* ---------- 状态栏 ---------- */
+#sk-app .statusbar { height: var(--statusbar-h); flex: 0 0 var(--statusbar-h); padding: 0 14px; display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 70%, var(--surface)); font-size: 10.5px; color: var(--ink-3); position: relative; z-index: 10; }
+#sk-app .status-health { display: flex; align-items: center; gap: 5px; color: var(--ink-2); }
+#sk-app .status-health i { width: 5px; height: 5px; border-radius: 50%; background: var(--success); }
+#sk-app .status-sep { width: 1px; height: 12px; background: var(--line); }
+#sk-app .status-path { font-family: var(--mono); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px; }
+#sk-app .status-star { display: inline-flex; align-items: center; gap: 4px; color: var(--warning); }
+#sk-app .status-star .icon { width: 11px; height: 11px; fill: currentColor; stroke-width: 1.5; }
+#sk-app .status-star b { font-family: var(--display); font-weight: 600; }
+#sk-app .status-right { margin-left: auto; display: flex; align-items: center; gap: 9px; }
+#sk-app .status-right b { font-family: var(--display); font-weight: 600; color: var(--ink-2); }
+
+/* ---------- ⋯ 快捷菜单 ---------- */
+#sk-app .ctx-menu { position: fixed; z-index: 260; min-width: 190px; padding: 4px; border-radius: 11px; border: 1px solid var(--line-strong); background: var(--surface); box-shadow: var(--shadow-2); animation: sk-fadeIn 100ms var(--ease) both; }
+#sk-app .ctx-label { padding: 6px 8px 4px; font-size: 9.5px; letter-spacing: 0.12em; color: var(--ink-3); font-weight: 600; text-transform: uppercase; }
+#sk-app .ctx-item { width: 100%; height: 30px; padding: 0 8px; border-radius: 7px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink); text-align: left; transition: background var(--fast); }
+#sk-app .ctx-item:hover { background: var(--surface-2); }
+#sk-app .ctx-item .icon { width: 13px; height: 13px; color: var(--ink-2); }
+#sk-app .ctx-item.star-item .icon { color: var(--warning); fill: currentColor; stroke-width: 1.5; }
+#sk-app .ctx-item.danger { color: var(--danger); }
+#sk-app .ctx-item.danger .icon { color: var(--danger); }
+#sk-app .ctx-item b { margin-left: auto; font-size: 10px; color: var(--ink-3); font-weight: 500; }
+#sk-app .ctx-sep { height: 1px; background: var(--line); margin: 4px 6px; }
+
+/* ---------- 弹窗 / Toast ---------- */
+#sk-app .overlay { position: absolute; inset: 0; z-index: 240; display: grid; place-items: center; padding: 28px; background: rgba(4, 7, 12, 0.56); backdrop-filter: blur(10px); animation: sk-fadeIn 140ms var(--ease) both; }
+#sk-app .modal { width: 500px; max-width: calc(100% - 20px); max-height: calc(100% - 40px); overflow: auto; border-radius: 16px; border: 1px solid var(--line-strong); background: var(--surface); box-shadow: 0 40px 120px rgba(0, 0, 0, 0.35); animation: sk-modalIn 240ms var(--spring) both; position: relative; scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
+#sk-app .modal-head { padding: 20px 22px 0; }
+#sk-app .modal-eyebrow { font-size: 10px; letter-spacing: 0.16em; color: var(--ink-3); font-weight: 600; }
+#sk-app .modal-head h2 { margin: 5px 0 0; font-family: var(--display); font-size: 19px; line-height: 1.15; letter-spacing: -0.02em; font-weight: 600; padding-right: 28px; }
+#sk-app .modal-close { position: absolute; top: 14px; right: 14px; width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; color: var(--ink-3); }
+#sk-app .modal-close:hover { background: var(--surface-2); color: var(--ink); }
+#sk-app .modal-close .icon { width: 13px; height: 13px; }
+#sk-app .modal-body { padding: 14px 22px 4px; font-size: 12px; line-height: 1.62; color: var(--ink-2); }
+#sk-app .modal-body p { margin: 0 0 9px; }
+#sk-app .modal-body b { color: var(--ink); }
+#sk-app .modal-foot { padding: 14px 22px 20px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+#sk-app .toasts { position: absolute; right: 20px; bottom: 42px; z-index: 250; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+#sk-app .toast { width: 330px; max-width: calc(100% - 40px); min-height: 50px; padding: 10px 11px; border-radius: 11px; border: 1px solid var(--line-strong); background: color-mix(in srgb, var(--surface) 94%, transparent); box-shadow: var(--shadow-3); backdrop-filter: blur(18px); display: flex; align-items: flex-start; gap: 9px; pointer-events: auto; animation: sk-toastIn 280ms var(--spring) both; }
+#sk-app .toast.out { animation: sk-toastOut 180ms var(--ease) both; }
+#sk-app .toast-icon { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; flex: none; background: var(--success-soft); color: var(--success); }
+#sk-app .toast-icon.warn { background: var(--warning-soft); color: var(--warning); }
+#sk-app .toast-icon.bad { background: var(--danger-soft); color: var(--danger); }
+#sk-app .toast-icon.info { background: var(--accent-soft); color: var(--accent); }
+#sk-app .toast-icon.gold { background: var(--warning-soft); color: var(--warning); }
+#sk-app .toast-icon .icon { width: 13px; height: 13px; }
+#sk-app .toast-icon.gold .icon { fill: currentColor; stroke-width: 1.5; }
+#sk-app .toast-main { flex: 1; min-width: 0; }
+#sk-app .toast-main b { display: block; font-size: 12px; font-weight: 600; line-height: 1.3; }
+#sk-app .toast-main span { display: block; margin-top: 2px; font-size: 10.5px; line-height: 1.45; color: var(--ink-2); word-break: break-word; }
+/* 说明弹窗里的规格小表 */
+#sk-app .spec-list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin: 4px 0 10px; }
+#sk-app .spec-row { min-height: 30px; padding: 5px 9px; display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--line); background: var(--surface); font-size: 11px; }
+#sk-app .spec-row:first-child { border-top: 0; }
+#sk-app .spec-row span:first-child { width: 72px; flex: none; color: var(--ink-3); font-size: 10.5px; }
+#sk-app .spec-row b { flex: 1; min-width: 0; font-weight: 500; color: var(--ink); }
+#sk-app .demo-strip { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin-top: 12px; }
+#sk-app .demo-strip .demo-cap { font-size: 10px; letter-spacing: 0.08em; color: var(--ink-4); margin-right: 2px; }
+#sk-app .demo-chip { height: 25px; padding: 0 9px; border-radius: 7px; border: 1px dashed var(--line-strong); background: transparent; color: var(--ink-2); font-size: 10.5px; font-weight: 550; display: inline-flex; gap: 5px; align-items: center; transition: color var(--fast), border-color var(--fast), background var(--fast); }
+#sk-app .demo-chip .icon { width: 11px; height: 11px; }
+#sk-app .demo-chip:hover { border-color: color-mix(in srgb, var(--warning) 52%, transparent); color: var(--warning); background: var(--warning-soft); }
+
+@keyframes sk-fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes sk-modalIn { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes sk-toastIn { from { opacity: 0; transform: translateX(18px) scale(0.97); } to { opacity: 1; transform: translateX(0) scale(1); } }
+@keyframes sk-toastOut { from { opacity: 1; } to { opacity: 0; transform: translateX(18px); } }
+@keyframes rowIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { #sk-app *, #sk-app *::before, #sk-app *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; } }
+@media (max-width: 1340px) { #sk-app { --inspector-w: 312px; --sidebar-w: 204px; } #sk-app .gsearch { width: 240px; flex-basis: 240px; } }
+@media (max-width: 1200px) { #sk-app { --inspector-w: 292px; --sidebar-w: 192px; } #sk-app .brand-sub { display: none; } #sk-app .board-tab { height: 76px; } #sk-app .tab-sub, #sk-app .tab-title em { display: none; } #sk-app .tab-num { font-size: 22px; } }
+@media (max-width: 1060px) { #sk-app .inspector { display: none; } }
+@media (max-width: 860px) { #sk-app .sidebar { display: none; } #sk-app .boards { grid-template-columns: 1fr; } #sk-app .board-tab { height: 60px; } }
+</style>
+
+<div id="sk-app">
+  <div class="window">
+    <!-- ==================================================== titlebar -->
+    <header class="titlebar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true"><svg class="icon"><use href="#i-layers"></use></svg></div>
+        <span class="wordmark">skilllocker</span>
+        <span class="brand-divider"></span>
+        <span class="brand-sub">SKILL LIBRARY</span>
+      </div>
+      <div class="gsearch">
+        <svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg>
+        <input id="gsearch" type="text" placeholder="搜索名称、备注、分类" autocomplete="off" spellcheck="false" aria-label="搜索 skill">
+        <span class="kbd">Ctrl K</span>
+      </div>
+      <div class="title-actions">
+        <span class="local-pill"><i></i>LOCAL</span>
+        <button class="icon-btn" id="theme-toggle" title="切换深色模式" aria-label="切换深色模式">
+          <svg class="icon" aria-hidden="true"><use href="#i-moon"></use></svg>
+        </button>
+        <div class="win-controls">
+          <button class="win-btn" title="最小化"><svg class="icon" aria-hidden="true"><use href="#i-minus"></use></svg></button>
+          <button class="win-btn" title="最大化"><svg class="icon" aria-hidden="true"><use href="#i-maximize"></use></svg></button>
+          <button class="win-btn close" title="关闭"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg></button>
+        </div>
+      </div>
+    </header>
+
+    <!-- ==================================================== body -->
+    <div class="app-body">
+
+      <!-- ------------------------------------------------ sidebar -->
+      <aside class="sidebar">
+        <div class="store-card">
+          <div class="store-top">
+            <span class="eyebrow">Central Store</span>
+            <span class="live"><i></i>LIVE</span>
+          </div>
+          <div class="store-path">D:\skilllocker\store</div>
+          <div class="store-meta"><span><b>51</b> skills</span><span>54.4 MB</span></div>
+          <div class="health-track"><span></span></div>
+        </div>
+
+        <button class="import-cta" id="btn-import-side">
+          <svg class="icon" aria-hidden="true"><use href="#i-download"></use></svg>导入 Skill
+        </button>
+
+        <div>
+          <div class="nav-label">看板</div>
+          <nav class="nav" aria-label="看板切换">
+            <button class="nav-item" data-nav="shared" id="nav-shared">
+              <svg class="icon" aria-hidden="true"><use href="#i-layers"></use></svg>
+              <span>共有技能</span><span class="nav-badge">51</span>
+            </button>
+            <button class="nav-item" data-nav="unique" id="nav-unique">
+              <svg class="icon" aria-hidden="true"><use href="#i-sparkle"></use></svg>
+              <span>独有技能</span><span class="nav-badge">2</span>
+            </button>
+            <button class="nav-item" data-nav="agents" id="nav-agents">
+              <svg class="icon" aria-hidden="true"><use href="#i-bot"></use></svg>
+              <span>智能体</span><span class="nav-badge">7</span>
+            </button>
+            <button class="nav-item star-nav" data-nav="starred" id="nav-star" aria-label="收藏">
+              <svg class="icon" aria-hidden="true"><use href="#i-star"></use></svg>
+              <span>收藏</span><span class="nav-badge" id="nav-star-badge">0</span>
+            </button>
+          </nav>
+        </div>
+
+        <div class="side-stat" aria-label="库概览">
+          <div><b>7</b><span>agents</span></div>
+          <div><b id="stat-edited">2</b><span>已编辑</span></div>
+          <div><b>7</b><span>分类文件夹</span></div>
+          <div><b>0</b><span>未归档</span></div>
+        </div>
+
+        <div>
+          <div class="nav-label-row"><span class="nav-label">分类文件夹</span></div>
+          <nav class="nav" id="side-folders" aria-label="分类文件夹"></nav>
+        </div>
+
+        <div class="sidebar-foot">
+          <button class="settings-btn" id="open-settings">
+            <svg class="icon" aria-hidden="true"><use href="#i-settings"></use></svg>
+            <span>设置与数据</span><kbd>⌘,</kbd>
+          </button>
+          <div class="version">v0.3.0 · 快照 22:16</div>
+        </div>
+      </aside>
+
+      <!-- ------------------------------------------------ workspace -->
+      <main class="workspace">
+        <header class="topbar">
+          <div class="topbar-title">
+            <h1 id="page-title">共有技能</h1>
+            <p id="page-sub">51 个 skill 同时存在于 7 个 agent · 全部指向中央仓库</p>
+          </div>
+          <div class="topbar-actions">
+            <div class="segmented" id="view-seg" role="group" aria-label="视图切换">
+              <button data-view-mode="grid" title="卡片网格视图"><svg class="icon"><use href="#i-grid"></use></svg>网格</button>
+              <button data-view-mode="list" class="active" title="列表视图"><svg class="icon"><use href="#i-rows"></use></svg>列表</button>
+            </div>
+            <button class="icon-btn" id="about-btn" title="原型说明：收藏功能设计" aria-label="原型说明">
+              <svg class="icon" aria-hidden="true"><use href="#i-info"></use></svg>
+            </button>
+            <button class="icon-btn" id="refresh-btn" title="刷新" aria-label="刷新数据">
+              <svg class="icon" aria-hidden="true"><use href="#i-refresh"></use></svg>
+            </button>
+            <button class="sort-btn" id="sort-btn" title="切换排序">
+              <svg class="icon" aria-hidden="true"><use href="#i-sort"></use></svg>
+              <span id="sort-label">名称 A→Z</span>
+            </button>
+          </div>
+        </header>
+
+        <div class="content">
+          <div class="boards-wrap">
+            <div class="boards" role="tablist" aria-label="技能看板">
+              <button class="board-tab active" data-board="shared" role="tab" aria-selected="true">
+                <span class="tab-icon"><svg class="icon" aria-hidden="true"><use href="#i-layers"></use></svg></span>
+                <span class="tab-main">
+                  <span class="tab-title"><b>共有技能</b><em>7 个分类文件夹</em></span>
+                  <span class="tab-sub">手动建夹 · 拖拽归档 · 像资源管理器一样管理</span>
+                </span>
+                <span class="tab-num">51</span>
+              </button>
+              <button class="board-tab" data-board="unique" role="tab" aria-selected="false">
+                <span class="tab-icon"><svg class="icon" aria-hidden="true"><use href="#i-sparkle"></use></svg></span>
+                <span class="tab-main">
+                  <span class="tab-title"><b>独有技能</b><em>1 + 1 同名覆盖</em></span>
+                  <span class="tab-sub">只存在于某个 agent · 中央仓库没有或内容不同</span>
+                </span>
+                <span class="tab-num">2</span>
+              </button>
+              <button class="board-tab" data-board="agents" role="tab" aria-selected="false">
+                <span class="tab-icon"><svg class="icon" aria-hidden="true"><use href="#i-bot"></use></svg></span>
+                <span class="tab-main">
+                  <span class="tab-title"><b>智能体</b><em>7 已连接</em></span>
+                  <span class="tab-sub">本机 agent 与 skills 目录的链接开关</span>
+                </span>
+                <span class="tab-num">7</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="crumb-bar" id="crumb-bar" hidden></div>
+
+          <div class="list-card" id="list-card">
+            <div class="list-head" id="list-head"></div>
+            <div class="list-body" id="list-body"></div>
+            <div class="empty" id="list-empty" hidden></div>
+            <div class="list-foot">
+              <span class="hint">
+                <svg class="icon" aria-hidden="true"><use href="#i-info"></use></svg>
+                <span id="list-foot-hint">行尾 ☆ 收藏常用 skill · ⋯ 菜单里也能收藏 · 选中后按 F 快捷收藏</span>
+              </span>
+              <span id="list-foot-count">12 条（示例数据）</span>
+            </div>
+          </div>
+
+          <div class="folder-scroll" id="grid-root" hidden></div>
+        </div>
+      </main>
+
+      <!-- ------------------------------------------------ inspector -->
+      <aside class="inspector" aria-label="Skill 编辑面板">
+        <div class="ins-head">
+          <div class="ins-head-main">
+            <span class="eyebrow">Skill Detail</span>
+            <h2 id="ins-raw-name">—</h2>
+          </div>
+          <button class="ins-star" id="ins-star" title="收藏 / 取消收藏" aria-label="收藏">
+            <svg class="icon" aria-hidden="true"><use href="#i-star"></use></svg>
+          </button>
+          <span class="save-state" id="save-state" hidden>
+            <svg class="icon" aria-hidden="true"><use href="#i-check"></use></svg>
+            <span>已保存</span>
+          </span>
+        </div>
+        <div class="ins-body" id="ins-body"></div>
+      </aside>
+
+    </div>
+
+    <!-- ==================================================== statusbar -->
+    <footer class="statusbar">
+      <span class="status-health"><i></i><b>51 共有 · 2 独有</b></span>
+      <span class="status-sep"></span>
+      <span class="status-path">D:\skilllocker\store</span>
+      <span class="status-sep"></span>
+      <span>已编辑 <b id="sb-edited">2</b> 条</span>
+      <span class="status-sep"></span>
+      <span class="status-star" title="收藏数"><svg class="icon" aria-hidden="true"><use href="#i-star"></use></svg><b id="sb-star">0</b> 收藏</span>
+      <div class="status-right">
+        <span>SQLite <b>WAL</b></span>
+        <span class="status-sep"></span>
+        <span>扫描 <b>22:16</b></span>
+        <span class="status-sep"></span>
+        <span>v0.3.0</span>
+      </div>
+    </footer>
+
+    <div id="modal-root"></div>
+    <div class="toasts" id="toasts" aria-live="polite"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var root = document.getElementById('sk-app');
+  var mroot = document.getElementById('modal-root');
+  var LS_KEY = 'skilllocker.favorites.proto.v1';
+
+  /* ---------------- 示例数据（取自 data.js 真实快照的子集） ---------------- */
+  var FOLDERS = {
+    design:  { name: '设计', c: 'var(--violet)',  cs: 'var(--violet-soft)' },
+    frontend:{ name: '前端', c: 'var(--accent)',  cs: 'var(--accent-soft)' },
+    doc:     { name: '文档', c: 'var(--warning)', cs: 'var(--warning-soft)' },
+    video:   { name: '视频', c: 'var(--rose)',    cs: 'var(--rose-soft)' },
+    memory:  { name: '记忆', c: 'var(--teal)',    cs: 'var(--teal-soft)' },
+    eng:     { name: '工程', c: 'var(--slate)',   cs: 'var(--slate-soft)' },
+    search:  { name: '检索', c: 'var(--success)', cs: 'var(--success-soft)' }
+  };
+
+  var SKILLS = [
+    { key: 'aihot',                label: 'aihot',                 folder: 'search',   note: '',                                            size: '0.4 MB', files: 6,  updated: '10-25 11:02' },
+    { key: 'brandkit',             label: 'brandkit',              folder: 'design',   note: '',                                            size: '1.2 MB', files: 11, updated: '10-24 09:18' },
+    { key: 'browser-use',          label: 'browser-use',           folder: 'eng',      note: '控制浏览器做端到端验证，比截图自查可靠',         size: '2.8 MB', files: 22, updated: '10-28 14:10' },
+    { key: 'docx',                 label: 'docx',                  folder: 'doc',      note: '',                                            size: '3.6 MB', files: 30, updated: '10-22 16:40' },
+    { key: 'frontend-design',      label: 'frontend-design',       folder: 'design',   note: 'taste 基准稿',                                size: '0.9 MB', files: 9,  updated: '10-30 19:22' },
+    { key: 'mnemosyne-os-memory',  label: 'mnemosyne-os-memory',   folder: 'memory',   note: '记忆系统主 skill',                             size: '1.7 MB', files: 15, updated: '10-21 20:05' },
+    { key: 'pdf',                  label: 'pdf',                   folder: 'doc',      note: '拆页 / 合并 / 提取文本高频；workbuddy 有同名覆盖，见差异', size: '2.1 MB', files: 14, updated: '10-29 18:40', conflict: true },
+    { key: 'remotion-render',      label: 'remotion-render',       folder: 'video',    note: '渲染前对齐 remotion-docs 的版本约定',           size: '1.4 MB', files: 12, updated: '10-27 09:31' },
+    { key: 'skill-creator',        label: 'skill-creator',         folder: 'eng',      note: '做新 skill 的脚手架',                          size: '0.6 MB', files: 8,  updated: '10-23 13:27' },
+    { key: 'ui-design-system',     label: 'ui-design-system',      folder: 'design',   note: '出 UI 前先读；token 体系与本仓库样式一致',      size: '1.1 MB', files: 10, updated: '10-31 09:12', display: 'UI 设计系统' },
+    { key: 'web-artifacts-builder',label: 'web-artifacts-builder', folder: 'frontend', note: '',                                            size: '1.9 MB', files: 17, updated: '10-20 15:33' },
+    { key: 'webapp-testing',       label: 'webapp-testing',        folder: 'frontend', note: 'Playwright + 系统 Edge 跑回归',                size: '1.3 MB', files: 13, updated: '10-30 08:47' }
+  ];
+
+  var UNIQUE = [
+    { key: 'workbuddy/pdf', name: 'pdf', tool: 'workbuddy', toolLabel: 'Workbuddy', mark: 'WB',
+      note: '同名覆盖：与中央仓库内容不同，走差异处置', size: '412 KB', files: 19, updated: '10-26 20:18' }
+  ];
+
+  /* 预置收藏（演示用；正式版空起步） */
+  var PRESET_STAR = {
+    'shared|pdf': '10-31 21:04',
+    'shared|ui-design-system': '10-31 09:12',
+    'shared|webapp-testing': '10-30 19:22',
+    'shared|remotion-render': '10-29 08:47',
+    'shared|browser-use': '10-28 14:10',
+    'unique|workbuddy/pdf': '10-26 20:18'
+  };
+
+  var state = {
+    view: 'root',            /* root | starred */
+    viewMode: 'list',        /* list | grid */
+    sort: 'name',            /* name | starred */
+    q: '',
+    sel: null,               /* 'shared|pdf' */
+    starred: {},             /* { 'scope|key': 'MM-DD HH:MM' } */
+    edited: { 'shared|ui-design-system': 1, 'shared|frontend-design': 1 }
+  };
+
+  /* ---------------- localStorage ---------------- */
+  function lsLoad() {
+    try {
+      var raw = localStorage.getItem(LS_KEY);
+      if (!raw) { state.starred = Object.assign({}, PRESET_STAR); return; }
+      var d = JSON.parse(raw);
+      state.starred = d.starred || {};
+      if (d.viewMode) state.viewMode = d.viewMode;
+      if (d.sort) state.sort = d.sort;
+    } catch (e) { state.starred = Object.assign({}, PRESET_STAR); }
+  }
+  function lsSave() {
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify({ starred: state.starred, viewMode: state.viewMode, sort: state.sort }));
+    } catch (e) {}
+  }
+
+  /* ---------------- utils ---------------- */
+  function icon(n) { return '<svg class="icon" aria-hidden="true"><use href="#i-' + n + '"></use></svg>'; }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (ch) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]; }); }
+  function mark(name) { return esc(name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 2) || 'SK'); }
+  function displayName(scope, key) {
+    if (scope === 'unique') {
+      var u = UNIQUE.filter(function (x) { return x.key === key; })[0];
+      return u ? u.name : key;
+    }
+    var s = SKILLS.filter(function (x) { return x.key === key; })[0];
+    return s ? (s.display || s.label) : key;
+  }
+  function findSkill(fullKey) {
+    var p = fullKey.split('|');
+    if (p[0] === 'unique') return UNIQUE.filter(function (x) { return x.key === p[1]; })[0] || null;
+    return SKILLS.filter(function (x) { return x.key === p[1]; })[0] || null;
+  }
+  function isStarred(fullKey) { return !!state.starred[fullKey]; }
+  function starCount() { return Object.keys(state.starred).length; }
+  function editedCount() { return Object.keys(state.edited).length; }
+  function coverOf(s) { return s.conflict ? { ok: 6, bad: 1, text: '6/7', badText: true } : { ok: 7, bad: 0, text: '7/7', badText: false }; }
+
+  /* ---------------- toast ---------------- */
+  function toast(kind, title, sub, ic) {
+    var box = document.getElementById('toasts');
+    var el = document.createElement('div');
+    el.className = 'toast';
+    el.innerHTML = '<span class="toast-icon ' + kind + '">' + icon(ic || (kind === 'bad' ? 'alert' : kind === 'info' ? 'info' : 'check')) + '</span>' +
+      '<div class="toast-main"><b>' + esc(title) + '</b>' + (sub ? '<span>' + esc(sub) + '</span>' : '') + '</div>';
+    box.appendChild(el);
+    setTimeout(function () {
+      el.classList.add('out');
+      setTimeout(function () { el.remove(); }, 190);
+    }, 2600);
+  }
+
+  /* ---------------- 行 / 卡片模板 ---------------- */
+  function starBtn(fullKey, cls) {
+    var on = isStarred(fullKey);
+    return '<button class="' + cls + (on ? ' on' : '') + '" data-star="' + esc(fullKey) + '" title="' + (on ? '取消收藏' : '收藏') + '" aria-label="' + (on ? '取消收藏' : '收藏') + '">' + icon('star') + '</button>';
+  }
+  function moreBtn(fullKey) { return '<button class="row-more" data-more="' + esc(fullKey) + '" title="更多操作">' + icon('ellipsis') + '</button>'; }
+
+  function rowHtml(fullKey, num, delay) {
+    var scope = fullKey.split('|')[0];
+    var s = findSkill(fullKey);
+    if (!s) return '';
+    var isU = scope === 'unique';
+    var catCell = isU
+      ? '<span class="agent-chip">' + esc(s.mark) + ' ' + esc(s.toolLabel) + '</span>'
+      : '<span class="cat" style="--cs:' + FOLDERS[s.folder].cs + ';--c:' + FOLDERS[s.folder].c + '"><i></i>' + esc(FOLDERS[s.folder].name) + '</span>';
+    var midCell = isU ? catCell : catCell; /* 列义随表头：分类 / 分类·来源 */
+    var timeCell = isStarred(fullKey)
+      ? '<span class="row-starred-at">' + esc(state.starred[fullKey]) + '</span>'
+      : '<span class="row-note is-empty">—</span>';
+    var coverCell = isU
+      ? '<div class="row-cover"><span class="cover-text" title="独有技能不参与分发">本地</span></div>'
+      : (function () {
+          var c = coverOf(s);
+          var segs = '';
+          for (var i = 0; i < c.ok; i++) segs += '<span class="cover-seg"></span>';
+          for (var j = 0; j < c.bad; j++) segs += '<span class="cover-seg bad"></span>';
+          return '<div class="row-cover"><span class="cover-bar">' + segs + '</span><span class="cover-text' + (c.badText ? ' bad' : '') + '">' + c.text + '</span></div>';
+        })();
+    return '<div class="row' + (s.conflict ? ' is-conflict' : '') + (state.sel === fullKey ? ' is-selected' : '') + '"' +
+      ' data-skill="' + esc(fullKey) + '" style="animation-delay:' + (delay || 0) + 'ms">' +
+      '<span class="row-num">' + num + '</span>' +
+      '<div class="row-main">' +
+        '<div class="row-title"><span class="row-name">' + esc(displayName(scope, s.key)) + '</span></div>' +
+        '<span class="row-label">' + esc(isU ? s.tool + '/' + s.name : s.key) + '</span>' +
+      '</div>' +
+      '<div class="row-folder">' + midCell + '</div>' +
+      '<div class="row-note' + (s.note ? '' : ' is-empty') + '">' + (s.note ? esc(s.note) : '添加备注…') + '</div>' +
+      '<div>' + (state.view === 'starred' ? timeCell : coverCell) + '</div>' +
+      '<div class="row-end">' + starBtn(fullKey, 'row-star') + moreBtn(fullKey) + '<span class="row-go">' + icon('chevron-right') + '</span></div>' +
+    '</div>';
+  }
+
+  function cardHtml(fullKey, delay) {
+    var scope = fullKey.split('|')[0];
+    var s = findSkill(fullKey);
+    if (!s) return '';
+    var isU = scope === 'unique';
+    var sub = isU
+      ? 'workbuddy · 独有'
+      : FOLDERS[s.folder].name + ' · ' + s.size + ' · ' + s.files + ' 文件' + (isStarred(fullKey) ? ' · ★ ' + state.starred[fullKey] : '');
+    return '<div class="file-card' + (isStarred(fullKey) ? ' is-starred' : '') + (state.sel === fullKey ? ' is-selected' : '') + '"' +
+      ' data-skill="' + esc(fullKey) + '" style="animation-delay:' + (delay || 0) + 'ms">' +
+      '<span class="fc-mark">' + mark(isU ? s.name : s.key) + '</span>' +
+      '<div class="fc-main"><b>' + esc(displayName(scope, s.key)) + '</b><span>' + esc(sub) + '</span></div>' +
+      starBtn(fullKey, 'fc-star') + moreBtn(fullKey) +
+    '</div>';
+  }
+
+  /* ---------------- 数据视图：过滤 + 排序 ---------------- */
+  function visibleKeys() {
+    var keys = [];
+    if (state.view === 'starred') {
+      Object.keys(state.starred).forEach(function (k) { if (findSkill(k)) keys.push(k); });
+    } else {
+      SKILLS.forEach(function (s) { keys.push('shared|' + s.key); });
+    }
+    if (state.q) {
+      var q = state.q.toLowerCase();
+      keys = keys.filter(function (k) {
+        var s = findSkill(k);
+        var hay = (displayName(k.split('|')[0], s.key) + ' ' + s.key + ' ' + (s.note || '')).toLowerCase();
+        return q.split(/\s+/).every(function (w) { return hay.indexOf(w) >= 0; });
+      });
+    }
+    var timeDesc = function (a, b) { return (state.starred[b] || '').localeCompare(state.starred[a] || ''); };
+    var byName = function (a, b) {
+      var sa = displayName(a.split('|')[0], findSkill(a).key);
+      var sb = displayName(b.split('|')[0], findSkill(b).key);
+      return sa.localeCompare(sb, 'zh-Hans-CN');
+    };
+    if (state.sort === 'starred') {
+      keys.sort(function (a, b) {
+        var sa = isStarred(a) ? 1 : 0, sb = isStarred(b) ? 1 : 0;
+        if (sa !== sb) return sb - sa;
+        if (sa === 1) return timeDesc(a, b);
+        return byName(a, b);
+      });
+    } else {
+      keys.sort(byName);
+    }
+    return keys;
+  }
+
+  /* 独有收藏排在共有之后（与真实库的 board 顺序一致），仅收藏视图 */
+  function orderedKeys() {
+    var keys = visibleKeys();
+    if (state.view !== 'starred') return keys;
+    return keys.filter(function (k) { return k.indexOf('shared|') === 0; })
+      .concat(keys.filter(function (k) { return k.indexOf('unique|') === 0; }));
+  }
+
+  /* ---------------- 渲染 ---------------- */
+  function renderNav() {
+    var navStar = document.getElementById('nav-star');
+    document.querySelectorAll('.nav-item[data-nav]').forEach(function (n) {
+      var k = n.getAttribute('data-nav');
+      var active = (k === 'starred' && state.view === 'starred') || (k === 'shared' && state.view === 'root');
+      n.classList.toggle('active', active);
+    });
+    document.getElementById('nav-star-badge').textContent = starCount();
+    void navStar;
+  }
+
+  function renderBoards() {
+    document.querySelectorAll('.board-tab').forEach(function (b) {
+      var on = b.getAttribute('data-board') === 'shared' && state.view === 'root';
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+  }
+
+  function renderTop() {
+    var t = document.getElementById('page-title');
+    var sub = document.getElementById('page-sub');
+    if (state.view === 'starred') {
+      var nShared = Object.keys(state.starred).filter(function (k) { return k.indexOf('shared|') === 0; }).length;
+      var nUnique = starCount() - nShared;
+      t.innerHTML = '<span class="page-star">' + icon('star') + '</span>收藏';
+      sub.textContent = starCount() + ' 个常用 skill（' + nShared + ' 共有 + ' + nUnique + ' 独有）· 星标存在 skill 元数据里，改名 / 移动分类都不会丢';
+    } else {
+      t.textContent = '共有技能';
+      sub.textContent = '51 个 skill 同时存在于 7 个 agent · 全部指向中央仓库（示例展示 12 条）';
+    }
+  }
+
+  function renderCrumb() {
+    var bar = document.getElementById('crumb-bar');
+    if (state.view !== 'starred') { bar.hidden = true; bar.innerHTML = ''; return; }
+    var nShared = Object.keys(state.starred).filter(function (k) { return k.indexOf('shared|') === 0; }).length;
+    var nUnique = starCount() - nShared;
+    bar.hidden = false;
+    bar.innerHTML =
+      '<button class="crumb-root" data-crumb-root>' + icon('folder') + '共有技能</button>' +
+      '<span class="crumb-sep">' + icon('chevron-right') + '</span>' +
+      '<span class="crumb-here crumb-star">' + icon('star') + '收藏</span>' +
+      '<span class="crumb-meta">' + nShared + ' 共有 + ' + nUnique + ' 独有 · 默认按收藏时间倒序</span>' +
+      '<div class="crumb-actions"><button class="btn btn-sm clear-star" id="clear-star-btn" title="取消全部收藏">' + icon('trash') + '清空收藏</button></div>';
+    var btn = document.getElementById('clear-star-btn');
+    if (btn) bindClearStar(btn);
+  }
+
+  var clearArm = false, clearTimer = null;
+  function bindClearStar(btn) {
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (!clearArm) {
+        if (!starCount()) { toast('info', '收藏夹本来就是空的', '在任意行尾点 ☆ 即可收藏'); return; }
+        clearArm = true;
+        btn.classList.add('arm');
+        btn.innerHTML = icon('alert') + '确认清空？';
+        clearTimer = setTimeout(function () { resetClearStar(btn); }, 2600);
+        return;
+      }
+      clearTimeout(clearTimer);
+      var n = starCount();
+      state.starred = {};
+      resetClearStar(btn);
+      lsSave(); renderAll();
+      toast('warn', '已清空 ' + n + ' 个收藏', 'skill 本体不受影响 · 重新点 ☆ 可再收藏', 'trash');
+    });
+    function resetClearStar(b) {
+      clearArm = false;
+      b.classList.remove('arm');
+      b.innerHTML = icon('trash') + '清空收藏';
+    }
+  }
+
+  function renderHead() {
+    var head = document.getElementById('list-head');
+    if (state.view === 'starred') {
+      head.innerHTML = '<span></span><span>SKILL</span><span>分类 · 来源</span><span>备注</span><span>收藏于</span><span></span>';
+    } else {
+      head.innerHTML = '<span></span><span>SKILL</span><span>分类</span><span>备注</span><span>分发覆盖</span><span></span>';
+    }
+  }
+
+  function renderList() {
+    var body = document.getElementById('list-body');
+    var empty = document.getElementById('list-empty');
+    var keys = orderedKeys();
+    renderHead();
+    if (!keys.length) {
+      body.innerHTML = '';
+      empty.hidden = false;
+      renderEmpty(empty);
+      return;
+    }
+    empty.hidden = true;
+    var html = '', num = 0, lastScope = 'shared';
+    keys.forEach(function (k, i) {
+      var scope = k.split('|')[0];
+      if (state.view === 'starred' && scope === 'unique' && lastScope === 'shared') {
+        html += '<div class="agent-divider"><span class="ad-mark">WB</span><span class="ad-name">Workbuddy · 独有</span><span class="ad-count">' +
+          keys.filter(function (x) { return x.indexOf('unique|') === 0; }).length + ' 个</span><span class="ad-line"></span></div>';
+      }
+      lastScope = scope;
+      num += 1;
+      html += rowHtml(k, num, Math.min(i * 14, 160));
+    });
+    body.innerHTML = html;
+  }
+
+  function renderEmpty(empty) {
+    if (state.view === 'starred' && !starCount() && !state.q) {
+      empty.innerHTML =
+        '<div class="empty-icon gold">' + icon('star') + '</div>' +
+        '<b>还没有收藏的 skill</b>' +
+        '<span>在任意行尾、卡片角或详情栏点 ☆ 收藏常用技能；收藏会汇集在这里，按收藏时间排序，改名与移动分类都不会丢。</span>' +
+        '<button class="btn btn-sm" data-empty-goto>去共有技能逛逛</button>';
+    } else {
+      empty.innerHTML =
+        '<div class="empty-icon">' + icon('search') + '</div>' +
+        '<b>没有匹配的 ' + (state.view === 'starred' ? '收藏' : 'skill') + '</b>' +
+        '<span>换个关键词，或清除搜索</span>' +
+        '<button class="btn btn-sm" data-empty-reset>清除筛选</button>';
+    }
+  }
+
+  function renderGrid() {
+    var g = document.getElementById('grid-root');
+    var keys = orderedKeys();
+    if (!keys.length) { g.hidden = true; document.getElementById('list-card').hidden = false; renderList(); return; }
+    document.getElementById('list-card').hidden = true;
+    g.hidden = false;
+    var nStar = keys.filter(function (k) { return isStarred(k); }).length;
+    var html = '<div class="grid-sect"><b>' + (state.view === 'starred' ? '收藏' : '全部技能') + '</b>' +
+      '<span>' + keys.length + ' 个 · ' + nStar + ' 个已收藏</span><span class="count-text">' + (state.sort === 'starred' ? '收藏优先' : '名称 A→Z') + '</span></div>' +
+      '<div class="folder-grid">';
+    keys.forEach(function (k, i) { html += cardHtml(k, Math.min(i * 14, 160)); });
+    html += '</div>';
+    g.innerHTML = html;
+  }
+
+  function renderFoot() {
+    var keys = orderedKeys();
+    document.getElementById('list-foot-hint').textContent = state.view === 'starred'
+      ? '点 ☆ 取消收藏即从列表移除 · 排序跟随顶栏设置'
+      : '行尾 ☆ 收藏常用 skill · ⋯ 菜单里也能收藏 · 选中后按 F 快捷收藏';
+    document.getElementById('list-foot-count').textContent = keys.length + ' 条' + (state.view === 'root' ? '（示例数据）' : '');
+  }
+
+  function renderStatus() {
+    document.getElementById('sb-star').textContent = starCount();
+    document.getElementById('sb-edited').textContent = editedCount();
+    document.getElementById('stat-edited').textContent = editedCount();
+  }
+
+  /* ---------------- 检查器 ---------------- */
+  var saveTimer = null;
+  function flashSave() {
+    var el = document.getElementById('save-state');
+    el.hidden = false;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function () { el.hidden = true; }, 1400);
+  }
+
+  function renderInspector() {
+    var body = document.getElementById('ins-body');
+    var starBtnEl = document.getElementById('ins-star');
+    var raw = document.getElementById('ins-raw-name');
+    if (!state.sel || !findSkill(state.sel)) {
+      raw.textContent = '—';
+      starBtnEl.hidden = true;
+      body.innerHTML = '<div class="ins-empty"><div class="empty-icon">' + icon('search') + '</div><b>未选中 skill</b><span>点任意一行查看详情</span></div>';
+      return;
+    }
+    starBtnEl.hidden = false;
+    var scope = state.sel.split('|')[0];
+    var s = findSkill(state.sel);
+    var isU = scope === 'unique';
+    raw.textContent = isU ? s.tool + '/' + s.name : s.key;
+    starBtnEl.classList.toggle('on', isStarred(state.sel));
+    starBtnEl.title = isStarred(state.sel) ? '取消收藏' : '收藏';
+
+    var html = '';
+    /* 显示名称 */
+    html += '<div class="field"><div class="field-label"><span>显示名称</span><span style="letter-spacing:0">只改界面，不改目录名</span></div>' +
+      '<input class="ins-input" id="ins-display" value="' + esc(displayName(scope, s.key)) + '"' + (isU ? ' readonly' : '') + '></div>';
+    /* 归属分类 / 来源 */
+    if (isU) {
+      html += '<div class="field"><div class="field-label"><span>来源</span></div>' +
+        '<div class="meta-list"><div class="meta-row"><span>agent</span><b>' + esc(s.toolLabel) + '</b><span class="agent-chip">' + esc(s.mark) + '</span></div>' +
+        '<div class="meta-row"><span>种类</span><b>同名覆盖（与中央仓库内容不同）</b></div></div></div>';
+    } else {
+      html += '<div class="field"><div class="field-label"><span>归属分类</span></div><div class="fold-picker">';
+      html += '<button class="fold-chip dashed" data-fold="">未归档</button>';
+      Object.keys(FOLDERS).forEach(function (fid) {
+        html += '<button class="fold-chip' + (s.folder === fid ? ' on' : '') + '" data-fold="' + fid + '" style="--cs:' + FOLDERS[fid].cs + ';--c:' + FOLDERS[fid].c + '"><span class="catdot"></span>' + esc(FOLDERS[fid].name) + '</button>';
+      });
+      html += '</div></div>';
+    }
+    /* 备注 */
+    html += '<div class="field"><div class="field-label"><span>备注</span><span id="ins-note-count" style="letter-spacing:0; font-family:var(--mono)">' + (s.note || '').length + ' / 400</span></div>' +
+      '<textarea class="ins-area" id="ins-note" maxlength="400" placeholder="记用途 / 坑 / 来源…">' + esc(s.note || '') + '</textarea></div>';
+    /* 收藏时间 */
+    if (isStarred(state.sel)) {
+      html += '<div class="field"><div class="field-label"><span>收藏</span></div>' +
+        '<div class="meta-list"><div class="meta-row star-row"><span>收藏于</span><b>' + esc(state.starred[state.sel]) + '</b>' + icon('star') + '</div></div></div>';
+    } else {
+      html += '<div class="ins-fav-hint"><b>☆ 收藏</b> · 点右上角星标把「' + esc(displayName(scope, s.key)) + '」加进收藏夹，侧栏 ★ 一键直达。</div>';
+    }
+    /* 元信息 */
+    html += '<div class="field"><div class="field-label"><span>元信息</span></div><div class="meta-list">' +
+      '<div class="meta-row"><span>原始名</span><b>' + esc(isU ? s.tool + '/' + s.name : s.key) + '</b></div>' +
+      '<div class="meta-row"><span>大小</span><b>' + esc(s.size) + ' · ' + s.files + ' 文件</b></div>' +
+      '<div class="meta-row"><span>更新</span><b>' + esc(s.updated) + '</b></div>' +
+      '<div class="meta-row"><span>分发</span><b>' + (isU ? '本地实体（不分发）' : '7 agent junction') + '</b></div>' +
+      '</div></div>';
+    /* 路径 */
+    html += '<div class="field"><div class="path-box"><b>' + (isU ? 'C:\\Users\\LENOVO\\.' + esc(s.tool) + '\\skills\\' + esc(s.name) : 'D:\\skilllocker\\store\\' + esc(s.key)) + '</b>' +
+      '<button data-copy title="复制路径">' + icon('copy') + '</button></div></div>';
+
+    body.innerHTML = html;
+
+    var disp = document.getElementById('ins-display');
+    if (disp && !isU) {
+      disp.addEventListener('input', function () {
+        s.display = this.value;
+        markEdited(state.sel);
+        renderContentSoft();
+      });
+    }
+    var note = document.getElementById('ins-note');
+    if (note) {
+      note.addEventListener('input', function () {
+        s.note = this.value;
+        document.getElementById('ins-note-count').textContent = this.value.length + ' / 400';
+        markEdited(state.sel);
+        renderContentSoft();
+      });
+    }
+    body.querySelectorAll('[data-fold]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        toast('info', '原型聚焦收藏功能', '归属分类交互见 design-category-folders.html；移动分类不影响收藏（key 不变）');
+      });
+    });
+    var cp = body.querySelector('[data-copy]');
+    if (cp) {
+      cp.addEventListener('click', function () {
+        var p = isU ? 'C:\\Users\\LENOVO\\.' + s.tool + '\\skills\\' + s.name : 'D:\\skilllocker\\store\\' + s.key;
+        try { navigator.clipboard.writeText(p); } catch (e) {}
+        toast('ok', '路径已复制', p);
+      });
+    }
+  }
+
+  function markEdited(fullKey) {
+    if (fullKey.indexOf('unique|') === 0) return;
+    state.edited[fullKey] = 1;
+    flashSave();
+    renderStatus();
+  }
+
+  /* 软刷新：只更新行内文字，不重建 DOM（保焦点） */
+  function renderContentSoft() {
+    document.querySelectorAll('#list-body .row, #grid-root .file-card').forEach(function (el) {
+      var k = el.getAttribute('data-skill');
+      var s = findSkill(k);
+      if (!s) return;
+      var scope = k.split('|')[0];
+      var nameEl = el.querySelector('.row-name') || el.querySelector('.fc-main b');
+      if (nameEl) nameEl.textContent = displayName(scope, s.key);
+      var noteEl = el.querySelector('.row-note');
+      if (noteEl) { noteEl.textContent = s.note || '添加备注…'; noteEl.classList.toggle('is-empty', !s.note); }
+    });
+  }
+
+  function renderAll() {
+    renderNav(); renderBoards(); renderTop(); renderCrumb(); renderFoot(); renderStatus();
+    if (state.viewMode === 'grid') { renderGrid(); document.getElementById('list-card').hidden = true; }
+    else { renderList(); document.getElementById('grid-root').hidden = true; document.getElementById('list-card').hidden = false; }
+    renderInspector();
+    syncSeg();
+  }
+
+  function syncSeg() {
+    document.querySelectorAll('#view-seg button').forEach(function (b) {
+      b.classList.toggle('active', b.getAttribute('data-view-mode') === state.viewMode);
+    });
+  }
+
+  /* ---------------- 收藏 toggle（核心动作） ---------------- */
+  function toggleStar(fullKey, srcBtn) {
+    var scope = fullKey.split('|')[0];
+    var s = findSkill(fullKey);
+    if (!s) return;
+    var name = displayName(scope, s.key);
+    if (isStarred(fullKey)) {
+      delete state.starred[fullKey];
+      lsSave();
+      if (state.view === 'starred') {
+        /* 收藏视图内取消：整行右滑淡出后重渲染 */
+        var host = srcBtn && srcBtn.closest('.row');
+        if (host) {
+          host.classList.add('row-out');
+          setTimeout(function () { renderAll(); }, 190);
+        } else renderAll();
+        toast('info', '已取消收藏 ' + name, '剩余 ' + starCount() + ' 个');
+      } else {
+        renderAll();
+        toast('info', '已取消收藏 ' + name, '剩余 ' + starCount() + ' 个');
+      }
+      popStar(srcBtn, false);
+      return;
+    }
+    state.starred[fullKey] = nowStamp();
+    lsSave();
+    renderAll();
+    toast('gold', '已收藏 ' + name, '收藏夹现有 ' + starCount() + ' 个 · 侧栏 ★ 直达', 'star');
+    popStar(srcBtn, true);
+  }
+
+  function popStar(btn, on) {
+    /* 只对「点击的那个按钮」做弹跳；重渲染后的按钮由 CSS .on 呈现状态 */
+    void on;
+  }
+
+  function nowStamp() {
+    var d = new Date();
+    var p = function (n) { return (n < 10 ? '0' : '') + n; };
+    return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+
+  /* 点击行内星标：先原地弹跳 + 光环，再重渲染 */
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-star]');
+    if (btn && btn.classList.contains('row-star') || btn && btn.classList.contains('fc-star') || btn && btn.classList.contains('ins-star')) {
+      e.stopPropagation();
+      var k = btn.getAttribute('data-star') || state.sel;
+      var willStar = !isStarred(k);
+      btn.classList.remove('pop', 'burst');
+      void btn.offsetWidth; /* 重启动画 */
+      if (willStar) { btn.classList.add('pop', 'burst'); }
+      else { btn.classList.add('pop'); }
+      setTimeout(function () { toggleStar(k, btn); }, willStar ? 160 : 60);
+      return;
+    }
+    /* ⋯ 菜单 */
+    var more = e.target.closest('[data-more]');
+    if (more) {
+      e.stopPropagation();
+      openMenu(more, more.getAttribute('data-more'));
+      return;
+    }
+    /* 行 / 卡选中 */
+    var row = e.target.closest('[data-skill]');
+    if (row && !e.target.closest('button')) {
+      state.sel = row.getAttribute('data-skill');
+      document.querySelectorAll('.row, .file-card').forEach(function (x) {
+        x.classList.toggle('is-selected', x.getAttribute('data-skill') === state.sel);
+      });
+      renderInspector();
+      return;
+    }
+    var act = e.target.closest('[data-crumb-root], [data-empty-goto], [data-empty-reset]');
+    if (act) {
+      if (act.hasAttribute('data-crumb-root')) { state.view = 'root'; renderAll(); return; }
+      if (act.hasAttribute('data-empty-goto')) { state.view = 'root'; state.q = ''; document.getElementById('gsearch').value = ''; renderAll(); return; }
+      if (act.hasAttribute('data-empty-reset')) { state.q = ''; document.getElementById('gsearch').value = ''; renderAll(); return; }
+    }
+  });
+
+  /* ---------------- ⋯ 快捷菜单 ---------------- */
+  var menuEl = null;
+  function closeMenu() { if (menuEl) { menuEl.remove(); menuEl = null; } }
+  function openMenu(anchor, fullKey) {
+    closeMenu();
+    var on = isStarred(fullKey);
+    menuEl = document.createElement('div');
+    menuEl.className = 'ctx-menu';
+    menuEl.innerHTML =
+      '<div class="ctx-label">' + esc(displayName(fullKey.split('|')[0], findSkill(fullKey).key)) + '</div>' +
+      '<button class="ctx-item star-item" data-mi="star">' + icon('star') + (on ? '取消收藏' : '收藏') + '</button>' +
+      '<button class="ctx-item" data-mi="folder">' + icon('folder') + '移动到分类…</button>' +
+      '<button class="ctx-item" data-mi="open">' + icon('external') + '打开目录</button>' +
+      '<div class="ctx-sep"></div>' +
+      '<button class="ctx-item danger" data-mi="del">' + icon('trash') + '删除 skill…</button>';
+    document.body.appendChild(menuEl);
+    var r = anchor.getBoundingClientRect();
+    var mw = 190, mh = menuEl.offsetHeight || 180;
+    var x = Math.min(r.left, window.innerWidth - mw - 10);
+    var y = r.bottom + 4;
+    if (y + mh > window.innerHeight - 10) y = r.top - mh - 4;
+    menuEl.style.left = x + 'px';
+    menuEl.style.top = Math.max(10, y) + 'px';
+    menuEl.addEventListener('click', function (e) {
+      var it = e.target.closest('[data-mi]');
+      if (!it) return;
+      var mi = it.getAttribute('data-mi');
+      closeMenu();
+      if (mi === 'star') { toggleStar(fullKey, anchor); return; }
+      if (mi === 'folder') { toast('info', '原型聚焦收藏功能', '移动到分类的交互见 design-category-folders.html'); return; }
+      if (mi === 'open') { toast('info', '原型环境', '桌面端此处调 bridge.openDir() 打开实体目录'); return; }
+      if (mi === 'del') { toast('warn', '删除不受收藏影响', '真实实现走删除确认弹窗；实体删除后 prune 会清掉对应收藏'); }
+    });
+    setTimeout(function () {
+      document.addEventListener('click', function h() { closeMenu(); document.removeEventListener('click', h); });
+    }, 0);
+  }
+
+  /* ---------------- 顶栏 / 侧栏绑定 ---------------- */
+  document.querySelectorAll('.nav-item[data-nav]').forEach(function (n) {
+    n.addEventListener('click', function () {
+      var k = n.getAttribute('data-nav');
+      if (k === 'starred') { state.view = 'starred'; renderAll(); return; }
+      if (k === 'shared') { state.view = 'root'; renderAll(); return; }
+      toast('info', '原型聚焦收藏功能', k === 'unique' ? '独有技能同样可收藏（示例：workbuddy/pdf）' : '智能体看板与收藏无交叉');
+    });
+  });
+  document.querySelectorAll('.board-tab').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var k = b.getAttribute('data-board');
+      if (k === 'shared') { state.view = 'root'; renderAll(); return; }
+      toast('info', '原型聚焦收藏功能', '本原型只实现共有看板 + 收藏视图，其余看板保持现状');
+    });
+  });
+  document.querySelectorAll('#view-seg button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      state.viewMode = b.getAttribute('data-view-mode');
+      lsSave(); renderAll();
+    });
+  });
+  document.getElementById('sort-btn').addEventListener('click', function () {
+    state.sort = state.sort === 'name' ? 'starred' : 'name';
+    document.getElementById('sort-label').textContent = state.sort === 'name' ? '名称 A→Z' : '收藏优先';
+    lsSave(); renderAll();
+  });
+  document.getElementById('refresh-btn').addEventListener('click', function () {
+    var b = this;
+    b.classList.add('is-busy');
+    setTimeout(function () {
+      b.classList.remove('is-busy');
+      toast('ok', '已重新扫描', '收藏与库数据同存 meta 表 · 当前 ' + starCount() + ' 个收藏');
+    }, 900);
+  });
+  document.getElementById('btn-import-side').addEventListener('click', function () {
+    toast('info', '原型聚焦收藏功能', '导入交互见 design-skill-import.html');
+  });
+  document.getElementById('open-settings').addEventListener('click', function () {
+    toast('info', '设置与收藏', '「清空我的编辑」只重置显示名 / 备注 / 归属，不清收藏（收藏属于个人偏好）');
+  });
+  var gsearch = document.getElementById('gsearch');
+  gsearch.addEventListener('input', function () { state.q = this.value.trim(); renderAll(); });
+
+  /* 检查器星标（独立于行内按钮：直接切换） */
+  document.getElementById('ins-star').addEventListener('click', function () {
+    if (!state.sel) return;
+    toggleStar(state.sel, this);
+  });
+
+  /* ---------------- 主题 ---------------- */
+  var prefs = { theme: 'light' };
+  try { prefs.theme = JSON.parse(localStorage.getItem(LS_KEY) || '{}').theme || 'light'; } catch (e) {}
+  document.getElementById('theme-toggle').addEventListener('click', function () {
+    prefs.theme = prefs.theme === 'dark' ? 'light' : 'dark';
+    root.classList.toggle('theme-dark', prefs.theme === 'dark');
+    this.innerHTML = icon(prefs.theme === 'dark' ? 'sun' : 'moon');
+    try {
+      var d = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+      d.theme = prefs.theme;
+      localStorage.setItem(LS_KEY, JSON.stringify(d));
+    } catch (e) {}
+  });
+
+  /* ---------------- 键盘 ---------------- */
+  document.addEventListener('keydown', function (e) {
+    var typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement && document.activeElement.tagName || '');
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); gsearch.focus(); return; }
+    if (e.key === 'Escape') {
+      /* Esc 链：菜单 → 弹窗 → 清空搜索（即便焦点在输入框）→ 退出收藏视图；
+         编辑备注 / 改名中途 Esc 不应误退视图，故最后一步才有 typing 守卫 */
+      if (menuEl) { closeMenu(); return; }
+      if (mroot.firstChild) { mroot.innerHTML = ''; return; }
+      if (gsearch.value) { gsearch.value = ''; state.q = ''; renderAll(); return; }
+      if (typing) return;
+      if (state.view === 'starred') { state.view = 'root'; renderAll(); }
+      return;
+    }
+    if (typing) return;
+    if (e.key === 'f' || e.key === 'F') {
+      if (state.sel && findSkill(state.sel)) { e.preventDefault(); toggleStar(state.sel, document.querySelector('[data-skill="' + state.sel + '"] .row-star, [data-skill="' + state.sel + '"] .fc-star')); }
+      return;
+    }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      var keys = orderedKeys();
+      if (!keys.length) return;
+      e.preventDefault();
+      var i = keys.indexOf(state.sel);
+      i = e.key === 'ArrowDown' ? Math.min(keys.length - 1, i + 1) : Math.max(0, i <= 0 ? 0 : i - 1);
+      state.sel = keys[i];
+      var rowEl = document.querySelector('[data-skill="' + state.sel + '"]');
+      if (rowEl && rowEl.scrollIntoView) rowEl.scrollIntoView({ block: 'nearest' });
+      document.querySelectorAll('.row, .file-card').forEach(function (x) {
+        x.classList.toggle('is-selected', x.getAttribute('data-skill') === state.sel);
+      });
+      renderInspector();
+    }
+  });
+
+  /* ---------------- 原型说明弹窗 ---------------- */
+  function noteOpen() {
+    mroot.innerHTML = '<div class="overlay" data-act="ov"><div class="modal" role="dialog" aria-modal="true" aria-label="原型说明">' +
+      '<div class="modal-head"><span class="modal-eyebrow">ABOUT THIS PROTOTYPE</span><h2>收藏（Star）· 设计说明</h2>' +
+      '<button class="modal-close" data-act="close" aria-label="关闭">' + icon('x') + '</button></div>' +
+      '<div class="modal-body">' +
+        '<p><b>定位</b>：收藏 = 给常用 skill 打星标，跨「共有 / 独有」汇集一个直达视图。纯元数据——<b>不改文件、不分发、不影响 agent 加载</b>；<b>改名、移动分类、junction 重链都不会丢星</b>（key 不随展示名变）。</p>' +
+        '<div class="spec-list">' +
+          '<div class="spec-row"><span>入口 ×4</span><b>行尾 ☆（hover 显现）· 卡片角 ☆ · 检查器星标 · 行 ⋯ 菜单；选中后按 F</b></div>' +
+          '<div class="spec-row"><span>收藏 key</span><b>scope + key：共有 = 名字，独有 = tool/名字（同名覆盖互不串）</b></div>' +
+          '<div class="spec-row"><span>收藏视图</span><b>侧栏 ★（金色）→ 面包屑「收藏」；共有在前，独有按 agent 分组；列 4 = 收藏时间</b></div>' +
+          '<div class="spec-row"><span>排序</span><b>名称 A→Z ↔ 收藏优先（星标置顶、按收藏时间倒序）</b></div>' +
+          '<div class="spec-row"><span>清空</span><b>面包屑「清空收藏」两段确认（2.6s 回弹）；空态给引导 + 返回入口</b></div>' +
+        '</div>' +
+        '<p><b>后端映射</b>（落地增量很小）：</p>' +
+        '<div class="spec-list">' +
+          '<div class="spec-row"><span>表</span><b>skill_meta 加 starred INTEGER、starred_at INTEGER（pragma 判存在再 alter，同 folder_id 套路）</b></div>' +
+          '<div class="spec-row"><span>写</span><b>set_meta(scope,key,{starred}) 即时写库，无新桥</b></div>' +
+          '<div class="spec-row"><span>读</span><b>list_boards() meta 回填 starred / starred_at → data.js 同构</b></div>' +
+          '<div class="spec-row"><span>排序</span><b>order by starred desc, starred_at desc + localeCompose 名称次序</b></div>' +
+          '<div class="spec-row"><span>prune</span><b>skill 实体消失 → meta 行清理 → 收藏随之清，不留幽灵星</b></div>' +
+          '<div class="spec-row"><span>清空编辑</span><b>只重置显示名 / 备注 / 归属，收藏保留（个人偏好）</b></div>' +
+        '</div>' +
+        '<div class="demo-strip"><span class="demo-cap">演示直达</span>' +
+          '<button class="demo-chip" data-demo="goto-star">' + icon('star') + '收藏视图</button>' +
+          '<button class="demo-chip" data-demo="sort-star">' + icon('sort') + '收藏优先排序</button>' +
+          '<button class="demo-chip" data-demo="clear-all">' + icon('trash') + '清空看空态</button>' +
+          '<button class="demo-chip" data-demo="dark">' + icon('moon') + '深色模式</button>' +
+        '</div>' +
+        '<p style="margin-top:10px; font-size:10.5px; color:var(--ink-4)">示例数据为 data.js 快照子集（12 共有 + 1 独有）；预置 6 个收藏仅为演示，正式版空起步。</p>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn btn-primary" data-act="close">开始体验</button></div>' +
+      '</div></div>';
+  }
+
+  mroot.addEventListener('click', function (e) {
+    var t = e.target.closest('[data-act], [data-demo]');
+    if (!t) return;
+    if (t.hasAttribute('data-demo')) {
+      var d = t.getAttribute('data-demo');
+      mroot.innerHTML = '';
+      if (d === 'goto-star') { state.view = 'starred'; renderAll(); }
+      if (d === 'sort-star') { state.sort = 'starred'; state.view = 'root'; document.getElementById('sort-label').textContent = '收藏优先'; renderAll(); toast('gold', '已切到「收藏优先」', '星标行置顶 · 按收藏时间倒序', 'star'); }
+      if (d === 'clear-all') { state.view = 'starred'; state.starred = {}; lsSave(); renderAll(); toast('warn', '已清空收藏', '这就是收藏视图的空态引导', 'trash'); }
+      if (d === 'dark') { document.getElementById('theme-toggle').click(); }
+      return;
+    }
+    mroot.innerHTML = '';
+  });
+
+  document.getElementById('about-btn').addEventListener('click', noteOpen);
+
+  /* ---------------- 启动 ---------------- */
+  lsLoad();
+  document.getElementById('sort-label').textContent = state.sort === 'name' ? '名称 A→Z' : '收藏优先';
+  if (prefs.theme === 'dark') {
+    root.classList.add('theme-dark');
+    document.getElementById('theme-toggle').innerHTML = icon('sun');
+  }
+  state.sel = 'shared|pdf';
+  renderAll();
+  setTimeout(function () {
+    noteOpen();
+    toast('gold', '已打开「收藏」设计说明', '功能逻辑 + 后端映射都在里面 · Esc 关闭', 'star');
+  }, 480);
+})();
+</script>
+<!--SK-FRAGMENT-END-->
+</body>
+</html>
