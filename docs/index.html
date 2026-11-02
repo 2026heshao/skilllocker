@@ -7,7 +7,6 @@
   <title>SkillLocker, 本地 Skill 管理</title>
   <meta name="description" content="SkillLocker 是 Windows 本地 Skill 管理器：扫描中央仓库，把 Skill 链进各 Agent，并用矩阵查看分发状态。">
   <link rel="stylesheet" href="site.css">
-  <script src="site.js" defer></script>
 </head>
 <body>
   <a class="skip" href="#main">跳到正文</a>
@@ -563,43 +562,35 @@ python skilllocker.py fetch &lt;owner/repo/skill&gt;</code></pre>
     <section class="section install" id="install">
       <div class="container">
         <div class="section-head">
-          <h2>不用安装器，直接跑。</h2>
-          <p>Windows 10/11，Python 3.12，WebView2。无需账号，一个目录就能跑。</p>
+          <h2>装好，打开就用。</h2>
+          <p>Windows 10/11，WebView2。安装包自带 Python 运行时；装好从开始菜单打开。</p>
         </div>
         <ol class="steps steps--row">
           <li>
-            <h3>下载安装包</h3>
-            <p>下载 SkillLocker-v0.3.0.zip，解压到本机。</p>
+            <h3>运行安装包</h3>
+            <p>运行 SkillLocker-Setup-v0.3.0.exe，按向导安装。</p>
           </li>
           <li>
-            <h3>启动桌面端</h3>
-            <p>双击 启动 skilllocker.bat。</p>
+            <h3>打开应用</h3>
+            <p>从开始菜单或桌面打开；首次启动自动创建本地库。</p>
           </li>
           <li>
-            <h3>或走命令行</h3>
-            <p>cd kit，然后 python desktop.py。</p>
+            <h3>导入技能</h3>
+            <p>在应用内选择带 SKILL.md 的目录，不需要手动找 store。</p>
           </li>
         </ol>
         <dl class="requirements">
           <div><dt>系统</dt><dd>Windows 10/11</dd></div>
-          <div><dt>Python</dt><dd>3.12</dd></div>
-          <div><dt>桌面端</dt><dd>WebView2 + pywebview</dd></div>
+          <div><dt>运行时</dt><dd>内置 Python</dd></div>
+          <div><dt>桌面</dt><dd>WebView2</dd></div>
           <div><dt>后端</dt><dd>无第三方依赖</dd></div>
         </dl>
         <div class="panel install__panel--wide">
-          <div class="panel__head"><span>快速运行</span><span>PowerShell</span></div>
-          <div class="install__panel-body">
-            <pre><code id="install-code">cd kit
-python desktop.py</code></pre>
-            <div class="install__side">
-              <a class="btn btn--quiet install__download" href="https://github.com/2026heshao/skilllocker/releases/latest/download/SkillLocker-v0.3.0.zip">下载 SkillLocker-v0.3.0.zip</a>
-              <div class="install__actions">
-                <button class="btn btn--quiet" type="button" data-copy-target="#install-code">复制命令</button>
-                <span class="copy-status" data-copy-status aria-live="polite"></span>
-              </div>
-              <p class="install__note">首次启动会扫描中央仓库；数据不会上传。</p>
-              <p class="install__release"><a href="https://github.com/2026heshao/skilllocker/releases/tag/v0.3.0">Release v0.3.0</a><span>便携 ZIP，不含本机技能库</span></p>
-            </div>
+          <div class="panel__head"><span>Windows installer</span><span>v0.3.0</span></div>
+          <div class="install__box">
+            <a class="btn btn--quiet install__download" href="https://github.com/2026heshao/skilllocker/releases/latest/download/SkillLocker-Setup-v0.3.0.exe">下载 SkillLocker-Setup-v0.3.0.exe</a>
+            <p class="install__note">安装包自带 Python 运行时。首次启动自动创建本地库和数据库；技能在应用内导入。</p>
+            <p class="install__release"><a href="https://github.com/2026heshao/skilllocker/releases/tag/v0.3.0">Release v0.3.0</a><span>Windows 10/11, WebView2 Runtime</span></p>
           </div>
         </div>
       </div>
