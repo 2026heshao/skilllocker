@@ -35,7 +35,7 @@ IGNORE_NAMES = {".git", ".DS_Store", "Thumbs.db", ".gitignore"}
 # 首启也能解析出正确路径；开发机 D:\skilllocker 下推导值与旧硬编码一致，零迁移。
 DEFAULT_STORE = os.path.normpath(
     os.path.join(os.path.dirname(KIT), "store")).replace(os.sep, "/")
-APP_VERSION = "0.2.1"
+APP_VERSION = "0.3.0"
 
 # UI 上的两字母标记；不在表里的工具用 label 首字母推导
 TOOL_MARKS = {

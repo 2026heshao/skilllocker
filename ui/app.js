@@ -1129,13 +1129,19 @@
       cover = '<div class="row-cover"><span class="row-starred-at">' +
         fmtStarredAt(r.starredAt) + '</span></div>';
     } else if (r.board === 'shared') {
+      var linked = r.skill.agents || [];
+      var real = r.skill.realIn || [];
       var segs = ENABLED.map(function (t) {
-        var bad = (r.skill.realIn || []).indexOf(t.key) > -1;
-        return '<span class="cover-seg ' + (bad ? 'bad' : '') + '" title="' + esc(t.label) + ' · ' + (bad ? '同名冲突' : 'junction') + '"></span>';
+        var bad = real.indexOf(t.key) > -1;
+        var ok = linked.indexOf(t.key) > -1;
+        var cls = bad ? 'bad' : ok ? '' : 'none';
+        var tip = bad ? '同名冲突' : ok ? '已分发' : '未分发';
+        return '<span class="cover-seg ' + cls + '" title="' + esc(t.label + ' · ' + tip) + '"></span>';
       }).join('');
-      var okCount = ENABLED.length - (r.conflict ? 1 : 0);
+      var okCount = linked.length;
+      var coverCls = 'cover-text' + (r.conflict ? ' bad' : okCount < ENABLED.length ? ' is-partial' : '');
       cover = '<div class="row-cover"><div class="cover-bar">' + segs + '</div>' +
-        '<span class="cover-text ' + (r.conflict ? 'bad' : '') + '">' + okCount + '/' + ENABLED.length + '</span></div>';
+        '<span class="' + coverCls + '">' + okCount + '/' + ENABLED.length + '</span></div>';
     } else {
       var sharedNames = (r.entry.sharedWith || []).map(toolLabelOf);
       var sharedTip = sharedNames.length
@@ -1476,18 +1482,24 @@
     }
 
     var coverHtml = '';
+    var missingCount = 0;
     if (r.board === 'shared') {
-      var tools = r.skill.agents || [];
+      var linked = r.skill.agents || [];
+      var real = r.skill.realIn || [];
       coverHtml = ENABLED.map(function (t) {
-        var bad = (r.skill.realIn || []).indexOf(t.key) > -1;
-        return '<div class="cover-item' + (bad ? ' is-bad' : '') + '" title="' + esc(t.dir) + '">' +
+        var bad = real.indexOf(t.key) > -1;
+        var ok = linked.indexOf(t.key) > -1;
+        if (!ok && !bad) missingCount++;
+        var cls = bad ? ' is-bad' : ok ? '' : ' is-missing';
+        var tip = (bad ? '同名冲突' : ok ? '已分发' : '未分发') + ' · ' + t.dir;
+        return '<div class="cover-item' + cls + '" title="' + esc(tip) + '">' +
           '<b>' + esc(t.mark) + '</b><span>' + esc(t.label) + '</span>' +
-          icon(bad ? 'alert' : 'check') + '</div>';
+          icon(bad ? 'alert' : ok ? 'check' : 'minus') + '</div>';
       }).join('');
       if (prefs.showDisabled) {
         var offs = TOOLS.filter(function (t) { return !t.enabled; });
         coverHtml += offs.map(function (t) {
-          return '<div class="cover-item" style="opacity:.55" title="' + esc(t.dir) + '">' +
+          return '<div class="cover-item is-off" title="未启用分发 · ' + esc(t.dir) + '">' +
             '<b>' + esc(t.mark) + '</b><span>' + esc(t.label) + '</span>' +
             icon('lock') + '</div>';
         }).join('');
@@ -1597,8 +1609,14 @@
       '<div class="divider"></div>' +
       '<div class="field-block">' +
         '<div class="field-label"><span>' + (r.board === 'shared' ? '分发覆盖' : '本地副本') + '</span>' +
-        '<span style="text-transform:none;letter-spacing:0;font-weight:400">' + (r.board === 'shared' ? ENABLED.length + ' 个 agent' : esc(r.entry.toolLabel)) + '</span></div>' +
+        '<span style="text-transform:none;letter-spacing:0;font-weight:400">' +
+        (r.board === 'shared'
+          ? '已分发 ' + (r.skill.agents || []).length + ' / ' + ENABLED.length
+          : esc(r.entry.toolLabel)) + '</span></div>' +
         (r.board === 'shared' ? '<div class="cover-grid">' + coverHtml + '</div>' : coverHtml) +
+        (r.board === 'shared' && missingCount
+          ? '<div class="field-help">灰色 = 已启用但还没分发；重新打开该 agent 的分发开关即可补齐。</div>'
+          : '') +
       '</div>' +
       '<div class="field-block">' + metaHtml + '</div>' +
       '<div class="field-block">' +
