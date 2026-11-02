@@ -1355,6 +1355,35 @@ p {
   padding: 0;
 }
 
+.install__download {
+  align-self: stretch;
+}
+
+.install__release {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  color: var(--color-muted);
+  font-size: var(--text-meta);
+  line-height: 1.5;
+}
+
+.install__release a {
+  color: var(--color-ink);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+  transition: color var(--dur-micro) var(--ease-out);
+}
+
+.install__release a:hover {
+  color: var(--color-muted);
+}
+
+.install__release a:active {
+  color: var(--color-muted);
+}
+
 .install__actions {
   display: flex;
   align-items: center;
