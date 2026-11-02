@@ -1355,6 +1355,17 @@ p {
   padding: 0;
 }
 
+.install__box {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+}
+
+.install__box .install__note {
+  padding: 0;
+}
+
 .install__download {
   align-self: stretch;
 }
