@@ -568,12 +568,12 @@ python skilllocker.py fetch &lt;owner/repo/skill&gt;</code></pre>
         </div>
         <ol class="steps steps--row">
           <li>
-            <h3>取回仓库</h3>
-            <p>把 skilllocker 目录放到本机。</p>
+            <h3>下载安装包</h3>
+            <p>下载 SkillLocker-v0.3.0.zip，解压到本机。</p>
           </li>
           <li>
             <h3>启动桌面端</h3>
-            <p>双击根目录的 启动 skilllocker.bat。</p>
+            <p>双击 启动 skilllocker.bat。</p>
           </li>
           <li>
             <h3>或走命令行</h3>
@@ -583,7 +583,7 @@ python skilllocker.py fetch &lt;owner/repo/skill&gt;</code></pre>
         <dl class="requirements">
           <div><dt>系统</dt><dd>Windows 10/11</dd></div>
           <div><dt>Python</dt><dd>3.12</dd></div>
-          <div><dt>桌面端</dt><dd>WebView2 Runtime</dd></div>
+          <div><dt>桌面端</dt><dd>WebView2 + pywebview</dd></div>
           <div><dt>后端</dt><dd>无第三方依赖</dd></div>
         </dl>
         <div class="panel install__panel--wide">
@@ -592,11 +592,13 @@ python skilllocker.py fetch &lt;owner/repo/skill&gt;</code></pre>
             <pre><code id="install-code">cd kit
 python desktop.py</code></pre>
             <div class="install__side">
+              <a class="btn btn--quiet install__download" href="https://github.com/2026heshao/skilllocker/releases/latest/download/SkillLocker-v0.3.0.zip">下载 SkillLocker-v0.3.0.zip</a>
               <div class="install__actions">
                 <button class="btn btn--quiet" type="button" data-copy-target="#install-code">复制命令</button>
                 <span class="copy-status" data-copy-status aria-live="polite"></span>
               </div>
               <p class="install__note">首次启动会扫描中央仓库；数据不会上传。</p>
+              <p class="install__release"><a href="https://github.com/2026heshao/skilllocker/releases/tag/v0.3.0">Release v0.3.0</a><span>便携 ZIP，不含本机技能库</span></p>
             </div>
           </div>
         </div>
