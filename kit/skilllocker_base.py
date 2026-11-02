@@ -26,15 +26,22 @@ import threading
 import time
 
 KIT = os.path.dirname(os.path.abspath(__file__))
-CONFIG_FILE = os.path.join(KIT, "config.json")
-ADAPTERS_FILE = os.path.join(KIT, "adapters.json")
-DB_FILE = os.path.join(KIT, "skilllocker.db")
+FROZEN = bool(getattr(sys, "frozen", False))
+# 安装版：程序文件只读，数据写到 %LOCALAPPDATA%\SkillLocker。
+# 源码运行：保持原来的 kit/ 旁 store、config、db，开发机零迁移。
+RES_DIR = getattr(sys, "_MEIPASS", KIT) if FROZEN else KIT
+DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"),
+                        "SkillLocker") if FROZEN else KIT
+os.makedirs(DATA_DIR, exist_ok=True)
+CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
+ADAPTERS_FILE = os.path.join(RES_DIR, "adapters.json")
+DB_FILE = os.path.join(DATA_DIR, "skilllocker.db")
 HOME = os.path.expanduser("~")
 IGNORE_NAMES = {".git", ".DS_Store", "Thumbs.db", ".gitignore"}
-# 默认中央仓库跟随安装目录（kit/ 的上一级）。不写死盘符：无 D: 盘的机器
-# 首启也能解析出正确路径；开发机 D:\skilllocker 下推导值与旧硬编码一致，零迁移。
+# 源码运行默认中央仓库跟随仓库根目录；安装版跟随 %LOCALAPPDATA%\SkillLocker。
 DEFAULT_STORE = os.path.normpath(
-    os.path.join(os.path.dirname(KIT), "store")).replace(os.sep, "/")
+    os.path.join(DATA_DIR if FROZEN else os.path.dirname(KIT), "store")
+).replace(os.sep, "/")
 APP_VERSION = "0.3.0"
 
 # UI 上的两字母标记；不在表里的工具用 label 首字母推导

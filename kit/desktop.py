@@ -34,15 +34,25 @@ except ImportError:
     webview = None
 
 import skilllocker
+import skilllocker_base
 
-KIT = os.path.dirname(os.path.abspath(__file__))
-UI_DIR = os.path.join(os.path.dirname(KIT), "ui")
+if getattr(sys, "frozen", False):
+    RES_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(sys.executable)))
+    KIT = os.path.join(RES_DIR, "kit")
+    DATA_DIR = skilllocker_base.DATA_DIR
+    UI_DIR = os.path.join(RES_DIR, "ui")
+    ICON = os.path.join(RES_DIR, "kit", "assets", "skilllocker.ico")
+else:
+    KIT = os.path.dirname(os.path.abspath(__file__))
+    DATA_DIR = skilllocker_base.DATA_DIR
+    UI_DIR = os.path.join(os.path.dirname(KIT), "ui")
+    ICON = os.path.join(KIT, "assets", "skilllocker.ico")
+os.makedirs(DATA_DIR, exist_ok=True)
 INDEX = os.path.join(UI_DIR, "index.html")
-PROFILE = os.path.join(KIT, "desktop_profile")
-ICON = os.path.join(KIT, "assets", "skilllocker.ico")
+PROFILE = os.path.join(DATA_DIR, "desktop_profile")
 WIN_W, WIN_H = 1200, 760
 MIN_W, MIN_H = 1180, 720
-LOG_FILE = os.path.join(KIT, "skilllocker.log")
+LOG_FILE = os.path.join(DATA_DIR, "skilllocker.log")
 
 # 无边框 WinForms 窗口会被系统去掉 WS_MINIMIZEBOX，任务栏按钮点击就不会最小化；
 # 这里在窗口显示后补回该样式位，并在每次窗口状态变化后重新补一次。
@@ -886,7 +896,7 @@ class Api:
         safe = "".join(c for c in str(name or "skilllocker-meta.json")
                        if c.isalnum() or c in "._-") or "skilllocker-meta.json"
         target = self._window.create_file_dialog(
-            webview.SAVE_DIALOG, directory=os.path.join(KIT, ".."),
+            webview.SAVE_DIALOG, directory=DATA_DIR,
             save_filename=safe, file_types=("JSON (*.json)",))
         if not target:
             return {"ok": True, "path": ""}
@@ -1100,17 +1110,37 @@ def build_window(api, hidden=False, noboot=False):
     )
 
 
-def _report(message):
+def _report(message, title="skilllocker 启动失败"):
     """pythonw 没有控制台：错误进统一日志（kit/skilllocker.log），并弹系统提示框。"""
     _LOG.error("%s", message)
     try:
         ctypes.windll.user32.MessageBoxW(
-            ctypes.wintypes.HWND(0), str(message), "skilllocker 启动失败", 0x10)
+            ctypes.wintypes.HWND(0), str(message), title, 0x10)
     except Exception:  # noqa: BLE001 - 非 Windows 或弹窗失败
         try:
             print(message, file=sys.stderr)
         except (AttributeError, OSError):
             pass  # pythonw 下连 stderr 都是 None，别让兜底自己再炸一次
+
+
+def _selftest_runner():
+    """取 --selftest 的执行体；自检模块不可用时给出明确提示并返回 None。
+
+    --selftest 的数据断言依赖开发库里的真实技能，只对源码 / 开发包有意义。
+    发布包是空库、也不带 selftest.py，误加 --selftest 不该被报成「启动失败」。
+    """
+    try:
+        import selftest  # 懒加载：正常启动不背自检代码；selftest 反向 import 本模块
+    except Exception as exc:  # noqa: BLE001 - 自检入口失败要弹窗，不能静默死
+        if isinstance(exc, ImportError) and getattr(exc, "name", "") == "selftest":
+            detail = "当前安装包未包含自检模块 kit/selftest.py。"
+        else:
+            detail = "自检模块加载失败：%s: %s" % (type(exc).__name__, exc)
+        _report(detail + "\n\n--selftest 只在源码 / 开发包中可用；日常启动请直接双击"
+                "“启动 skilllocker.bat”，不要附加 --selftest。",
+                title="skilllocker 自检不可用")
+        return None
+    return selftest.run
 
 
 def main():
@@ -1131,6 +1161,12 @@ def main():
         _report("找不到界面文件：%s" % INDEX)
         return 2
 
+    start_fn = on_start
+    if args.selftest:
+        start_fn = _selftest_runner()
+        if start_fn is None:
+            return 2
+
     try:
         _make_dpi_aware()
         api = Api()
@@ -1141,10 +1177,6 @@ def main():
         # create_window()，直接抛 "create_window() got an unexpected keyword
         # argument 'icon'" 让启动整个失败）。Windows 侧图标统一由 on_start()
         # 里的 _apply_window_icon() 走 WM_SETICON 设置，这里不需要再传。
-        start_fn = on_start
-        if args.selftest:
-            import selftest  # 懒加载：正常启动不背自检代码；selftest 反向 import 本模块
-            start_fn = selftest.run
         webview.start(start_fn, window,
                       debug=args.debug, private_mode=False, storage_path=PROFILE)
     except Exception as exc:  # noqa: BLE001 - 双击启动时看不到控制台

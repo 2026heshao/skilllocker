@@ -24,13 +24,21 @@
 - 无边框桌面界面（pywebview）与完整 CLI
 - Windows 下所有删除先判断 reparse point，不顺着链接递归删实体
 
+## 安装版（普通用户）
+
+直接下载 Releases 里的 `SkillLocker-Setup-v0.3.0.exe`，运行安装向导即可。安装包自带 Python 运行时，不需要装 Python，也不需要运行 bat 或手动放置 skill。
+
+安装后从开始菜单或桌面打开 SkillLocker。首次启动会自动创建 `%LOCALAPPDATA%\SkillLocker` 下的 store、SQLite 数据库和 WebView2 profile；技能在应用内导入（选择带 `SKILL.md` 的目录）。
+
+## 源码运行（开发）
+
 ## 环境
 
 - Windows 10 / 11
 - Python 3.12
 - 桌面端需要 `pywebview` 与 WebView2 Runtime；后端与 CLI 无第三方依赖
 
-## 运行
+## 源码启动
 
 双击仓库根目录的 `启动 skilllocker.bat`，或用命令行：
 
