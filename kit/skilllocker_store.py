@@ -471,19 +471,30 @@ def find_unique_row(con, cfg, tool_key, name):
 
 # ---------------------------------------------------------------- 首启探测
 def adoptable_rows(unique):
-    """一键收编的可行范围：agent 主目录里的实体独有行。
+    """一键收编的可行范围：agent 主目录**直属**的实体独有行。
 
-    口径与单行收编（promote_unique）一致，只是批量：src=main（就在 agent
-    自己的 skills_dir 直属位）、kind=unique（不是 foreign-link 也不是同名覆盖）、
-    sameName 为假（中央没有同名不同内容的副本）。
+    口径：src=main（真身就在该 agent skills_dir 的直属一层）、kind=unique
+    （不是 foreign-link）、sameName 为假（中央没有同名不同内容的副本），并且
+    行名 == 真身目录名。
 
-    extra 外部目录、容器展开行、指向别处的 junction 都不收 —— 那些真身归
-    agent 或第三方安装器管，本工具往里写东西只会跟它们打架；用户真想收可以
-    在独有看板逐行走「转为共有」或手动导入。
+    容器展开行（`codex/.system/xxx` 这类顶层没有 SKILL.md、往下钻一层才找到的）
+    批量时不收：入库只能按真身目录名登记，行名与仓库名对不上，收完独有行不会
+    消失（内容比对按名字查），用户看到的是「转成功了但行还在」的假象。单行
+    promote_unique 保留这个能力（用户明确点某一行，且详情栏会说明源路径）。
+
+    extra 外部目录、指向别处的 junction 都不收 —— 那些真身归 agent 或第三方
+    安装器管，本工具往里写东西只会跟它们打架；用户真想收可以在独有看板逐行走
+    「转为共有」或手动导入。
     """
-    return [u for u in unique or []
-            if u.get("src") == "main" and u.get("kind") == "unique"
-            and not u.get("sameName")]
+    out = []
+    for u in unique or []:
+        if u.get("src") != "main" or u.get("kind") != "unique" or u.get("sameName"):
+            continue
+        name = str(u.get("name") or "")
+        if name != os.path.basename(os.path.normpath(str(u.get("path") or ""))):
+            continue
+        out.append(u)
+    return out
 
 
 def agent_managed_roots(con, tools=None):
@@ -557,9 +568,8 @@ def find_existing_store(con, cfg, tools=None, min_links=2, min_skills=2):
                 continue
             if any(path_under(root, m) or path_under(m, root) for m in managed):
                 continue
-            v = votes.setdefault(root, {"links": 0, "names": set(), "tools": {}})
+            v = votes.setdefault(root, {"links": 0, "tools": {}})
             v["links"] += 1
-            v["names"].add(n)
             tv = v["tools"].setdefault(
                 t["key"], {"key": t["key"], "label": t["label"], "links": 0})
             tv["links"] += 1

@@ -572,31 +572,36 @@ def adopt_store(con, cfg, path):
 
 
 def adopt_local_skills(con, cfg, unique=None):
-    """首启一键收编：把各 agent 主目录里的实体技能目录收进中央仓库。
+    """首启一键收编：把各 agent 主目录直属的实体技能目录收进中央仓库。
 
-    范围由 store.adoptable_rows 把关（只收 src=main 的实体行，外部目录 /
-    容器展开 / 指向别处的 junction 一律不碰）。语义与单行收编 promote_unique
-    一致，区别是把 N 次 rescan 合成 1 次：
+    范围由 store.adoptable_rows 把关（只收 src=main 的直属实体行；外部 extra
+    目录、容器展开行、指向别处的 junction、同名不同内容的覆盖行一律不碰）。
+    语义与单行收编 promote_unique 一致，区别是把 N 次 rescan 合成 1 次：
       1. 按真身目录名分组：同名多来源只收第一份，其余按内容哈希判定 ——
          一致就一起算收编完成（源副本保留，独有行自动消失），不一致就跳过
          让用户到独有看板逐条处置，绝不静默覆盖；
       2. copy_tree_atomic 拷进仓库（崩溃残留的 .skpart-* 由下轮 rescan 清理）；
       3. 独有行上的人工改名 / 备注迁给共有行；
       4. 一次 rescan + 一次 seed_meta（新共有行按预置规则归档）；
-      5. 只对分发开关开着的 agent 做 do_sync 对齐：源副本内容已与中央一致，
-         junction 模式下 takeover → relink 成指向仓库的链接；开关关着的
-         保留实体副本不动（探测到 ≠ 授权分发）。
+      5. 只对分发开关开着的 agent 做 do_sync 对齐，且**只对齐该 agent 主目录
+         直属的那些名字**：容器行（`容器/子目录`）的真身不在 skills_dir 直属位，
+         给它补一条 skills_dir/子目录 会让同一个 agent 从两个路径加载同名技能
+         （promote_unique 同口径，见其 src_main 判定）；开关关着的保留实体副本
+         不动（探测到 ≠ 授权分发）。
     除第 5 步的链接对齐外全部非破坏，源目录保留。
     """
     if not os.path.isdir(cfg["store"]):
         raise RuntimeError("中央仓库目录不可用：%s" % cfg["store"].replace("/", "\\"))
     rows = adoptable_rows(unique if unique is not None else unique_entries(con, cfg))
     groups, index = [], {}      # [(name, [(tool, path)])]，保持扫描顺序
+    direct = {}                 # tool -> {name}：主目录直属行，只有这些能补 / 对齐链接
     for u in rows:
         path = os.path.normpath(u["path"])
         name = os.path.basename(path)
         if name in ("", ".", ".."):
             continue
+        if u["name"] == name:
+            direct.setdefault(u["tool"], set()).add(name)
         if name in index:
             groups[index[name]][1].append((u["tool"], path))
         else:
@@ -658,8 +663,15 @@ def adopt_local_skills(con, cfg, unique=None):
         "select key from tools where detected=1 and enabled=1")}
     touched = sorted(affected & enabled)
     if touched and adopted:
-        plan = do_sync(con, cfg, only_tools=touched, only_skills=adopted,
-                       apply_changes=True)
+        # 逐个 agent 只对齐它主目录直属的那批名字：容器行不补链接（否则同一个
+        # agent 会从「容器/子目录」和「子目录」两个路径加载到同名技能）
+        plan = []
+        for tool in touched:
+            names = [n for n in adopted if n in direct.get(tool, set())]
+            if not names:
+                continue
+            plan += do_sync(con, cfg, only_tools=[tool], only_skills=names,
+                            apply_changes=True)
         # relink = 开着分发的 agent 里那份同名实体被对齐成指向仓库的链接；
         # junction/copy = 该 agent 还没有这个技能，按开关补一条分发链接（收编的
         # 目的就是统一分发，补链与 promote_unique 的语义一致）

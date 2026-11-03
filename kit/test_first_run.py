@@ -498,8 +498,8 @@ def _():
             assert sorted(act["adopted"]) == ["alpha", "beta", "gamma"], act
             assert act["metaMoved"] == 1, act
             assert res["meta"].get("beta", {}).get("display") == "我的小技能", res["meta"]
-            assert act["relinked"] == 2, act    # claude 开着：两个同名实体转成链接
-            assert act["linked"] == 1, act       # gamma 是仓库新技能，给开着的 claude 补一条链接
+            assert act["relinked"] == 2, act     # claude 开着：它自己那两份同名实体转成链接
+            assert act["linked"] == 0, act       # gamma 不是 claude 贡献的：收编不越权替它分发
             for n in ("alpha", "beta"):
                 p = os.path.join(cl, n)
                 assert skilllocker.is_reparse(p), p
@@ -507,7 +507,46 @@ def _():
                     os.path.join(store, n)), p
             assert os.path.isdir(os.path.join(cu, "gamma")) and not skilllocker.is_reparse(
                 os.path.join(cu, "gamma")), "cursor 开关关着，源副本必须保留"
+            assert not os.path.lexists(os.path.join(cl, "gamma")),                 "claude 没贡献 gamma，收编不该给它新建链接（分发是开关的事）"
             assert res["data"]["unique"] == [], res["data"]["unique"]
+
+
+@case("first_run: 容器展开行不进批量收编，也不会被补成重复加载路径")
+def _():
+    if sys.platform != "win32":
+        raise AssertionError("仅 Windows（需要 junction）")
+    with tempfile.TemporaryDirectory() as td:
+        store = empty_store(td)
+        with sandbox(td, store=store, adapters=ADAPTERS) as (home, _s):
+            cl = os.path.join(home, ".claude", "skills")
+            skill_dir(os.path.join(cl, ".system"), "nested")    # 容器子目录（非直属）
+            skill_dir(cl, "plain")                              # 主目录直属
+            import desktop
+            api = desktop.Api()
+            assert api.bootstrap()["ok"]
+            boot = api.bootstrap()
+            names = sorted(a["name"] for a in boot["data"]["firstRun"]["adoptable"])
+            assert names == ["plain"], boot["data"]["firstRun"]["adoptable"]
+            con = skilllocker.db()
+            try:
+                con.execute("update tools set enabled=1 where key='claude_code'")
+                con.commit()
+            finally:
+                con.close()
+            res = api.adopt_local_skills()
+            assert res.get("ok"), res
+            act = res["action"]
+            assert act["adopted"] == ["plain"], act
+            assert act["relinked"] == 1 and act["linked"] == 0, act
+            p = os.path.join(cl, "plain")
+            assert skilllocker.is_reparse(p), p
+            assert skilllocker.link_target(p) == skilllocker.norm_path(os.path.join(store, "plain")), p
+            # 容器那份：不入库、不新建 skills_dir/nested（否则同一 agent 两份同名）
+            assert not os.path.lexists(os.path.join(cl, "nested")), \
+                "容器行不该被补成直属链接，会让 Claude Code 从两个路径加载 nested"
+            assert os.path.isdir(os.path.join(cl, ".system", "nested"))
+            uniq = [u["name"] for u in res["data"]["unique"]]
+            assert uniq == [".system/nested"], uniq
 
 
 def main():
