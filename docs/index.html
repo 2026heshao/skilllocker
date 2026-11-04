@@ -33,10 +33,10 @@
     "name": "SkillLocker",
     "applicationCategory": "DeveloperApplication",
     "operatingSystem": "Windows 10, Windows 11",
-    "softwareVersion": "0.3.0",
+    "softwareVersion": "0.3.4",
     "url": "https://2026heshao.github.io/skilllocker/",
-    "downloadUrl": "https://2026heshao.github.io/skilllocker/SkillLocker-Setup-v0.3.0.exe",
-    "installUrl": "https://2026heshao.github.io/skilllocker/SkillLocker-Setup-v0.3.0.exe",
+    "downloadUrl": "https://2026heshao.github.io/skilllocker/SkillLocker-Setup-v0.3.4.exe",
+    "installUrl": "https://2026heshao.github.io/skilllocker/SkillLocker-Setup-v0.3.4.exe",
     "image": ["https://2026heshao.github.io/skilllocker/og-image.png", "https://2026heshao.github.io/skilllocker/screenshots/01-library.png"],
     "offers": { "@type": "Offer", "price": "0", "priceCurrency": "CNY" },
     "sameAs": "https://github.com/2026heshao/skilllocker"
@@ -64,7 +64,7 @@
         <a href="#cli">CLI</a>
         <a href="#install">安装</a>
       </nav>
-      <a class="btn btn--quiet nav-cta" href="SkillLocker-Setup-v0.3.0.exe" download="SkillLocker-Setup-v0.3.0.exe">
+      <a class="btn btn--quiet nav-cta" href="SkillLocker-Setup-v0.3.4.exe" download="SkillLocker-Setup-v0.3.4.exe">
         <svg class="btn__icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
           <path d="M8 2.5v6.75"></path>
           <path d="M5 6.5 8 9.5l3-3"></path>
@@ -82,7 +82,7 @@
           <h1>所有 Skill，<span class="hero__line">一个本地库。</span></h1>
           <p class="lede">扫描中央仓库的 SKILL.md，用 junction 链进 Claude Code、Codex、Qoder 等 Agent，再用矩阵看清覆盖、漂移与冲突。</p>
           <div class="hero__actions">
-            <a class="btn btn--primary" href="SkillLocker-Setup-v0.3.0.exe" download="SkillLocker-Setup-v0.3.0.exe">
+            <a class="btn btn--primary" href="SkillLocker-Setup-v0.3.4.exe" download="SkillLocker-Setup-v0.3.4.exe">
               <svg class="btn__icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
                 <path d="M8 2.5v6.75"></path>
                 <path d="M5 6.5 8 9.5l3-3"></path>
@@ -621,15 +621,15 @@ python skilllocker.py fetch &lt;owner/repo/skill&gt;</code></pre>
         <ol class="steps steps--row">
           <li>
             <h3>运行安装包</h3>
-            <p>运行 SkillLocker-Setup-v0.3.0.exe，按向导安装。</p>
+            <p>运行 SkillLocker-Setup-v0.3.4.exe，按向导安装。</p>
           </li>
           <li>
             <h3>打开应用</h3>
-            <p>从开始菜单或桌面打开；首次启动自动创建本地库。</p>
+            <p>从开始菜单或桌面打开。首次启动自动扫描各 agent 的共有技能，建好中央仓库 —— 不用点任何东西。</p>
           </li>
           <li>
-            <h3>导入技能</h3>
-            <p>在应用内选择带 SKILL.md 的目录，不需要手动找 store。</p>
+            <h3>检查并收编剩余</h3>
+            <p>同名不同内容不会被自动选边；剩余独有技能可在提示条里补充收编，或自己挑目录导入。仓库就在安装目录的 store 里，看得见、带得走。</p>
           </li>
         </ol>
         <dl class="requirements">
@@ -639,9 +639,9 @@ python skilllocker.py fetch &lt;owner/repo/skill&gt;</code></pre>
           <div><dt>后端</dt><dd>无第三方依赖</dd></div>
         </dl>
         <div class="panel install__panel--wide">
-          <div class="panel__head"><span>Windows installer</span><span>v0.3.0</span></div>
+          <div class="panel__head"><span>Windows installer</span><span>v0.3.4</span></div>
           <div class="install__box">
-            <a class="btn btn--primary install__download" href="SkillLocker-Setup-v0.3.0.exe" download="SkillLocker-Setup-v0.3.0.exe">
+            <a class="btn btn--primary install__download" href="SkillLocker-Setup-v0.3.4.exe" download="SkillLocker-Setup-v0.3.4.exe">
               <svg class="btn__icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
                 <path d="M8 2.5v6.75"></path>
                 <path d="M5 6.5 8 9.5l3-3"></path>
@@ -649,9 +649,9 @@ python skilllocker.py fetch &lt;owner/repo/skill&gt;</code></pre>
               </svg>
               <span>下载 Setup.exe</span>
             </a>
-            <p class="install__hint"><span class="mono">SkillLocker-Setup-v0.3.0.exe</span> · 约 27.5 MB · 需在 Windows 10/11 上运行</p>
-            <p class="install__note">安装包自带 Python 运行时。首次启动自动创建本地库和数据库；技能在应用内导入。</p>
-            <p class="install__release"><a href="https://github.com/2026heshao/skilllocker/releases/tag/v0.3.0">Release 说明</a><span>Windows 10/11, WebView2 Runtime</span></p>
+            <p class="install__hint"><span class="mono">SkillLocker-Setup-v0.3.4.exe</span> · 约 27.6 MB · 需在 Windows 10/11 上运行</p>
+            <p class="install__note">安装包自带 Python 运行时。首次启动自动把各 agent 的共有技能收进安装目录的 store；只写自己的仓库，不改 agent 目录。卸载默认保留技能库，确认后才会删除。</p>
+            <p class="install__release"><a href="https://github.com/2026heshao/skilllocker/releases/tag/v0.3.4">Release 说明</a><span>Windows 10/11, WebView2 Runtime</span></p>
           </div>
         </div>
       </div>

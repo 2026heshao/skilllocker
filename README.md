@@ -26,9 +26,19 @@
 
 ## 安装版（普通用户）
 
-直接下载 Releases 里的 `SkillLocker-Setup-v0.3.0.exe`，运行安装向导即可。安装包自带 Python 运行时，不需要装 Python，也不需要运行 bat 或手动放置 skill。
+直接下载 [SkillLocker-Setup-v0.3.4.exe](https://2026heshao.github.io/skilllocker/SkillLocker-Setup-v0.3.4.exe)（官网站内直链），或从 [GitHub Release v0.3.4](https://github.com/2026heshao/skilllocker/releases/tag/v0.3.4) 获取同一份安装包；校验值见仓库内 `release/SkillLocker-Setup-v0.3.4.exe.sha256`。安装包自带 Python 运行时，不需要装 Python，也不需要运行 bat 或手动放置 skill。
 
-安装后从开始菜单或桌面打开 SkillLocker。首次启动会自动创建 `%LOCALAPPDATA%\SkillLocker` 下的 store、SQLite 数据库和 WebView2 profile；技能在应用内导入（选择带 `SKILL.md` 的目录）。
+安装后从开始菜单或桌面打开 SkillLocker。中央仓库默认就在**安装目录的 `store\`**（看得见、带得走）；数据库、配置、WebView2 profile 和日志在 `%LOCALAPPDATA%\SkillLocker`。安装包不预置任何技能。
+
+**首次启动会自动完成中央仓库**：如果各 agent 目录里的 skill 链接已经汇聚到同一份仓库（升级安装、或之前用过别的管理器），应用会直接接管它（只写 `config.json` 并重新登记，不搬文件）；没有现成仓库时，扫描各 agent 的主 `skills` 目录，把两个以上 agent 都装了的共有技能（本机只有一个 agent 时则取它目录里的全部技能）按真身拷进仓库。全程只写自己的 `store\`，不改 agent 目录、不建链接（分发开关仍由你决定）。同名不同内容不会自动选边，会留在独有看板由你处置。
+
+自动接管 / 建库之后，人工出口仍然保留、降级为次级提示：
+
+- **接管本机已有的中央仓库**：自动接管失败时才需要手动点；只写 `config.json` 并重新登记，不搬文件
+- **补充收编 / 一键收编**：把 agent 主目录里的实体技能、以及可解析真身的外部链接收进中央仓库，源目录保留；外部目录、容器展开行、同名不同内容不会被动
+- **导入目录 / 在线获取**：一次一个，入库前有预检报告
+
+卸载安装包时默认**保留技能库**（搬到 `%LOCALAPPDATA%\SkillLocker\store.kept` 并留说明文件），只有明确勾选才会连同 `store\` 一起删除。首启的自动接管与自动建库可用 `config.json` 的 `seed_auto: false` 一起关掉。
 
 ## 源码运行（开发）
 
@@ -60,6 +70,7 @@ python skilllocker.py verify                   :: 检查漂移（只报告）
 python skilllocker.py sync [--tool 工具] [--fix] :: 建立 / 修复分发
 python skilllocker.py import <目录> [--name 名称] :: 从目录导入
 python skilllocker.py remove <名称>             :: 删除分发与实体
+python skilllocker.py seed [--dry]              :: 首启自动建库（--dry 只打印将收的名字与来源）
 python skilllocker.py search <关键词>           :: skills.sh 在线检索
 python skilllocker.py fetch <owner/repo/skill> :: 在线获取到临时目录
 ```
@@ -79,5 +90,6 @@ ui/                  前端页面（原生 HTML / CSS / JS，无构建步骤）
 ```bat
 python kit/test_unit.py
 python kit/test_first_run.py
+python kit/test_firstrun_ui.py  :: 需要 playwright 与本机 Edge / Chromium
 python kit/test_boot_proto.py   :: 需要 playwright 与本机 Edge / Chromium
 ```

@@ -9,7 +9,8 @@ import sys
 from skilllocker_base import (  # noqa: F401 - 部分名字经 skilllocker 门面再导出
     APP_VERSION, HOME, _file_digest, _tool_mark, file_list, fmt_bytes,
     folder_rows, last_scan_time, ordered_tools, target_state, tree_stats)
-from skilllocker_store import agent_entries, unique_entries
+from skilllocker_store import (  # noqa: F401 - 门面再导出
+    adoptable_rows, agent_entries, find_existing_store, group_unique, unique_entries)
 
 
 def _db_path():
@@ -26,7 +27,11 @@ def list_boards(con, cfg):
 
     # 同一快照共享一份哈希备忘：state_map 与 agent_entries 会把同一个格口
     # 各查一遍，不贯通缓存就是每棵实体树全量哈希两遍
-    hash_cache = {}
+    # bootstrap 在 cfg 上挂了共享备忘（seed_meta 已扫过一遍）；其他桥调用没有，
+    # 就用本次快照自己的缓存。
+    hash_cache = cfg.get("_hash_cache")
+    if not isinstance(hash_cache, dict):
+        hash_cache = {}
     state_map = {}
     for t in enabled:
         for s in skills:
@@ -60,6 +65,10 @@ def list_boards(con, cfg):
     # prune_meta 看到标记就跳过本轮（防把暂时看不见的 meta 当已删除清掉）
     scan_errors = []
     unique = unique_entries(con, cfg, tools, hash_cache, scan_errors)
+    # 独有看板的真实单位是「逻辑技能」(名字, 内容哈希)，不是 (agent, 目录项)：
+    # 同一技能被 7 个 agent 各装一份 = 1 个技能、7 个实例。实例行保留给
+    # 删除 / 卸载等按行定位的操作，组行只用于展示与计数。
+    unique_groups = group_unique(unique)
     agent_rows = agent_entries(con, cfg, tools, skills, hash_cache)
     agent_counts = {k: sum(1 for a in agent_rows if a["status"] == k)
                     for k in ("connected", "off", "missing")}
@@ -71,6 +80,37 @@ def list_boards(con, cfg):
 
     scan_at = last_scan_time(con)
     generated = datetime.datetime.now()
+
+    # 首启引导：仓库为空时给「接管已有仓库 / 一键收编 / 导入」整块面板；
+    # 自动建库只收走了共有那部分、还有可收行时给单行提示条（strip），
+    # 不长期打扰。candidate 只在空库时计算（有内容时接管会被后端守卫拒绝）。
+    first_run = None
+    ready = adoptable_rows(unique, cfg)
+    strip = bool(skill_out and cfg.get("_seed_note") and ready)
+    if not skill_out or strip:
+        cand = find_existing_store(con, cfg, tools) if not skill_out else None
+        blocked = None
+        if not skill_out:
+            if not cfg.get("seed_auto", True):
+                blocked = "disabled"
+            elif cand:
+                blocked = "candidate"
+        first_run = {
+            "storeEmpty": not skill_out,
+            "strip": strip,
+            "candidate": cand,
+            "adoptable": [{"tool": u["tool"], "toolLabel": u["toolLabel"],
+                           "mark": u["mark"], "name": u["name"],
+                           "files": u["files"], "bytes": u["bytes"],
+                           "kind": u["kind"]}
+                          for u in ready],
+            "adoptableAgents": sorted({u["toolLabel"] for u in ready}),
+            "seedNote": cfg.get("_seed_note") or None,
+            "seedBlocked": blocked,
+            # 自动接管失败的原因：面板据此如实说明「为什么还得手动点一次」
+            "autoAdoptError": cfg.get("_auto_adopt_error") or None,
+        }
+
     out_tools = []
     for t in tools:
         rel = ""
@@ -101,19 +141,31 @@ def list_boards(con, cfg):
             "agentMissing": agent_counts["missing"],
             "disabledCount": len(tools) - len(enabled),
             "sharedCount": len(skill_out),
+            # uniqueCount 保持「实例数」语义（旧前端 / 脚本兼容）；
+            # uniqueLogical 是去重后的逻辑技能数，界面默认展示后者。
             "uniqueCount": len(unique),
+            "uniqueLogical": len(unique_groups),
+            "storeIn": cfg.get("storeIn") or "install",
+            # 空仓库首启的轻量快照：同名副本尚未按内容合并，文件数/字节未统计
+            "uniqueLight": bool(cfg.get("_unique_light")),
+            # 首启自动建库的说明（仅在真正跑过的那次 bootstrap 上有值）
+            "seedNote": cfg.get("_seed_note") or None,
             # 非 None = 本轮有扫描根不可枚举（prune_meta 会跳过）；给排障留现场
             "scanDegraded": scan_errors or None,
             # config.json 损坏退回默认配置的留痕：前端 toast 显性化，别静默换仓库
             "loadError": cfg.get("_load_error") or None,
+            # 首启自动接管失败（成功时为空）：状态栏/排障要能看到原因
+            "autoAdoptError": cfg.get("_auto_adopt_error") or None,
         },
         "skills": skill_out,
         "tools": out_tools,
         "folders": folder_rows(con),
         "agents": agent_rows,
         "unique": unique,
+        "unique_groups": unique_groups,
         "events": [],
         "conflict": conflict,
+        "firstRun": first_run,
     }
 
 

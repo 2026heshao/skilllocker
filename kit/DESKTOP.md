@@ -71,6 +71,36 @@
 
 ---
 
+### 1.3 首启自动接管 / 自动建库 + 人工出口（v0.3.2）
+
+安装版的中央仓库默认在 **`<安装目录>\\store`**（`DEFAULT_STORE = <程序根>/store`，onedir 下程序根 = `_MEIPASS` 上一级）；`skilllocker.db` / `config.json` / `desktop_profile` / 日志仍在 `%LOCALAPPDATA%\\SkillLocker`。安装包不预置任何技能，所以仓库首启是空的 —— 但**不再需要用户点任何东西**：
+
+0. **自动接管优先**：`bootstrap` 在空库首启先调 `auto_adopt_store()`。若各 agent 目录里已有 junction 汇聚到同一份真仓库（≥2 条链接 + ≥2 个带 `SKILL.md` 的子目录），直接改指并重扫，写 `events(kind='first-run-adopt')`；首屏「共有」就是这份仓库的内容。已有仓库的机器（升级安装 / 用过别的管理器）走这条，不会造第二份仓库。
+1. 没有候选仓库时调 `seed_shared_store()`：仓库仍为空、首启未决策（`has_first_run_action`：建库 / 自动接管 / 手动接管任一留痕）、`seed_auto` 未关时，扫描各 agent 主目录，优先把 `shared(name) >= seed_min_agents`（默认 2）的技能按真身拷进仓库。**没有任何名字达到阈值时退化为「全部候选」**：单 agent（`single_agent`）或各 agent 技能完全不重叠（`fallback_all`）都全收，避免新用户首屏又是「共有 0」；同名但内容不同的组仍整组不选边。
+2. 同名不同内容**整组不选边**；`extra_dirs` 实体、容器展开行不收；main 下可解析真身的 `foreign-link` **按真身收**（真身含 `SKILL.md` 且不在本仓库内）。
+3. 拷贝用 `copy_tree_atomic`，源目录一律保留；分发开关全 off，**不改任何 agent 目录**。收完 `rescan` + `seed_meta`，独有行按内容哈希自动消失。
+4. 预算：`seed_max_skills`（300）/ `seed_budget_s`（20s）/ `seed_max_bytes`（400 MB）；触顶停止但**仍打标记**，剩余数写进 `meta.seedNote`。全部候选都**硬失败**（目录读不了 / 拷不进去）时不写一次性标记，`seedNote` 给出真实原因，下次启动自动重试。
+5. 幂等：`first-run-adopt` / `first-run-seed` / `adopt-store` 任一留痕都算首启已决策（`has_first_run_action`），之后手动清空仓库不会灌回。`seed_auto=false` 同时关掉自动接管与自动建库；`config.json` 显式写过 `store` 时也不自动改指。
+6. 轻量快照：仅**全新数据库的第一次启动**只登记名字与来源（不统计文件数）；同名副本仍按内容哈希合并，不把同一个技能在各 agent 的副本算成多条。之后即使仓库仍为空也走完整扫描。`meta.uniqueLight` 只在该次为 `true`。
+
+`list_boards()` 的 `data.firstRun`：
+
+- 空仓库 → 整块面板：`candidate`（已有仓库汇聚点）、`adoptable`（含实体行 + 可解析真身的链接行）、`adoptableAgents`、`seedNote`、`seedBlocked`（`candidate` / `disabled` / `None`）、`autoAdoptError`（自动接管失败原因，成功时为 `None`）。
+- 自动接管 / 建库后仍有可收独有行 → `strip: true`，前端渲染成单行提示条（「补充收编」），不占内容区。
+- 正常有库且无可收行 → `None`。
+
+人工出口与守卫：
+
+- `adopt_store(con, cfg, path)`：只写 config.json + 重扫登记，不搬文件；当前仓库非空、目标落在 agent 目录、目标无 `SKILL.md` 等一律拒绝。自动接管复用同一守卫，失败时面板显示 `autoAdoptError`。
+- `adopt_local_skills(con, cfg)`：显式批量收编，与单行 `promote_unique` 共用 `_adopt_groups`；同名不同内容收第一份、其余跳过并说明。只对开关开着的 agent、且只对主目录直属名字做 `do_sync` 对齐。
+- `resolve_adopt_target()`：实体行取真身目录名；`foreign-link` 解析 junction 真身（断链 / 缺 `SKILL.md` / 真身在本仓库内 → 拒绝）。详情栏按钮据行形态显示「转为共有技能」或「按真身收进仓库」。
+
+CLI：`python kit/skilllocker.py seed [--dry]`，`--dry` 只打印将收的名字与来源。
+
+回归：`python kit/test_first_run.py`（33 项：自动接管 / 自动建库 / 单 agent 退化 / **多 agent 不重叠全收** / 同名不选边 / 候选阻断 / 幂等 / 预算 / seed_auto / extra·容器·foreign-link / 仓库落点 / 逻辑聚合 / **轻量同名合并** / 收编判定）+ `python kit/test_firstrun_ui.py`（49 项：三块引导面板 + 自动接管提示条 + 自动建库提示条 + 单 agent + **不重叠全收** + **按技能去重计数** + 逻辑技能组视图）。
+
+---
+
 ## 2. 依赖与环境
 
 | 项 | 实际值 | 说明 |
@@ -129,7 +159,7 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 
 | 方法 | 入参 | 返回 | 前端触发点 |
 |---|---|---|---|
-| `bootstrap()` | — | `{ok, data: 看板快照, meta: 全部元数据}` | 启动首屏：先 `sync_tools_from_adapters` 首屏探测 agent，skills 表为空（全新库）时自动 `rescan` 登记中央仓库，再 `migrate_folders + seed_meta` 播种、`prune_meta` 清理；失败返回 `ok:false` → 前端启动错误页（绝不退回演示快照）。`data.agents[].external[]` 是 agent 自己读取的外部技能目录统计（方案 A 只检测展示） |
+| `bootstrap()` | — | `{ok, data: 看板快照, meta: 全部元数据}` | 启动首屏：先 `sync_tools_from_adapters` 首屏探测 agent，skills 表为空（全新库）时自动 `rescan` 登记中央仓库；仍为空则先 `auto_adopt_store()` 接管已有仓库、再 `seed_shared_store()` 建库，最后 `migrate_folders + seed_meta` 播种、`prune_meta` 清理；失败返回 `ok:false` → 前端启动错误页（绝不退回演示快照）。`data.agents[].external[]` 是 agent 自己读取的外部技能目录统计（方案 A 只检测展示）；`data.firstRun` 在空库或自动接管/建库后仍有可收行时非空（首启引导的数据源，见 §1.3） |
 | `save_meta(scope, key, payload)` | `scope`: `shared`/`unique`；`payload`: `{tool, display, note, cats}` | `{ok, row}` | 改名 / 备注 / 分类修改（即时调用，无去抖） |
 | `clear_meta(scope, key)` | 同上 | `{ok}` | 详情栏「还原」 |
 | `delete_skill(scope, key)` | `scope`: `shared`/`unique` | `{ok, data, meta, action}` | 详情栏「彻底删除 skill / 删除本地副本」；`shared` 删中央实体 + 所有链接，`unique` 只删该 agent 的副本 |
@@ -140,6 +170,9 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 | `copy_path(text)` | 文本（≤2000 字） | `{ok, text}` | 详情栏「复制路径」 |
 | `open_dir(scope, key)` | `scope`: `shared`/`unique`/`agent`，只接受 scope+key | `{ok, path}` | 详情栏「打开目录」（路径由后端现算，防任意路径） |
 | `set_agent(key, on)` | agent key + 开关目标值 | `{ok, data, meta, action}` | 智能体看板的开关；开=补链接，关=撤链接 |
+| `promote_unique(key)` | `tool/name` | `{ok, data, meta, action}` | 独有行详情栏「转为共有」（单个实体拷进中央仓库 + 迁移改名备注） |
+| `adopt_store(path)` | 候选仓库绝对路径 | `{ok, data, meta, action:{store, previous, skills}}` | 首启引导「接管该仓库」；守卫见 §1.3，只写 config.json + 重扫 |
+| `adopt_local_skills()` | — | `{ok, data, meta, action:{adopted, skipped, relinked, linked, files, bytes, metaMoved}}` | 首启引导「一键收编」（只收 `src=main` 实体行） |
 | `win_min / win_max / win_close` | — | `{ok}` | 标题栏三键 |
 | `win_bounds()` | — | `{ok, bounds:{x,y,w,h}, maximized}` | 标题栏拖动 / 四边四角 grip 按下时取基准外框（CSS 像素） |
 | `win_set_bounds(x, y, w, h)` | CSS 像素矩形 | `{ok, bounds}` | 标题栏拖动与 grip 拖动中按位移算出的目标矩形，后端 `SetWindowPos` 落窗 |
@@ -183,7 +216,7 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 
 **期望值一律现算，不写死库内数据**：共有/独有行数、独有行键集合、序号范围、已编辑条数、已连接 agent 数、store 路径、**分类夹数与未归档数（`boards.folders` / `skill_meta.folder_id`）** 全部取自 `skilllocker.list_boards()` / `get_meta()` / `load_config()`。库内增删 skill、冲突收口之后重跑自检仍然成立。
 
-覆盖：模式=db、0 条 JS 错误、共有行数与侧栏计数、独有行数 / 行键集合与后端一致（含 extra / 容器展开 / 外部链接来源，见 §1.2）、独有序号连续 1..N、已编辑条数与 meta 一致（只有显示名 / 备注算编辑，归属夹不算）、**分类夹数、未归档数**、已连接 agent 数、路径来自 `config.json`、选中 `pdf`、列表上方筛选行已移除、**序号列（首行=1、共有序号连续 1..N、第 10 行两位数仍 26×26 不溢出）**、详情栏删除按钮存在、**分类文件夹 11 项**（网格视图卡片数=后端 folders 数、`#grid-new-folder` 虚卡存在、点 `data-folder-card` 进夹后标题=夹名且行数=后端夹内计数、面包屑返回根后 `.folder-grid` 重新出现、临时建夹+归入 pdf 后卡片数 +1、`folder_delete` 后卡片数复原且夹内行 `folder_id` 置空 / moved 计数正确、切列表视图 `.row` 数=sh_total、`set_meta(folder)` 落库与 `''` 复原、全新库上迁移回填一次且二次迁移零改动——自检用的临时库已在 `skilllocker.db` 升级时完成真实迁移）、**差异入口按冲突数据分支**（`boards.conflict` 来自独有板的同名覆盖行；共有板差异分支只在 `find_conflict_tool()` 现查到实体冲突时才测，否则核对「共有板无差异按钮」；独有板按 `scope=unique` 核对表头 `CONFLICT · tool / skill` 与弹窗出现）、改名写库（**目标选一条当前没有人工改名/备注的共有 skill，结束后只还原显示名与时间戳——整行 insert-or-replace 会把 folder_id 抹掉**）、已编辑计数 ±1、搜索（只校验「命中 pdf + 列表收窄」，不写死命中条数）与清筛选、非法删除被拒、从 UI 详情栏点击「彻底删除」并确认（临时 skill 的磁盘目录与列表行都消失、自动选中下一条）、设置弹窗文案、深色主题、智能体看板（10 行 / 侧栏 10 / tab 已连接数现算 / 4 个状态筛 / 每行开关 / 未安装开关禁用 / **序号列（首行=1、连续 1..N、≥10 行时第 10 行两位数仍 26×26 不溢出，不足 10 行跳过该项）**；没有未安装行时跳过「未安装调 API 被拒」）、**开关方向回归（点「开」着的开关必须先弹「关闭 … 分发？」确认框、一次点击只弹一个框、取消后开关回到开）**、**外部来源（agent 自己安装的目录如 `~/.agents/skills`：行标题出现「外部 N」标记且 N 与后端 `external[0].count` 一致、详情栏出现「外部来源」行、外部行详情有「卸载」按钮且无「删除副本」按钮；本机没有外部同名实体时整组跳过）**、**原生窗口（5 项：`WS_MINIMIZEBOX` 在、窗口小图标=ico 帧、窗口大图标=ico 帧、`ICON_SMALL2` 回退到小图标、最小化位被抹掉后能自动补回）**、8 个缩放手柄、窗口外框 API 可读（本机回读 1200 × 760 @ 168,28）、**标题栏拖动窗口（合成 pointerdown/move/up，外框应位移 dx=60,dy=40）**、启动尺寸 1180~1200 × 720~760、底部设置按钮与版本号完整可见、详情栏右边界 ≤ 窗口宽、1180 宽无横向溢出、外框写入 `1240×780` 回读一致、写入 `900×500` 被兜底成 `1180×720`、**独有转共有入口（可收编行详情有「转为共有」按钮；同名覆盖 / foreign-link 行不出现）**、**导入 skill 全链路 12 项（SPEC-skill-import.md §7.1 之 6-10：顶栏入口开弹窗且步骤条=选择来源、tempfile 源走真桥预检后 imp-start 可用、步骤条=预检命名且报告卡存在、键入现存名后按钮 disabled+冲突面板、改回合法名恢复可用、执行态 X 不渲染且 Esc 无效、真库落库到完成页、`#store-count`=后端现算值、搜索态下 `.file-card.is-new` 高亮、完成页位置指向新 skill、skills+skill_meta.folder_id 落库、完成态 Esc 可关；结束清临时 skill）**、**在线检索 / 获取 5 项（SPEC-skill-import.md §10.1：全程假网络——patch 门面 `skilllocker.online_search` 与 `_list_repo_files`/`_net_bytes`，桥与 UI 走真实链路；桥直调 `online_fetch` 落系统临时目录且 `listing=github`、结果走标准 `import_preflight` 可过、`open_url` 白名单外域名拒绝（不真开浏览器）、在线 tab 检索假结果渲染成 `.sr-row`、点「获取」→ 预检报告回填 `#imp-name`；结束恢复补丁 + 清临时目录，不写中央仓库）**；**窗口态测试放最后**（最大化拖动越过阈值先还原再位移、**最大化单击不还原**）——真实最大化过一次后，隐藏窗口的 WebView2 布局会卡在最大化尺寸不再跟随 OS 外框（`innerWidth` 恒 1536），所以这两项排在所有 innerWidth / 布局断言之后，末轮 boot 重载页面拿回干净布局；程序化最大化 / 还原走 `ShowWindow`（pywebview 同名方法带 `@_shown_call`，隐藏窗调用是静默 no-op——不加这一层，自检里最大化永远不生效，最大化拖动会靠普通拖动假通过）并临时禁用 DWM 缩放动画（WebView2 动画期间内容不跟帧，闪烁的根源）。
+覆盖：模式=db、0 条 JS 错误、共有行数与侧栏计数、独有逻辑组行数 / `g#` 组键集合与后端 `unique_groups` 一致（含 extra / 容器展开 / 外部链接来源，见 §1.2）、独有序号连续 1..N、已编辑条数与 meta 一致（只有显示名 / 备注算编辑，归属夹不算）、**分类夹数、未归档数**、已连接 agent 数、路径来自 `config.json`、选中 `pdf`、列表上方筛选行已移除、**序号列（首行=1、共有序号连续 1..N、第 10 行两位数仍 26×26 不溢出）**、详情栏删除按钮存在、**分类文件夹 11 项**（网格视图卡片数=后端 folders 数、`#grid-new-folder` 虚卡存在、点 `data-folder-card` 进夹后标题=夹名且行数=后端夹内计数、面包屑返回根后 `.folder-grid` 重新出现、临时建夹+归入 pdf 后卡片数 +1、`folder_delete` 后卡片数复原且夹内行 `folder_id` 置空 / moved 计数正确、切列表视图 `.row` 数=sh_total、`set_meta(folder)` 落库与 `''` 复原、全新库上迁移回填一次且二次迁移零改动——自检用的临时库已在 `skilllocker.db` 升级时完成真实迁移）、**差异入口按冲突数据分支**（`boards.conflict` 来自独有板的同名覆盖行；共有板差异分支只在 `find_conflict_tool()` 现查到实体冲突时才测，否则核对「共有板无差异按钮」；独有板按 `scope=unique` 核对表头 `CONFLICT · tool / skill` 与弹窗出现）、改名写库（**目标选一条当前没有人工改名/备注的共有 skill，结束后只还原显示名与时间戳——整行 insert-or-replace 会把 folder_id 抹掉**）、已编辑计数 ±1、搜索（只校验「命中 pdf + 列表收窄」，不写死命中条数）与清筛选、非法删除被拒、从 UI 详情栏点击「彻底删除」并确认（临时 skill 的磁盘目录与列表行都消失、自动选中下一条）、设置弹窗文案、深色主题、智能体看板（10 行 / 侧栏 10 / tab 已连接数现算 / 4 个状态筛 / 每行开关 / 未安装开关禁用 / **序号列（首行=1、连续 1..N、≥10 行时第 10 行两位数仍 26×26 不溢出，不足 10 行跳过该项）**；没有未安装行时跳过「未安装调 API 被拒」）、**开关方向回归（点「开」着的开关必须先弹「关闭 … 分发？」确认框、一次点击只弹一个框、取消后开关回到开）**、**外部来源（agent 自己安装的目录如 `~/.agents/skills`：行标题出现「外部 N」标记且 N 与后端 `external[0].count` 一致、详情栏出现「外部来源」行、外部行详情有「卸载」按钮且无「删除副本」按钮；本机没有外部同名实体时整组跳过）**、**原生窗口（5 项：`WS_MINIMIZEBOX` 在、窗口小图标=ico 帧、窗口大图标=ico 帧、`ICON_SMALL2` 回退到小图标、最小化位被抹掉后能自动补回）**、8 个缩放手柄、窗口外框 API 可读（本机回读 1200 × 760 @ 168,28）、**标题栏拖动窗口（合成 pointerdown/move/up，外框应位移 dx=60,dy=40）**、启动尺寸 1180~1200 × 720~760、底部设置按钮与版本号完整可见、详情栏右边界 ≤ 窗口宽、1180 宽无横向溢出、外框写入 `1240×780` 回读一致、写入 `900×500` 被兜底成 `1180×720`、**收编入口（实体行有「转为共有」、foreign-link 行有「按真身收进仓库」；同名覆盖不出现）**、**导入 skill 全链路 12 项（SPEC-skill-import.md §7.1 之 6-10：顶栏入口开弹窗且步骤条=选择来源、tempfile 源走真桥预检后 imp-start 可用、步骤条=预检命名且报告卡存在、键入现存名后按钮 disabled+冲突面板、改回合法名恢复可用、执行态 X 不渲染且 Esc 无效、真库落库到完成页、`#store-count`=后端现算值、搜索态下 `.file-card.is-new` 高亮、完成页位置指向新 skill、skills+skill_meta.folder_id 落库、完成态 Esc 可关；结束清临时 skill）**、**在线检索 / 获取 5 项（SPEC-skill-import.md §10.1：全程假网络——patch 门面 `skilllocker.online_search` 与 `_list_repo_files`/`_net_bytes`，桥与 UI 走真实链路；桥直调 `online_fetch` 落系统临时目录且 `listing=github`、结果走标准 `import_preflight` 可过、`open_url` 白名单外域名拒绝（不真开浏览器）、在线 tab 检索假结果渲染成 `.sr-row`、点「获取」→ 预检报告回填 `#imp-name`；结束恢复补丁 + 清临时目录，不写中央仓库）**；**窗口态测试放最后**（最大化拖动越过阈值先还原再位移、**最大化单击不还原**）——真实最大化过一次后，隐藏窗口的 WebView2 布局会卡在最大化尺寸不再跟随 OS 外框（`innerWidth` 恒 1536），所以这两项排在所有 innerWidth / 布局断言之后，末轮 boot 重载页面拿回干净布局；程序化最大化 / 还原走 `ShowWindow`（pywebview 同名方法带 `@_shown_call`，隐藏窗调用是静默 no-op——不加这一层，自检里最大化永远不生效，最大化拖动会靠普通拖动假通过）并临时禁用 DWM 缩放动画（WebView2 动画期间内容不跟帧，闪烁的根源）。
 
 结果：**111/111 PASS，`ERRORS: []`**（2026-11-01：92 项 + 转共有 2 项 + 导入 12 项 + 在线 5 项；本机当前库 52 共有 / 10 agents 行（7 已连接）/ 7 个分类文件夹，全部现算不写死，具体计数随库变化）。原生窗口那 5 项同时也在一台真实可见窗口（快捷方式启动的实例）上单独核对过：`WM_GETICON` 三档 = 20px 帧 / 40px 帧 / 同小图，样式 `0x16030000`，点任务栏按钮 = 最小化 ↔ 恢复，`WS_MINIMIZEBOX` 全程未丢。
 
@@ -250,7 +283,7 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 
 | 现象 | 原因 | 处理 |
 |---|---|---|
-| 界面显示「后端启动失败」错误页（含错误详情与重试按钮） | 后端 `bootstrap()` 抛错：常见为 store 指向不存在的盘符 / 目录、adapters.json 损坏且工具表为空；或桌面壳内 pywebview 注入超时（WebView2 冷启动过慢，桥未接上） | 看错误详情与 `kit\skilllocker.log`；修好 `config.json` 的 `store` 或 `kit\adapters.json` 后点【重试】。这是明确失败，界面**不会**拿内置演示快照冒充真实数据 |
+| 界面显示「后端启动失败」错误页（含错误详情与重试按钮） | 后端 `bootstrap()` 抛错：常见为 store 指向不存在的盘符 / 目录、adapters.json 损坏且工具表为空；或桌面壳内 pywebview 注入超时（WebView2 冷启动过慢，桥未接上；注入窗口 20s，超时先自动重载一次，仍失败才出错误页） | 看错误详情与 `kit\skilllocker.log`；修好 `config.json` 的 `store` 或 `kit\adapters.json` 后点【重试】。这是明确失败，界面**不会**拿内置演示快照冒充真实数据 |
 | 界面显示「LOCAL」胶囊、编辑没写进数据库（仅 `file://` 直开才会这样） | `bridge.js` 没等到 `window.pywebview`；桌面壳内注入超时已改为启动错误页，不再进只读原型 | 确认是用 `desktop.py` 打开（URL 必须带 `?desktop=1`）；`--debug` 看控制台错误 |
 | 窗口跑到屏幕外 / 右侧被切 | 进程未声明 DPI 感知，或尺寸没按工作区收口 | 确认 `desktop.py` 的 `_make_dpi_aware()`、`_centered_rect()`、`_nc_css()` 未被改动；建窗即居中，`on_start()` 只兜底最小化还原 |
 | 改了 `app.js` / `styles.css`，界面还是旧样子 | WebView2 缓存了 `file://` 资源 | 确认 `desktop.py` 的 `_asset_version()` 仍在 URL 上带 `&v=`，且 `index.html` 用版本号加载资源；必要时重启进程 |
@@ -283,7 +316,18 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 | 环境要求 | Windows 10+；Python 3.12（`pythonw.exe` 可用）且已装 pywebview（`pip install pywebview`）+ Edge WebView2 Runtime |
 
 首次启动行为（干净机器：无 `skilllocker.db`、无 `config.json`）：`bootstrap()` 自动探测
-本机已装 agent（状态「已关闭」，开关 off）并登记中央仓库 skill 列表；打开任一 agent
-开关即在其 skills 目录建指向 `<安装目录>\store\<skill>` 的 junction。失败路径都有明确
+本机已装 agent（状态「已关闭」，开关 off），空仓库时自动把共有技能收进 `<安装目录>\store`
+（见 §1.3）；打开任一 agent 开关即在其 skills 目录建指向 `<安装目录>\store\<skill>` 的 junction。失败路径都有明确
 出口：缺 pywebview → 系统弹窗 + 退出码 2；store 不可用 / adapters.json 损坏 → 界面
 启动错误页（错误详情 + 重试），不会拿演示数据冒充真实数据。
+
+**Setup.exe 形态（v0.3.2 起）**：中央仓库在 `<安装目录>\store`（用户看得见、带得走）；
+`skilllocker.db` / `config.json` / `desktop_profile` / 日志仍在 `%LOCALAPPDATA%\SkillLocker`
+（程序目录可能被同步/压缩工具碰）。安装程序只创建程序文件、空 `store` 与快捷方式，
+**不预置任何技能**；全新安装首启按 §1.3 自动把各 agent 的共有技能收进仓库。
+若安装目录不可写（机器级安装到 `Program Files`），空库首启会回退到
+`%LOCALAPPDATA%\SkillLocker\store`，并在 `meta.loadError` 与日志里写明原因。
+
+**卸载保护**：`packaging/setup.nsi` 卸载时默认**保留**技能库 —— 先把 `store` 搬到
+`%LOCALAPPDATA%\SkillLocker\store.kept[-N]` 并写 `store-kept.txt` 说明路径，再删程序文件；
+移动失败会中止卸载，绝不 `RMDir /r $INSTDIR` 把库删光。发布前必须做「装 → 卸 → 查 store 仍在」硬验。

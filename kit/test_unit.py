@@ -766,7 +766,7 @@ def _():
             skilllocker_base.DB_FILE = old
 
 
-@case("promote_unique: 同名覆盖 / foreign-link / 不存在 三类拒绝，不动盘")
+@case("promote_unique: 同名覆盖 / 不存在 拒绝；foreign-link 按真身收编")
 def _():
     if sys.platform != "win32":
         raise AssertionError("仅 Windows（需要 junction）")
@@ -786,12 +786,11 @@ def _():
             cfg = tmp_cfg(store)
             insert_tool(con, "t1", agent)
             skilllocker.rescan(con, cfg)
-            for name, frag in (("s1", "同名"), ("flink", "链接")):
-                try:
-                    skilllocker.promote_unique(con, cfg, "t1", name)
-                    raise AssertionError("%s 应被拒绝" % name)
-                except RuntimeError as exc:
-                    assert frag in str(exc), exc
+            try:
+                skilllocker.promote_unique(con, cfg, "t1", "s1")
+                raise AssertionError("同名覆盖应被拒绝")
+            except RuntimeError as exc:
+                assert "同名" in str(exc), exc
             try:
                 skilllocker.promote_unique(con, cfg, "t1", "nope")
                 raise AssertionError("不存在的独有行应被拒绝")
@@ -799,7 +798,17 @@ def _():
                 assert "不存在" in str(exc), exc
             # 拒绝路径不得动盘：中央仓库仍是入库前的 1 个 skill
             assert con.execute("select count(*) from skills").fetchone()[0] == 1
-            assert os.path.isfile(os.path.join(elsewhere, "SKILL.md"))
+            # foreign-link：真身内容收进仓库，链接改指仓库，真身原样保留
+            act = skilllocker.promote_unique(con, cfg, "t1", "flink")
+            assert act["name"] == "flink" and act["via"] == "link", act
+            assert act["relinked"] == 1, act
+            with open(os.path.join(store, "flink", "SKILL.md"), encoding="utf-8") as fh:
+                assert "name: body" in fh.read()
+            assert os.path.isfile(os.path.join(elsewhere, "SKILL.md")), "第三方真身不得改动"
+            link = os.path.join(agent, "flink")
+            assert skilllocker.is_reparse(link), link
+            assert skilllocker.link_target(link) == skilllocker.norm_path(
+                os.path.join(store, "flink")), skilllocker.link_target(link)
         finally:
             con.close()
             skilllocker_base.DB_FILE = old
@@ -940,6 +949,61 @@ def _():
             cfg = skilllocker.load_config()
             assert cfg["store"] == skilllocker.DEFAULT_STORE
             assert "config.json 解析失败" in cfg.get("_load_error", "")
+        finally:
+            skilllocker_base.CONFIG_FILE = old_file
+
+
+@case("load_config: seed_* 默认值与非法值回落")
+def _():
+    old_file = skilllocker_base.CONFIG_FILE
+    with tempfile.TemporaryDirectory() as td:
+        cfg_file = os.path.join(td, "config.json")
+        skilllocker_base.CONFIG_FILE = cfg_file
+        try:
+            cfg = skilllocker.load_config()
+            assert cfg["seed_auto"] is True
+            assert cfg["seed_min_agents"] == 2
+            assert cfg["seed_max_skills"] == 300
+            assert cfg["seed_budget_s"] == 20
+            assert cfg["seed_max_bytes"] == 400 << 20
+            write(cfg_file, json.dumps({"seed_auto": "off", "seed_min_agents": 99,
+                                        "seed_max_skills": "x", "seed_budget_s": 0,
+                                        "seed_max_bytes": -1}))
+            cfg = skilllocker.load_config()
+            assert cfg["seed_auto"] is False, cfg
+            assert cfg["seed_min_agents"] == 8, cfg       # 上限 8
+            assert cfg["seed_max_skills"] == 300, cfg     # 非数字回默认
+            assert cfg["seed_budget_s"] == 1, cfg         # 下限 1
+            assert cfg["seed_max_bytes"] == 1 << 20, cfg  # 下限 1 MB
+        finally:
+            skilllocker_base.CONFIG_FILE = old_file
+
+
+@case("write_config: 合并旧文件保留用户手写键，运行期留痕不落盘")
+def _():
+    old_file = skilllocker_base.CONFIG_FILE
+    with tempfile.TemporaryDirectory() as td:
+        cfg_file = os.path.join(td, "config.json")
+        skilllocker_base.CONFIG_FILE = cfg_file
+        try:
+            store_a = os.path.join(td, "a")
+            store_b = os.path.join(td, "b")
+            os.makedirs(store_a)
+            os.makedirs(store_b)
+            write(cfg_file, json.dumps({"store": store_a.replace(os.sep, "/"),
+                                        "seed_auto": False, "seed_min_agents": 4,
+                                        "custom_key": "keep-me", "_load_error": "runtime"}))
+            cfg = skilllocker.load_config()
+            assert cfg["seed_auto"] is False and cfg["seed_min_agents"] == 4
+            cfg["store"] = store_b.replace(os.sep, "/")
+            skilllocker.write_config(cfg)
+            with open(cfg_file, encoding="utf-8") as fh:
+                saved = json.load(fh)
+            assert saved["store"] == store_b.replace(os.sep, "/"), saved
+            assert saved["seed_auto"] is False, saved
+            assert saved["seed_min_agents"] == 4, saved
+            assert saved["custom_key"] == "keep-me", saved
+            assert "_load_error" not in saved, saved
         finally:
             skilllocker_base.CONFIG_FILE = old_file
 
@@ -1602,6 +1666,28 @@ def _():
     finally:
         lk._replace_dir = saved
         shutil.rmtree(td, ignore_errors=True)
+
+
+@case("_store_writable: 以真实试写判定（Windows ACL 拒绝也能识别）")
+def _():
+    with tempfile.TemporaryDirectory() as td:
+        assert skilllocker_base._store_writable(td) is True
+        # 目标目录还不存在：探测最近一级已存在的父目录
+        assert skilllocker_base._store_writable(os.path.join(td, "not-yet")) is True
+        # 父目录链不存在：没有可写的落点
+        assert skilllocker_base._store_writable(os.path.join(td, "a", "b")) is False
+        old = skilllocker_base.tempfile.mkstemp
+
+        def deny(*args, **kwargs):
+            raise PermissionError(13, "Access is denied (simulated)")
+
+        # 关键回归：目录存在、os.access 返回 True，但真实写入被 ACL 拒绝
+        assert os.access(td, os.W_OK) is True
+        skilllocker_base.tempfile.mkstemp = deny
+        try:
+            assert skilllocker_base._store_writable(td) is False
+        finally:
+            skilllocker_base.tempfile.mkstemp = old
 
 
 def main():

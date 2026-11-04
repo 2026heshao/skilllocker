@@ -133,7 +133,9 @@ def _selftest_body(window, results):
     # 独有 / 冲突 / agent 计数同样现算：库里增删 skill、冲突收口后自检仍应成立
     un_rows = boards.get("unique") or []
     un_total = len(un_rows)
-    un_keys = sorted("%s/%s" % (u["tool"], u["name"]) for u in un_rows)
+    un_groups = boards.get("unique_groups") or []
+    un_logical = len(un_groups)
+    un_group_keys = sorted("g#" + g["key"] for g in un_groups)
     conflict = boards.get("conflict")
     ag_connected = sum(1 for a in ag_rows if a["status"] == "connected")
     ag_missing = [a["key"] for a in ag_rows if a["status"] == "missing"]
@@ -166,8 +168,8 @@ def _selftest_body(window, results):
            "document.querySelectorAll('.row').length", sh_total)
     _check(window, results, "侧栏共有=%d" % sh_total,
            "document.getElementById('nav-shared').textContent", str(sh_total))
-    _check(window, results, "侧栏独有=%d" % un_total,
-           "document.getElementById('nav-unique').textContent", str(un_total))
+    _check(window, results, "侧栏独有=%d（逻辑技能）" % un_logical,
+           "document.getElementById('nav-unique').textContent", str(un_logical))
     _check(window, results, "已编辑初始=%d" % edited0,
            "document.getElementById('stat-edited').textContent", str(edited0))
     _check(window, results, "分类夹数=%d" % folder_total,
@@ -375,57 +377,68 @@ def _selftest_body(window, results):
         "(function(){var b=document.querySelector(\"#view-seg [data-view-mode='list']\");"
         "if(b)b.click()})()")
     time.sleep(0.3)
-    _check(window, results, "独有行数=%d" % un_total,
-           "document.querySelectorAll('.row').length", un_total)
-    _check(window, results, "独有行键=后端集合",
+    # 独有根列表按「逻辑技能」一行一个：同名同内容的多 agent 副本已合并
+    _check(window, results, "独有行数=%d（逻辑技能）" % un_logical,
+           "document.querySelectorAll('.row').length", un_logical)
+    _check(window, results, "独有组行键=后端分组集合",
            "(function(){var a=[].map.call(document.querySelectorAll('.row'),"
            "function(e){return e.getAttribute('data-key')});a.sort();"
            "return JSON.stringify(a)})()",
-           json.dumps(un_keys, ensure_ascii=False, separators=(",", ":")))
-    _check(window, results, "独有序号连续 1..%d" % un_total,
+           json.dumps(un_group_keys, ensure_ascii=False, separators=(",", ":")))
+    _check(window, results, "独有序号连续 1..%d" % un_logical,
            "(function(){var n=[].map.call(document.querySelectorAll('.row .row-num'),"
-           "function(e){return +e.textContent});return n.length===" + str(un_total) +
+           "function(e){return +e.textContent});return n.length===" + str(un_logical) +
            "&&n.every(function(v,i){return v===i+1})})()", True)
 
-    # 独有看板的外部徽标：src != main 的行（extra 目录 / 容器展开 / 外部链接）
-    # 都要带「外部」标记；这类行没有「删除副本」（deletable=false），但详情栏
-    # 必须提供「卸载」入口（选中第一行核对：卸载按钮在、删除按钮不在）
-    un_ext = sum(1 for u in un_rows if u.get("src") and u["src"] != "main")
-    if un_ext:
-        _check(window, results, "独有外部徽标=%d" % un_ext,
-               "document.querySelectorAll('.row .mini-flag.ext').length", un_ext)
-        u0 = next(u for u in un_rows if u.get("src") and u["src"] != "main")
-        window.evaluate_js("document.querySelector('.row[data-key=%s]').click()"
-                           % json.dumps("%s/%s" % (u0["tool"], u0["name"])))
+    def _open_unique_instance(tool, name):
+        """从独有根进入该 agent 夹并选中实例行（根层级只有组行）。"""
+        window.evaluate_js("document.querySelector('[data-folder-nav=%s]').click()"
+                           % json.dumps(tool))
         time.sleep(0.3)
+        window.evaluate_js("document.querySelector('.row[data-key=%s]').click()"
+                           % json.dumps("%s/%s" % (tool, name)))
+        time.sleep(0.3)
+
+    # 独有看板的外部徽标：src != main 的逻辑组（extra 目录 / 容器展开 /
+    # 外部链接）都要带「外部」标记；实例没有「删除副本」但详情栏提供「卸载」
+    un_ext_groups = [g for g in un_groups
+                     if any(s and s != "main" for s in (g.get("srcs") or []))]
+    if un_ext_groups:
+        _check(window, results, "独有外部徽标=%d（组）" % len(un_ext_groups),
+               "document.querySelectorAll('.row .mini-flag.ext').length",
+               len(un_ext_groups))
+        u0 = next(u for u in un_rows if u.get("src") and u["src"] != "main")
+        _open_unique_instance(u0["tool"], u0["name"])
         _check(window, results, "外部行详情无删除按钮",
                "document.querySelectorAll('[data-delete]').length", 0)
         _check(window, results, "外部行详情有卸载按钮",
                "document.querySelectorAll('[data-uninstall]').length", 1)
+        window.evaluate_js("var b=document.querySelector('[data-folder-nav=\"all\"]');if(b)b.click()")
+        time.sleep(0.3)
 
-    # 一键转共有：实体独有行（kind=unique 且无同名覆盖）详情栏必须有 promote
-    # 入口；同名覆盖 / foreign-link 行不该出现。只断言按钮在，绝不点它 ——
-    # 自检跑的是真库，点了会把真实的独有技能拷进中央仓库。点击会换选中行，
-    # 结束后恢复原选中：后面的差异段还在独有板上按选中行断言。
+    # 一键收编入口：实体行 + 真身可读的 foreign-link 都必须有；同名覆盖没有。
+    # 只断言按钮在，绝不点它（自检跑真库，点了会真的拷进中央仓库）。
     prev_sel = window.evaluate_js(
         "(function(){var r=document.querySelector('.row.is-selected');"
         "return r?r.getAttribute('data-key'):null})()")
     un_prom = [u for u in un_rows if u.get("kind") == "unique" and not u.get("sameName")]
     if un_prom:
-        p_key = "%s/%s" % (un_prom[0]["tool"], un_prom[0]["name"])
-        window.evaluate_js("document.querySelector('.row[data-key=%s]').click()"
-                           % json.dumps(p_key))
-        time.sleep(0.3)
-        _check(window, results, "可收编行详情有「转为共有」按钮",
+        _open_unique_instance(un_prom[0]["tool"], un_prom[0]["name"])
+        _check(window, results, "实体行详情有「转为共有」按钮",
                "document.querySelectorAll('[data-promote]').length", 1)
-    un_blocked = [u for u in un_rows if u.get("sameName") or u.get("kind") == "foreign-link"]
+    un_link = [u for u in un_rows
+               if u.get("kind") == "foreign-link" and not u.get("sameName")]
+    if un_link:
+        _open_unique_instance(un_link[0]["tool"], un_link[0]["name"])
+        _check(window, results, "链接行详情有「按真身收进仓库」按钮",
+               "document.querySelectorAll('[data-promote]').length", 1)
+    un_blocked = [u for u in un_rows if u.get("sameName")]
     if un_blocked:
-        b_key = "%s/%s" % (un_blocked[0]["tool"], un_blocked[0]["name"])
-        window.evaluate_js("document.querySelector('.row[data-key=%s]').click()"
-                           % json.dumps(b_key))
-        time.sleep(0.3)
-        _check(window, results, "覆盖/链接行详情无「转为共有」按钮",
+        _open_unique_instance(un_blocked[0]["tool"], un_blocked[0]["name"])
+        _check(window, results, "同名不同内容行无收编按钮",
                "document.querySelectorAll('[data-promote]').length", 0)
+    window.evaluate_js("var b=document.querySelector('[data-folder-nav=\"all\"]');if(b)b.click()")
+    time.sleep(0.3)
     if prev_sel:
         window.evaluate_js("var r=document.querySelector('.row[data-key=%s]');if(r)r.click()"
                            % json.dumps(prev_sel))
@@ -480,13 +493,9 @@ def _selftest_body(window, results):
         # 独有看板的同名副本差异（scope=unique 路径），只有存在同名副本时才测
         u_same = [u for u in un_rows if u.get("sameName")]
         if u_same:
-            u_key = "%s/%s" % (u_same[0]["tool"], u_same[0]["name"])
             window.evaluate_js("document.getElementById('nav-unique').click()")
             time.sleep(0.3)
-            window.evaluate_js(
-                "var r=document.querySelector('.row[data-key=%s]');if(r)r.click()"
-                % json.dumps(u_key))
-            time.sleep(0.3)
+            _open_unique_instance(u_same[0]["tool"], u_same[0]["name"])
             window.evaluate_js("var b=document.querySelector('[data-diff]');if(b)b.click()")
             time.sleep(0.5)
             _check(window, results, "独有差异弹窗出现",

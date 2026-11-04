@@ -40,14 +40,17 @@
     if (!desktopHint) { settle(null); return; }
     if (fromInjection()) return;
     window.addEventListener('pywebviewready', fromInjection, { once: true });
+    // 首次安装 / 刚解压完的 exe 会被 Defender 扫描，WebView2 冷启动可能明显
+    // 超过 6s；注入窗口给到 20s，避免新用户第一次打开就停在「注入超时」。
+    var INJECT_TIMEOUT = 20000;
     var tries = 0;
     tick = setInterval(function () {
       if (fromInjection()) return;
-      // 与 6s 兜底对齐：轮询负责尽早命中（pywebviewready 事件兜不住时），
-      // 超时判定交给下面 6000ms 那一发，这里只管别比它早判死
-      if (++tries > 58) settle(null);
+      // 轮询负责尽早命中（pywebviewready 事件兜不住时）；超时判定交给下面
+      // INJECT_TIMEOUT 那一发，这里只管别比它早判死
+      if (++tries > Math.floor(INJECT_TIMEOUT / 100) - 2) settle(null);
     }, 100);
-    setTimeout(function () { if (!fromInjection()) settle(null); }, 6000);
+    setTimeout(function () { if (!fromInjection()) settle(null); }, INJECT_TIMEOUT);
   });
 
   // 桥调用超时：pywebview 的 promise 在后端线程死锁 / 窗口已销毁时可能永不
@@ -60,6 +63,8 @@
     delete_skill: 180000,
     uninstall_unique: 180000,
     promote_unique: 180000,
+    adopt_store: 180000,
+    adopt_local_skills: 600000,  // 批量拷贝 + 一次 rescan，按仓库大小给足预算
     set_agent: 180000,
     reseed_meta: 120000,
     diff: 60000,
@@ -104,6 +109,8 @@
     deleteSkill: function (scope, key) { return call('delete_skill', scope, key); },
     uninstallUnique: function (key) { return call('uninstall_unique', key); },
     promoteUnique: function (key) { return call('promote_unique', key); },
+    adoptStore: function (path) { return call('adopt_store', path); },
+    adoptLocalSkills: function () { return call('adopt_local_skills'); },
     chooseDir: function () { return call('choose_dir'); },
     importPreflight: function (src, name) { return call('import_preflight', src, name); },
     importSkill: function (src, name, folder) { return call('import_skill', src, name, folder); },

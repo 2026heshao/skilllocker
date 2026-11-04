@@ -1985,7 +1985,10 @@ body.reduce-motion .run-step.doing .run-ic .icon { animation: none; }
 @keyframes modalIn { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes toastIn { from { opacity: 0; transform: translateX(18px) scale(0.97); } to { opacity: 1; transform: translateX(0) scale(1); } }
 @keyframes toastOut { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(18px); } }
-@keyframes rowIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+/* 只做位移，不做透明度：WebView2 在窗口被遮挡 / 启动瞬间可能把 CSS 动画
+   暂停在 0%，配合 animation-fill-mode:both 会让整列表永远看不见（计数有、
+   行空白）。装饰动画不能决定内容可见性。 */
+@keyframes rowIn { from { transform: translateY(3px); } to { transform: translateY(0); } }
 
 .row { animation: rowIn 220ms var(--ease) both; }
 .row.no-anim { animation: none; }
@@ -2524,3 +2527,111 @@ body.dark { color-scheme: dark; }
 
 #boot-error-retry:hover { filter: brightness(1.08); }
 #boot-error-retry:active { transform: translateY(1px); }
+
+/* ---------------------------------------------------------- 首启引导（空中央仓库） */
+/* 安装版首启的中央仓库天生是空的：共有 0、磁盘上的技能全落在独有看板。
+   面板就是共有看板内容区本身（列表与网格一起收起，见 app.js renderContent），
+   所以自己承担滚动与高度。 */
+.first-run[hidden] { display: none; }
+
+.first-run {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: auto;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--line));
+  background: linear-gradient(180deg,
+              color-mix(in srgb, var(--accent-soft) 55%, var(--surface)),
+              var(--surface) 62%);
+  box-shadow: var(--shadow-1);
+  padding: 16px 18px 18px;
+}
+
+.fr-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+
+.fr-title { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 0; }
+
+.fr-title b { font-size: 14px; font-weight: 650; color: var(--ink); }
+
+.fr-title span { font-size: 11.5px; line-height: 1.6; color: var(--ink-2); }
+
+.fr-dismiss {
+  flex: none;
+  width: 26px; height: 26px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-3);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: background var(--fast), color var(--fast);
+}
+.fr-dismiss:hover { background: var(--surface-3); color: var(--ink); }
+
+.fr-opts { display: flex; flex-direction: column; gap: 9px; }
+
+.fr-opt {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 13px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.fr-opt-icon {
+  flex: none;
+  width: 34px; height: 34px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+}
+.fr-opt-icon .icon { width: 17px; height: 17px; }
+
+.fr-opt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.fr-opt-main b { font-size: 12.5px; font-weight: 620; color: var(--ink); }
+.fr-opt-main span { font-size: 11px; line-height: 1.55; color: var(--ink-3); }
+
+.fr-opt code,
+.fr-title code {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--surface-3);
+  color: var(--ink-2);
+  word-break: break-all;
+}
+
+.fr-opt .btn { flex: none; font-size: 11.5px; padding: 8px 16px; }
+
+/* 接管 / 收编执行中：按钮禁用并显示「处理中…」（后端 OPS_LOCK 串行，重复点击只会排队） */
+.first-run .btn:disabled,
+.fr-dismiss:disabled { opacity: .55; cursor: default; }
+.first-run .btn:disabled:hover { filter: none; }
+
+/* 自动建库后的单行提示条：共有看板已可用，只提示还有独有技能可补收 */
+.first-run.is-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px 10px 14px;
+  border-radius: 12px;
+  border-color: var(--line);
+  background: var(--surface);
+}
+.fr-strip-main { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.fr-strip-main > .icon { flex: none; width: 18px; height: 18px; color: var(--success); }
+.fr-strip-main > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fr-strip-main b { font-size: 12px; font-weight: 620; color: var(--ink); }
+.fr-strip-main span { font-size: 11px; line-height: 1.5; color: var(--ink-3); }
+.fr-strip-actions { display: flex; align-items: center; gap: 4px; flex: none; }
+.fr-seed-note {
+  display: flex; align-items: flex-start; gap: 8px;
+  margin: 0 0 10px; padding: 8px 10px;
+  border-radius: 9px; background: var(--surface-3);
+  font-size: 11px; line-height: 1.55; color: var(--ink-2);
+}
+.fr-seed-note .icon { flex: none; width: 14px; height: 14px; margin-top: 1px; color: var(--accent); }
