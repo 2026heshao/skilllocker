@@ -14,6 +14,9 @@
   var TOOLS = [];
   var ENABLED = [];
   var UNIQUE = [];
+  // 独有看板的逻辑技能组（同名同内容多 agent 副本 = 1 组 N 实例）；
+  // 后端 list_boards 给 unique_groups，原型快照没有时按名字本地兜底分组。
+  var UNIQUE_GROUPS = [];
   var AGENTS = [];
   var FOLDERS = [];
   var CONFLICT = null;
@@ -34,6 +37,7 @@
     TOOLS = D.tools || [];
     ENABLED = TOOLS.filter(function (t) { return t.enabled; });
     UNIQUE = D.unique || [];
+    UNIQUE_GROUPS = D.unique_groups || localUniqueGroups(UNIQUE);
     AGENTS = D.agents || [];
     CONFLICT = (D.conflict && D.conflict.skill) ? D.conflict : null;
     // 首启引导：后端只在「仓库里一个技能都没有」时给这个块，接管 / 收编成功后
@@ -499,6 +503,85 @@
     });
   }
 
+  // 原型快照（ui/data.js）没有 unique_groups：按 (名字, kind, sameName) 兜底
+  // 聚合，保证本地模式也能看到组视图；桌面端永远以后端分组为准。
+  function localUniqueGroups(rows) {
+    var groups = {}, order = [];
+    (rows || []).forEach(function (u) {
+      var ident = [u.kind || '', u.sameName ? 1 : 0, u.hash || ''].join('|');
+      var key = u.name + '#' + ident;
+      var g = groups[key];
+      if (!g) {
+        g = groups[key] = {
+          key: key, name: u.name, hash: u.hash || '',
+          count: 0, tools: [], toolLabels: [], marks: [],
+          instances: [], files: 0, bytes: 0, kinds: [], srcs: [],
+          sameName: !!u.sameName, hasForeign: false, deletable: true
+        };
+        order.push(key);
+      }
+      g.count++;
+      g.instances.push(u.tool + '/' + u.name);
+      g.files += u.files || 0;
+      g.bytes += u.bytes || 0;
+      if (g.tools.indexOf(u.tool) < 0) {
+        g.tools.push(u.tool);
+        g.toolLabels.push(u.toolLabel || u.tool);
+        g.marks.push(u.mark || '');
+      }
+      if (u.kind && g.kinds.indexOf(u.kind) < 0) g.kinds.push(u.kind);
+      if (u.src && g.srcs.indexOf(u.src) < 0) g.srcs.push(u.src);
+      if (u.kind === 'foreign-link') g.hasForeign = true;
+      if (u.deletable === false) g.deletable = false;
+    });
+    return order.map(function (k) { return groups[k]; });
+  }
+
+  function uniqueLogicalCount() {
+    return UNIQUE_GROUPS.length;
+  }
+
+  function groupOfKey(key) {
+    if (!key || key.indexOf('g#') !== 0) return null;
+    var gid = key.slice(2);
+    for (var i = 0; i < UNIQUE_GROUPS.length; i++) {
+      if (UNIQUE_GROUPS[i].key === gid) return UNIQUE_GROUPS[i];
+    }
+    return null;
+  }
+
+  function groupEntry(g) {
+    // 组内第一个实例的后端行，供卡片 / 兜底字段使用
+    for (var i = 0; i < UNIQUE.length; i++) {
+      var u = UNIQUE[i];
+      if (g.instances.indexOf(u.tool + '/' + u.name) > -1) return u;
+    }
+    return null;
+  }
+
+  // 逻辑技能组 → 行。key 用 `g#` 前缀与实例 key（tool/name）区分：
+  // 组行只做展示与入口，改名 / 备注 / 删除等高危操作仍按实例定位。
+  function uniqueGroupRows() {
+    return UNIQUE_GROUPS.map(function (g) {
+      var first = groupEntry(g) || {};
+      return {
+        key: 'g#' + g.key,
+        board: 'unique',
+        group: true,
+        groupData: g,
+        name: g.name,
+        display: g.name,
+        label: (g.toolLabels || []).join('、'),
+        note: '',
+        updated: 0,
+        starred: 0,
+        starredAt: 0,
+        entry: first,
+        conflict: !!g.sameName
+      };
+    });
+  }
+
   function currentRows() {
     if (isStarredView()) return starredRows();
     if (state.board === 'agents') return agentRows();
@@ -558,7 +641,19 @@
     return c;
   }
 
+  function groupSubText(g) {
+    var who = g.toolLabels || [];
+    var base = g.count > 1
+      ? g.count + ' 个 agent 各有一份 · 内容一致'
+      : (who[0] || g.name) + ' · ' + (g.files || 0) + ' files';
+    if (g.sameName) base += ' · 同名不同内容';
+    else if (g.hasForeign) base += ' · 含外部链接';
+    else if ((g.srcs || []).some(function (s) { return s && s !== 'main'; })) base += ' · 含外部来源';
+    return base;
+  }
+
   function rowSecondary(r) {
+    if (r.group) return groupSubText(r.groupData);
     if (r.board === 'unique') {
       return r.entry.toolLabel + ' · ' + r.entry.files + ' files';
     }
@@ -692,7 +787,12 @@
     document.body.dataset.view = state.board;
 
     document.getElementById('store-path').textContent = STORE;
-    document.getElementById('store-path').title = STORE;
+    var storeInText = META.storeIn === 'localappdata'
+      ? '用户数据目录（安装目录不可写，已回退）'
+      : META.storeIn === 'custom' ? '自定义目录' : '安装目录';
+    document.getElementById('store-path').title =
+      '技能库：' + STORE + '（' + storeInText + '）' +
+      (META.db ? '\n数据：' + META.db + '（库文件与配置，升级/卸载不影响）' : '');
     document.getElementById('store-count').textContent = SKILLS.length;
     document.getElementById('store-size').textContent = META.storeSize || '—';
     var healthDen = SKILLS.length + UNIQUE.length;
@@ -701,11 +801,15 @@
 
     var sharedCount = SKILLS.length;
     var uniqueCount = UNIQUE.length;
+    var uniqueLogical = uniqueLogicalCount();
     var agentStats = agentCounts(agentRows());
     var unfiled = unfiledCount();
 
     document.getElementById('nav-shared').textContent = sharedCount;
-    document.getElementById('nav-unique').textContent = uniqueCount;
+    // 计数口径：逻辑技能数（去重后）；实例数在 tab 副标题 / 页面标题里给出
+    document.getElementById('nav-unique').textContent = uniqueLogical;
+    document.getElementById('nav-unique').title =
+      uniqueLogical + ' 个逻辑技能 · ' + uniqueCount + ' 个实例（含各 agent 副本）';
     document.getElementById('nav-agents').textContent = agentStats.all;
     document.getElementById('nav-starred-badge').textContent = starCount();
     document.getElementById('sb-starred').textContent = starCount();
@@ -714,22 +818,24 @@
     document.getElementById('stat-folders').textContent = FOLDERS.length;
     document.getElementById('stat-unfiled').textContent = unfiled;
     document.getElementById('sb-edited').textContent = editedCount();
-    document.getElementById('sb-health').textContent =
-      sharedCount + ' 共有 · ' + FOLDERS.length + ' 分类';
+    var sbHealth = document.getElementById('sb-health');
+    sbHealth.textContent = sharedCount + ' 共有 · ' + FOLDERS.length + ' 分类' +
+      (META.seedNote ? ' · 首启完成' : '');
+    sbHealth.title = META.seedNote || '';
     document.getElementById('sb-path').textContent = STORE;
-    document.getElementById('sb-path').title = STORE;
+    document.getElementById('sb-path').title = document.getElementById('store-path').title;
     document.getElementById('ver-scan').textContent = SCAN;
     document.getElementById('sb-scan').textContent = SCAN;
 
     document.getElementById('tab-shared-num').textContent = sharedCount;
-    document.getElementById('tab-unique-num').textContent = uniqueCount;
+    document.getElementById('tab-unique-num').textContent = uniqueLogical;
     document.getElementById('tab-agents-num').textContent = agentStats.all;
     document.getElementById('tab-shared-em').textContent = FOLDERS.length + ' 个分类文件夹';
     document.getElementById('tab-agents-em').textContent = agentStats.connected + ' 已连接';
     var overridden = UNIQUE.filter(function (u) { return u.sameName; }).length;
-    // 与共有 tab 的「N 个分类文件夹」同款口径：独有 tab 报 agent 文件夹数
+    // 与共有 tab 的「N 个分类文件夹」同款口径：独有 tab 报 agent 文件夹数 + 实例数
     document.getElementById('tab-unique-em').textContent =
-      uniqueAgentGroups().length + ' 个 agent 文件夹';
+      uniqueAgentGroups().length + ' 个 agent 文件夹 · ' + uniqueCount + ' 个实例';
 
     var colName = document.getElementById('col-name');
     var colMid = document.getElementById('col-mid');
@@ -810,18 +916,28 @@
         emptySub.textContent = '该 agent 目录里没有与中央仓库不同名的内容';
         footHint.textContent = '这些 skill 不会被中央仓库覆盖，改名与备注只影响展示';
       } else if (viewOf('unique') === 'grid') {
+        var mergedView = uniqueLogical < uniqueCount;
         document.getElementById('page-title').textContent = '独有技能';
-        document.getElementById('page-sub').textContent =
-          uGroups.length + ' 个 agent 文件夹 · ' + uniqueCount + ' 个 skill' +
-          (overridden ? '（' + overridden + ' 个同名覆盖）' : '') +
-          ' · 点击 agent 进入，像资源管理器一样浏览';
+        document.getElementById('page-sub').textContent = mergedView
+          ? uniqueLogical + ' 个逻辑技能（' + uniqueCount + ' 个实例）· ' +
+            uGroups.length + ' 个 agent 文件夹' +
+            (overridden ? ' · ' + overridden + ' 个同名不同内容' : '') +
+            ' · 点击查看实例' +
+            (META.uniqueLight ? ' · 首启轻量视图，建库后补全明细' : '')
+          : uGroups.length + ' 个 agent 文件夹 · ' + uniqueCount + ' 个独有技能' +
+            (overridden ? ' · ' + overridden + ' 个同名不同内容' : '') +
+            ' · 先按 agent 浏览' +
+            (META.uniqueLight ? ' · 首启轻量视图，建库后补全明细' : '');
       } else {
         document.getElementById('page-title').textContent = '独有技能';
         document.getElementById('page-sub').textContent =
-          '只存在于某一个 agent · ' + (uniqueCount - overridden) + ' 个中央仓库没有，' + overridden + ' 个同名但内容不同';
+          uniqueLogical + ' 个逻辑技能 · ' + uniqueCount + ' 个实例 · ' +
+          '同名同内容的多 agent 副本已合并' +
+          (overridden ? '，' + overridden + ' 个同名不同内容未合并' : '') +
+          (META.uniqueLight ? ' · 首启轻量视图，建库后补全明细' : '');
         emptyTitle.textContent = '没有匹配的 skill';
         emptySub.textContent = '换个关键词，或把筛选切回“全部”';
-        footHint.textContent = '这些 skill 不会被中央仓库覆盖，改名与备注只影响展示';
+        footHint.textContent = '一行一个逻辑技能；点行看实例 · 改名与备注按实例保存';
       }
     } else {
       colName.textContent = 'AGENT';
@@ -927,8 +1043,9 @@
     if (state.board === 'unique') {
       nav.setAttribute('aria-label', 'Agent 文件夹导航');
       var uHtml = '<button class="nav-item cat-nav' + (!state.folder ? ' active' : '') +
-        '" data-folder-nav="all" title="查看全部独有 skill">' +
-        icon('grid') + '全部独有<b class="nav-badge">' + UNIQUE.length + '</b></button>';
+        '" data-folder-nav="all" title="' + uniqueLogicalCount() + ' 个逻辑技能 · ' +
+        UNIQUE.length + ' 个实例">' +
+        icon('grid') + '全部独有<b class="nav-badge">' + uniqueLogicalCount() + '</b></button>';
       uniqueAgentGroups().forEach(function (g) {
         uHtml += '<button class="nav-item cat-nav' + (state.folder === g.tool ? ' active' : '') +
           '" data-folder-nav="' + esc(g.tool) +
@@ -999,13 +1116,29 @@
   // firstRun 快照给出口：① 接管从已有 junction 反推出来的仓库；② 一键收编各
   // agent 主目录里的实体技能；③ 手动导入。范围与守卫都在后端把关。
   function firstRunModel() {
-    if (MODE !== 'db' || !FIRST_RUN || firstRunDismissed || SKILLS.length) return null;
+    if (MODE !== 'db' || !FIRST_RUN || firstRunDismissed) return null;
+    var items = FIRST_RUN.adoptable || [];
+    var strip = !!(FIRST_RUN.strip && SKILLS.length);
+    // 空仓库：整块面板；自动建库后仍有可收行：单行提示条（不长期占版面）
+    if (SKILLS.length && !(strip && items.length)) return null;
+    // 面板文案按「技能」计数而不是「副本」：同一个 skill 在 7 个 agent 里
+    // 各有实体时是 1 个技能、7 份副本，别让用户以为是 7 个技能。
+    var names = {};
+    items.forEach(function (a) { names[a.name] = 1; });
+    var skillCount = Object.keys(names).length;
     return {
+      strip: strip,
       cand: FIRST_RUN.candidate || null,
-      items: FIRST_RUN.adoptable || [],
+      items: items,
+      skillCount: skillCount,
       agents: FIRST_RUN.adoptableAgents || [],
       uniqueCount: UNIQUE.length,
-      agentCount: AGENTS.filter(function (a) { return a.detected; }).length
+      uniqueLogical: uniqueLogicalCount(),
+      uniqueLight: !!META.uniqueLight,
+      agentCount: AGENTS.filter(function (a) { return a.detected; }).length,
+      seedNote: FIRST_RUN.seedNote || META.seedNote || '',
+      blocked: FIRST_RUN.seedBlocked || null,
+      autoAdoptError: FIRST_RUN.autoAdoptError || META.autoAdoptError || ''
     };
   }
 
@@ -1035,7 +1168,7 @@
       opts.push(frOptHtml({
         icon: 'download', id: 'fr-adopt-local', label: '收编',
         primary: !m.cand,
-        title: '一键收编本机 ' + m.items.length + ' 个技能',
+        title: '一键收编本机 ' + m.skillCount + ' 个技能',
         text: '把 ' + esc(m.agents.join('、')) + ' 主 skills 目录里的实体技能各拷一份进中央仓库，' +
           '拷完它们就是共有技能。源目录保留；外部目录、指向别处的链接、同名但内容不同的副本都不动。'
       }));
@@ -1045,14 +1178,49 @@
       title: '自己挑一个目录导入',
       text: '导入弹窗支持本地目录与 GitHub 来源，一次一个，入库前会给预检报告。'
     }));
+    var seedText = '';
+    if (m.autoAdoptError) {
+      seedText = '<div class="fr-seed-note">' + icon('info') + '<span>自动接管已有仓库失败：' +
+        esc(m.autoAdoptError) + '。仍可用下面的「接管该仓库」手动完成。</span></div>';
+    } else if (m.seedNote) {
+      seedText = '<div class="fr-seed-note">' + icon('info') + '<span>' +
+        esc(m.seedNote) + '</span></div>';
+    } else if (m.blocked === 'disabled') {
+      seedText = '<div class="fr-seed-note">' + icon('info') +
+        '<span>自动建库已在 config.json 关闭（seed_auto=false），以下为手动出口。</span></div>';
+    }
+    // 有独有技能但都不在自动收编范围（外部目录 / 容器展开）：说明原因，
+    // 不让「没有可收编的技能」看起来像检测失败。
+    if (!m.items.length && m.uniqueLogical) {
+      seedText += '<div class="fr-seed-note">' + icon('info') +
+        '<span>检测到的独有技能来自外部目录或容器（如 <code>.system</code>、' +
+        '<code>~/.agents/skills</code>），自动建库不会改动它们；可在独有看板逐行' +
+        '「转为共有」，或用「导入目录」加入仓库。</span></div>';
+    }
     return '<div class="fr-head">' +
       '<div class="fr-title"><b>中央仓库还是空的，所以「共有技能」是 0</b>' +
       '<span>共有 = 中央仓库 <code>' + esc(STORE) + '</code> 里的技能；' +
       '独有 = 各 agent 目录里能加载、但仓库没有（或内容不同）的技能。' +
-      '本机已检测到 ' + m.agentCount + ' 个 agent、' + m.uniqueCount + ' 个独有技能。</span></div>' +
+      '本机已检测到 ' + m.agentCount + ' 个 agent、' + m.uniqueLogical +
+      ' 个逻辑独有技能（' + m.uniqueCount + ' 个实例）' +
+      (m.uniqueLight ? '，建库后按内容合并同名副本' : '') + '。</span></div>' +
       '<button class="fr-dismiss" id="fr-dismiss" title="本次启动不再显示">' +
       icon('x') + '</button></div>' +
+      seedText +
       '<div class="fr-opts">' + opts.join('') + '</div>';
+  }
+
+  // 自动建库后的单行提示条：共有看板已经可用，只是还有独有技能没进库。
+  function firstRunStripHtml(m) {
+    var names = m.skillCount;
+    return '<div class="fr-strip-main">' + icon('check') +
+      '<div><b>中央仓库已就绪</b><span>' +
+      (m.seedNote ? esc(m.seedNote) + ' · ' : '') +
+      '还有 ' + names + ' 个独有技能可一键收编。</span></div></div>' +
+      '<div class="fr-strip-actions">' +
+      '<button class="btn btn-sm btn-primary" id="fr-adopt-local">补充收编</button>' +
+      '<button class="fr-dismiss" id="fr-dismiss" title="本次启动不再显示">' +
+      icon('x') + '</button></div>';
   }
 
   function renderFirstRun() {
@@ -1062,10 +1230,12 @@
     if (!m) {
       root.hidden = true;
       root.innerHTML = '';
+      root.classList.remove('is-strip');
       return;
     }
     root.hidden = false;
-    root.innerHTML = firstRunHtml(m);
+    root.classList.toggle('is-strip', !!m.strip);
+    root.innerHTML = m.strip ? firstRunStripHtml(m) : firstRunHtml(m);
     // 安装版首启排障留痕：日志里没有 firstrun 行 = 面板压根没渲染
     if (!firstRunLogged) {
       firstRunLogged = true;
@@ -1206,10 +1376,13 @@
   }
 
   function renderList(animate) {
-    var all = currentRows();
     var isUnique = state.board === 'unique';
     var starredView = isStarredView();
     var inFolder = (state.board === 'shared' || isUnique) && !!state.folder;
+    // 独有根层级按「逻辑技能」展示：同名同内容的多 agent 副本只占一行，
+    // 不再把 7 份 brandkit 列成 7 条；agent 夹内仍是实例行。
+    var uniqueRoot = isUnique && !inFolder && !starredView;
+    var all = uniqueRoot ? uniqueGroupRows() : currentRows();
     var rows;
     var narrow = false; // 5 列行（进入文件夹的共有行 / 独有看板所有行 / 收藏视图）
     if (starredView) {
@@ -1262,9 +1435,11 @@
       body.innerHTML = renderAgentRows(rows, animate);
     } else if (starredView) {
       body.innerHTML = starredGroupedHtml(rows, animate);
-    } else if (isUnique && !inFolder) {
-      // 独有根列表：按 agent 分组 + 分割线；agent 夹内全是同一 agent，平铺即可
-      body.innerHTML = uniqueGroupedHtml(rows, animate);
+    } else if (uniqueRoot) {
+      // 独有根列表：一行一个逻辑技能（同名同内容已合并）；agent 夹内才是实例行
+      body.innerHTML = rows.map(function (r, i) {
+        return skillRowHtml(r, i, animate, true);
+      }).join('');
     } else {
       body.innerHTML = rows.map(function (r, i) {
         return skillRowHtml(r, i, animate, narrow);
@@ -1297,8 +1472,47 @@
     return html;
   }
 
+  // 逻辑技能组行：一行一个技能，副标题说明「N 个 agent 各有一份」，点进去看实例。
+  // 不提供星标 / ⋯ 菜单（那些都按实例定位），避免把组 key 写进 meta。
+  function groupRowHtml(r, i, animate, inFolder) {
+    var g = r.groupData;
+    var isSel = state.selected === r.key;
+    var flag;
+    var hasExtSrc = (g.srcs || []).some(function (s) { return s && s !== 'main'; });
+    if (g.sameName) flag = '<span class="mini-flag conflict">同名不同内容</span>';
+    else if (g.hasForeign) flag = '<span class="mini-flag conflict">' + icon('alert') + '外部链接</span>';
+    else flag = '<span class="mini-flag unique">内容一致</span>';
+    if (hasExtSrc) {
+      flag += '<span class="mini-flag ext" title="来自 extra_dirs 外部目录或容器展开">外部</span>';
+    }
+    if (g.count > 1) flag += '<span class="mini-flag count">' + g.count + ' 个实例</span>';
+    var marks = (g.marks || []).slice(0, 5).map(function (m, idx) {
+      return '<span class="agent-chip" title="' + esc(g.toolLabels[idx] || '') + '">' +
+        esc(m || '?') + '</span>';
+    }).join('');
+    if ((g.marks || []).length > 5) marks += '<span class="agent-chip">+' + (g.marks.length - 5) + '</span>';
+    var note = '<span class="row-note is-empty">' +
+      (g.count > 1 ? '点行查看 ' + g.count + ' 个实例' : '点行查看实例') + '</span>';
+    var cover = '<div class="row-agent">' + marks +
+      '<span class="count-text" style="margin-left:auto">' + (g.files || 0) + ' 文件</span></div>';
+    return '<div class="row group-row' + (inFolder ? ' in-folder' : '') +
+      (isSel ? ' is-selected' : '') + (r.conflict ? ' is-conflict' : '') +
+      (animate ? '' : ' no-anim') +
+      '" data-key="' + esc(r.key) + '" data-row-board="unique" data-group-row="1"' +
+      ' role="button" tabindex="0"' +
+      (animate ? ' style="animation-delay:' + Math.min(i, 14) * 12 + 'ms"' : '') + '>' +
+      '<span class="row-mark row-num">' + (i + 1) + '</span>' +
+      '<div class="row-main"><div class="row-title"><span class="row-name">' +
+      esc(r.display) + '</span>' + flag + '</div>' +
+      '<span class="row-label">' + esc(rowSecondary(r)) + '</span></div>' +
+      note + cover +
+      '<span class="row-go">' + icon('chevron-right') + '</span>' +
+      '</div>';
+  }
+
   // 单条 skill 行（共有 / 独有看板共用）；inFolder = 5 列窄行
   function skillRowHtml(r, i, animate, inFolder) {
+    if (r.group) return groupRowHtml(r, i, animate, inFolder);
     var secondary = rowSecondary(r);
     var isSel = state.selected === r.key;
     var conflictFlag;
@@ -1393,6 +1607,16 @@
   }
 
   function fileCardHtml(r) {
+    if (r.group) {
+      var g = r.groupData;
+      var gm = (g.marks || []).slice(0, 4).join(' ') || mark(g.name);
+      return '<div class="file-card group-card' + (state.selected === r.key ? ' is-selected' : '') +
+        '" role="button" tabindex="0" data-key="' + esc(r.key) + '" data-group-row="1">' +
+        '<span class="fc-mark">' + esc(gm) + '</span>' +
+        '<div class="fc-main"><b>' + esc(r.display) + '</b><span>' +
+        esc(groupSubText(g)) + '</span></div>' +
+        '</div>';
+    }
     var isSel = state.selected === r.key;
     // 共有卡副标题 = 归属夹；独有卡副标题 = 来源 agent（同名覆盖一并标出）
     var sub;
@@ -1470,22 +1694,36 @@
   // 搜索态 = 结果文件卡流。没有「未归档」段——独有 skill 恒归属某 agent。
   function uniqueGridHtml() {
     if (state.q) {
-      var hits = sortRows(filterRows(uniqueRows()));
+      var hits = sortRows(filterRows(uniqueGroupRows()));
       return '<div class="grid-sect"><b>搜索结果</b><span>“' + esc(state.q) + '”</span><span class="count-text">' +
-        hits.length + ' 个匹配</span></div>' +
+        hits.length + ' 个逻辑技能</span></div>' +
         (hits.length
           ? '<div class="folder-grid">' + hits.map(fileCardHtml).join('') + '</div>'
           : '<div class="empty" style="min-height:180px"><div class="empty-icon">' + icon('search') +
             '</div><b>没有匹配的 skill</b><span>换个关键词试试</span></div>');
     }
     var groups = uniqueAgentGroups();
+    var logical = uniqueGroupRows();
     if (!groups.length) {
       return '<div class="empty" style="min-height:180px"><div class="empty-icon">' + icon('check') +
         '</div><b>没有独有 skill</b><span>每个 agent 都与中央仓库完全一致</span></div>';
     }
-    return '<div class="grid-sect"><b>Agent 文件夹</b><span>一个 agent 一个文件夹 · 点击进入它的独有 skill</span>' +
+    // 按数据自适应：只有真的发生了合并（逻辑数 < 实例数）时才把「逻辑技能」
+    // 放第一段；全是单实例时先给 agent 文件夹，避免 100+ 张平铺卡把入口埋掉。
+    var merged = logical.length < UNIQUE.length;
+    var agentSect = '<div class="grid-sect"' + (merged ? ' style="margin-top:18px"' : '') + '>' +
+      '<b>Agent 文件夹</b>' +
+      '<span>按 agent 浏览它的独有 skill</span>' +
       '<span class="count-text">' + groups.length + ' 个 agent</span></div>' +
       '<div class="folder-grid">' + groups.map(agentFolderCardHtml).join('') + '</div>';
+    var logicalSect = '<div class="grid-sect"' + (merged ? '' : ' style="margin-top:18px"') + '>' +
+      '<b>' + (merged ? '逻辑技能' : '全部独有技能') + '</b>' +
+      '<span>' + (merged
+        ? '同名同内容的多 agent 副本合并为一条 · 点卡查看实例'
+        : '没有发生合并，按技能平铺 · 点卡查看实例') + '</span>' +
+      '<span class="count-text">' + logical.length + ' 个 / ' + UNIQUE.length + ' 实例</span></div>' +
+      '<div class="folder-grid">' + logical.map(fileCardHtml).join('') + '</div>';
+    return merged ? logicalSect + agentSect : agentSect + logicalSect;
   }
 
   // 面包屑内容（#crumb-bar 是容器）：共有根节点同时是「移出分类」的投放区；
@@ -1616,6 +1854,8 @@
 
   /* ---------------------------------------------------------- render: inspector */
   function selectedRow() {
+    var g = groupOfKey(state.selected);
+    if (g) return uniqueGroupRows().filter(function (r) { return r.key === state.selected; })[0] || null;
     var rows = currentRows();
     for (var i = 0; i < rows.length; i++) if (rows[i].key === state.selected) return rows[i];
     return null;
@@ -1645,6 +1885,12 @@
     }
 
     saveState.hidden = true;
+    if (r.group) {
+      if (insStar) insStar.hidden = true; // 组不是单行实体，收藏按实例走
+      head.textContent = r.name;
+      renderGroupInspector(r);
+      return;
+    }
     if (r.board === 'agents') {
       if (insStar) insStar.hidden = true; // agent 不是 skill，不参与收藏
       renderAgentInspector(r);
@@ -1770,21 +2016,31 @@
         icon('star') + '</div></div></div>'
       : '';
 
-    // 一键转共有：只给实体独有行（kind=unique）。同名覆盖（中央已有副本，
-    // 该走差异处置）与 foreign-link（真身不归本工具管）不出现入口；
-    // 真正能收哪些由后端 promote_unique 把关，这里只做展示与确认。
+    // 一键收编：实体行与可解析真身的 foreign-link 都给入口（后端
+    // resolve_adopt_target 校验真身可读且不在仓库内）；同名覆盖走差异处置。
+    // 文案按行形态区分，避免用户以为在动第三方链接的目标文件。
     var promoteHtml = '';
-    if (r.board === 'unique' && r.entry.kind === 'unique' && !r.entry.sameName) {
+    var promotable = r.entry && (r.entry.kind === 'unique' || r.entry.kind === 'foreign-link');
+    if (r.board === 'unique' && promotable && !r.entry.sameName) {
+      var linkKind = r.entry.kind === 'foreign-link';
       var align = r.entry.src === 'main' && r.entry.agentEnabled !== false;
       promoteHtml = '<div class="promote-box">' +
         '<div class="promote-title">' + icon('upload') + '收进中央仓库</div>' +
-        '<p>把整个目录拷贝进中央仓库成为共有技能（' + r.entry.files + ' 个文件 / ' +
-        fmtBytes(r.entry.bytes) + '），之后可统一分发给所有 agent。' +
-        (align
-          ? '「' + esc(r.entry.toolLabel) + '」的分发开关开着，收编后源副本会按分发方式对齐。'
-          : '源目录保留不动，' + esc(r.entry.toolLabel) + ' 不受影响。') +
-        '已写过的显示名与备注会一并带过去。</p>' +
-        '<button class="btn btn-primary" data-promote="1">' + icon('upload') + '转为共有技能</button>' +
+        '<p>' + (linkKind
+          ? '链接真身的内容会拷贝进中央仓库成为共有技能（' + r.entry.files + ' 个文件 / ' +
+            fmtBytes(r.entry.bytes) + '）。' +
+            (align
+              ? '「' + esc(r.entry.toolLabel) + '」的分发开关开着，收编后链接改指中央仓库。'
+              : '分发开关关着：保留原链接，真身仍在原路径，本工具不删第三方文件。')
+          : '把整个目录拷贝进中央仓库成为共有技能（' + r.entry.files + ' 个文件 / ' +
+            fmtBytes(r.entry.bytes) + '），之后可统一分发给所有 agent。' +
+            (align
+              ? '「' + esc(r.entry.toolLabel) + '」的分发开关开着，收编后源副本会按分发方式对齐。'
+              : '源目录保留不动，' + esc(r.entry.toolLabel) + ' 不受影响。') +
+            '已写过的显示名与备注会一并带过去。') +
+        '</p>' +
+        '<button class="btn btn-primary" data-promote="1">' + icon('upload') +
+        (linkKind ? '按真身收进仓库' : '转为共有技能') + '</button>' +
         '</div>';
     }
 
@@ -1834,7 +2090,7 @@
       (r.board === 'unique' && r.entry.deletable === false
         ? '<div class="agent-hint ext">' + esc(
             r.entry.kind === 'foreign-link'
-              ? '这是指向 agent 外部目录的链接，真身不归本工具管理：只展示、不分发；需要移除时只摘链接，不碰真身。'
+              ? '这是指向别处的链接，真身不归本工具管理：可在上方「按真身收进仓库」把内容纳入统一分发；需要移除时只摘链接，不碰真身。'
               : '来自外部目录 ' + r.entry.src + '，由 agent 自己安装/管理：本工具不分发；需要移除时可以卸载（永久删除该目录）。') + '</div>' +
           '<div class="ins-danger">' +
           '<button class="btn btn-danger" data-uninstall="1">' + icon('trash') +
@@ -1851,6 +2107,62 @@
             ? '删除中央仓库实体并撤掉所有 agent 链接，操作不可恢复。'
             : '只删除这个 agent 目录下的副本，中央仓库的同名内容不受影响。') + '</p>' +
         '</div>');
+  }
+
+  // 逻辑技能组详情：只做汇总与实例入口。改名 / 备注 / 收编 / 删除都必须
+  // 落到具体实例（tool/name），这里不提供会写组 key 的表单。
+  function renderGroupInspector(r) {
+    var body = document.getElementById('ins-body');
+    var g = r.groupData;
+    var inst = uniqueRows().filter(function (row) {
+      return g.instances.indexOf(row.key) > -1;
+    });
+    var instHtml = inst.map(function (row) {
+      var e = row.entry;
+      var kindText = e.sameName ? '同名不同内容'
+        : e.kind === 'foreign-link' ? '外部链接'
+        : (e.src && e.src !== 'main') ? '外部目录（' + e.src + '）' : '仅此 agent 有';
+      return '<div class="meta-list" style="margin-bottom:8px">' +
+        '<div class="meta-row"><span>' + esc(e.mark || '') + ' ' + esc(e.toolLabel || e.tool) +
+        '</span><b>' + esc(row.display) + '</b></div>' +
+        '<div class="meta-row"><span>类型</span><b>' + esc(kindText) + '</b></div>' +
+        '<div class="meta-row"><span>文件数</span><b>' + (e.files || 0) + ' 个 · ' +
+        fmtBytes(e.bytes) + '</b></div>' +
+        '<div class="meta-row"><span>路径</span><b style="font-family:var(--mono);font-size:10.5px">' +
+        esc(e.path || '') + '</b></div>' +
+        '<div style="display:flex;gap:6px;margin-top:6px">' +
+        '<button class="btn btn-sm" data-open-instance="' + esc(row.key) + '">查看实例</button>' +
+        '<button class="btn btn-sm" data-copy="' + esc(e.path || '') + '">复制路径</button>' +
+        '</div></div>';
+    }).join('');
+    var diffHtml = '';
+    if (g.sameName && inst.length) {
+      diffHtml = '<div class="field-block"><div class="diff-box">' +
+        '<div class="diff-title">' + icon('alert') + '中央仓库有同名但内容不同的副本</div>' +
+        '<div class="diff-text">同名不同内容的实例不会被自动合并；收编会覆盖中央副本，' +
+        '请先查看差异后用冲突处置决定保留哪一份。</div>' +
+        '<button class="btn btn-sm diff-btn" data-diff="1" data-diff-scope="unique" ' +
+        'data-diff-key="' + esc(inst[0].key) + '">' + icon('eye') + '查看文件差异</button>' +
+        '</div></div>';
+    }
+    var note = g.sameName
+      ? '同名但内容不同的实例已分成不同组，绝不会被合并成一条。'
+      : (g.count > 1 ? '这些副本内容完全一致，合并展示；操作仍按 agent 实例进行。'
+                     : '只有一个 agent 装有这份技能。');
+    body.innerHTML =
+      '<div class="field-block"><div class="meta-list">' +
+      '<div class="meta-row"><span>逻辑技能</span><b>' + esc(g.name) + '</b></div>' +
+      '<div class="meta-row"><span>实例</span><b>' + g.count + ' 个 · ' +
+      esc((g.toolLabels || []).join('、')) + '</b></div>' +
+      '<div class="meta-row"><span>内容哈希</span><b>' + esc((g.hash || '').slice(0, 12) || '—') + '</b></div>' +
+      '<div class="meta-row"><span>合计</span><b>' + (g.files || 0) + ' 个文件 · ' +
+      fmtBytes(g.bytes) + '</b></div>' +
+      '</div><div class="field-help">' + esc(note) + '</div></div>' +
+      diffHtml +
+      '<div class="divider"></div>' +
+      '<div class="field-block"><div class="field-label"><span>实例</span>' +
+      '<span style="text-transform:none;letter-spacing:0;font-weight:400">点「查看实例」进入该 agent 的那一份</span></div>' +
+      instHtml + '</div>';
   }
 
   function renderAgentInspector(a) {
@@ -2000,6 +2312,10 @@
   // 桌面端随 metaPayload 进 saveMeta 落库（starred_at 由后端只在变星时刻产生）；
   // 原型端整张 meta map 写 localStorage。
   function toggleStar(key) {
+    if (String(key || '').indexOf('g#') === 0) {
+      toast('info', '收藏按实例保存', '进入组详情选一个 agent 的实例再收藏');
+      return;
+    }
     var m = metaOf(key);
     var on = !m.starred;
     m.starred = on ? 1 : 0;
@@ -2519,7 +2835,7 @@
 
   function requestDelete() {
     var r = selectedRow();
-    if (!r || r.board === 'agents') return;
+    if (!r || r.board === 'agents' || r.group) return; // 组行只做展示，操作按实例走
     if (MODE !== 'db' || !SKB) {
       toast('info', '原型模式', '桌面端才会真的删除磁盘上的 skill');
       return;
@@ -2562,7 +2878,7 @@
     // foreign-link）。与「删除本地副本」的区别在后端 uninstall_unique：
     // foreign-link 只摘链接；实体目录永久删除。deletable 行仍走 requestDelete。
     var r = selectedRow();
-    if (!r || r.board !== 'unique' || r.entry.deletable !== false) return;
+    if (!r || r.group || r.board !== 'unique' || r.entry.deletable !== false) return;
     if (MODE !== 'db' || !SKB) {
       toast('info', '原型模式', '桌面端才会真的摘除链接 / 删除外部目录');
       return;
@@ -2601,20 +2917,28 @@
     // 收编范围与源副本处置由后端 promote_unique 决定（同名覆盖 / foreign-link
     // 行根本不渲染按钮，后端仍会再拦一次）。
     var r = selectedRow();
-    if (!r || r.board !== 'unique' || r.entry.kind !== 'unique') return;
+    if (!r || r.group || r.board !== 'unique') return;
+    var isLink = r.entry.kind === 'foreign-link';
+    if (r.entry.kind !== 'unique' && !isLink) return;
     if (MODE !== 'db' || !SKB) {
       toast('info', '原型模式', '桌面端才会真的把技能拷进中央仓库');
       return;
     }
     var toAlign = r.entry.src === 'main' && r.entry.agentEnabled !== false;
-    var title = '把“' + r.display + '”转为共有技能？';
-    var text = '将把 ' + r.entry.path + ' 拷贝到中央仓库（' + r.entry.files + ' 个文件 / ' +
-      fmtBytes(r.entry.bytes) + '），并纳入统一分发。' +
-      (toAlign
-        ? '「' + r.entry.toolLabel + '」的分发开关开着，源副本会按分发方式对齐。'
-        : '源目录保留不动，' + r.entry.toolLabel + ' 不受影响。') +
-      '显示名与备注会一并带过去。';
-    confirmModal(title, text, '转为共有', function () {
+    var title = '把“' + r.display + '”' + (isLink ? '按真身收进仓库？' : '转为共有技能？');
+    var text = isLink
+      ? '将把链接真身（' + r.entry.path + '）的内容拷贝到中央仓库（' + r.entry.files +
+        ' 个文件 / ' + fmtBytes(r.entry.bytes) + '），并纳入统一分发。' +
+        (toAlign
+          ? '「' + r.entry.toolLabel + '」的分发开关开着，收编后链接会改指中央仓库。'
+          : '分发开关关着：保留原链接不动，真身仍在原路径，本工具不删第三方文件。')
+      : '将把 ' + r.entry.path + ' 拷贝到中央仓库（' + r.entry.files + ' 个文件 / ' +
+        fmtBytes(r.entry.bytes) + '），并纳入统一分发。' +
+        (toAlign
+          ? '「' + r.entry.toolLabel + '」的分发开关开着，源副本会按分发方式对齐。'
+          : '源目录保留不动，' + r.entry.toolLabel + ' 不受影响。') +
+        '显示名与备注会一并带过去。';
+    confirmModal(title, text, isLink ? '按真身收进仓库' : '转为共有', function () {
       closeModal();
       runProgress(700, function () {
         SKB.promoteUnique(r.key).then(function (res) {
@@ -2624,9 +2948,11 @@
             // 转换的终点在共有看板：跳过去选中新技能，让结果可见
             setState({ board: 'shared', selected: act.name });
           }
-          toast('ok', '已转为共有技能',
+          toast('ok', act.via === 'link' ? '已按真身收进仓库' : '已转为共有技能',
             '「' + (act.name || r.name) + '」已收进中央仓库' +
-            (act.relinked ? '，' + r.entry.toolLabel + ' 的源副本已转为链接' : ''));
+            (act.relinked
+              ? '，' + r.entry.toolLabel + ' 的' + (act.via === 'link' ? '链接已改指中央仓库' : '源副本已转为链接')
+              : (act.via === 'link' ? '；原链接保留（分发开关关着），真身仍在原路径' : '')));
         }).catch(function (err) {
           toast('bad', '转换失败', String(err && err.message || err));
         });
@@ -3511,6 +3837,14 @@
     setState({ folder: id === 'all' ? null : id });
   }
 
+  // 组行「查看实例」：进入该 agent 文件夹并选中那一条实例（tool/name）
+  function openGroupInstance(key) {
+    var tool = String(key || '').split('/')[0];
+    if (!tool) return;
+    setState({ folder: tool, selected: key });
+    insScrollTop();
+  }
+
   function setViewMode(mode) {
     if (mode !== 'grid' && mode !== 'list') return;
     if (viewOf(state.board) === mode) return;
@@ -4270,6 +4604,8 @@
         return;
       }
 
+      var instEl = t.closest('[data-open-instance]');
+      if (instEl) { openGroupInstance(instEl.getAttribute('data-open-instance')); return; }
       if (t.closest('[data-delete]')) { requestDelete(); return; }
       if (t.closest('[data-uninstall]')) { requestUninstall(); return; }
       if (t.closest('[data-promote]')) { requestPromote(); return; }
@@ -4811,6 +5147,7 @@
     // config.json 损坏退回默认配置：与 scanDegraded 同一套显性化口径，
     // 别让用户在毫不知情下看着「另一个仓库」的数据
     if (META.loadError) toast('warn', '配置未生效', META.loadError);
+    if (META.seedNote && SKILLS.length) toast('ok', '中央仓库已就绪', META.seedNote);
     // 当前所在的文件夹若已被删除回根（共有=folder id，独有=agent key）；
     // 选中行由 renderList 兜底回落
     if (state.folder && state.folder !== 'none') {
@@ -4851,7 +5188,7 @@
         '<h1>后端启动失败</h1>' +
         '<p class="boot-error-sub">skilllocker 后端在初始化时出错，界面无法连接真实数据库。</p>' +
         '<pre class="boot-error-detail">' + esc(detail) + '</pre>' +
-        '<p class="boot-error-hint">详细原因见安装目录 <b>kit\\skilllocker.log</b>；' +
+        '<p class="boot-error-hint">详细原因见 <b>%LOCALAPPDATA%\\SkillLocker\\skilllocker.log</b>；' +
         '排除后点「重试」重新加载。</p>' +
         '<button id="boot-error-retry" type="button">重试</button>' +
       '</div>';
@@ -4869,7 +5206,14 @@
         BootFX.fail();
         if (SKB.isDesktopShell && SKB.isDesktopShell()) {
           // 桌面壳里注入超时与 bootstrap 失败同等对待：错误页 + 重试（reload），
-          // 绝不退回演示快照 —— 那会让用户以为在改真库，实际只是内存里的假数据
+          // 绝不退回演示快照 —— 那会让用户以为在改真库，实际只是内存里的假数据。
+          // 首次安装时文件刚落地，WebView2 冷启动 + 杀软扫描可能拖过注入窗口：
+          // 自动重载一次（桥热了通常就接上了），仍失败才显示错误页。
+          if (!/[?&]bridgeRetry=1/.test(location.search)) {
+            location.href = location.href +
+              (location.href.indexOf('?') > -1 ? '&' : '?') + 'bridgeRetry=1';
+            return;
+          }
           MODE = 'error';
           renderBootError(new Error("pywebview 注入超时：桌面壳已启动但桥未接上，"
             + "通常是 WebView2 冷启动过慢，点「重试」重新加载"));
@@ -4884,6 +5228,9 @@
         hydrate(res.data);
         setMetaMap(res.meta);
         start();
+        // 首启自动建库留痕：toast + 状态栏（META.seedNote 只在真正跑过的那次有值）。
+        // 0 收成时不弹 toast（空库引导面板里已有说明），避免“检查了但没建”的噪音。
+        if (META.seedNote && SKILLS.length) toast('ok', '中央仓库已就绪', META.seedNote);
         BootFX.ready(); // R = bootstrap 成功且 start() 首帧渲染完成
       }).catch(function (err) {
         BootFX.fail();

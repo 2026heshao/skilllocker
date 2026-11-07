@@ -55,7 +55,7 @@ def seed_meta(con, cfg, force=False):
         seed = seed_category(r["name"])
         rows.append(("shared", r["name"], "", "", "", "[]", seed,
                      seed if seed in folder_ids else None, 0))
-    for u in unique_entries(con, cfg):
+    for u in unique_entries(con, cfg, hash_cache=cfg.get("_hash_cache")):
         key = u["tool"] + "/" + u["name"]
         if ("unique", key) in known:
             continue

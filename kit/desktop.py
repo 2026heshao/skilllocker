@@ -517,9 +517,23 @@ class Api:
     @_guard
     @_serialized
     def bootstrap(self):
+        started = time.monotonic()
         con = skilllocker.db()
         try:
             cfg = skilllocker.load_config()
+            # 单次 bootstrap 内共享扫描备忘：seed_meta 与 list_boards 会各扫一遍
+            # 独有目录，不共享的话同样的全树 dir_stats / 哈希要做两遍（首屏慢）。
+            # 下划线键不会写进 config.json，且每次桥调用都是新 cfg，不会跨操作变旧。
+            cfg["_stats_cache"] = {}
+            cfg["_hash_cache"] = {}
+            cfg["_unique_cache"] = None  # 哨兵：seed_meta 扫完，list_boards 复用
+            cfg["_unique_errors"] = []   # 与缓存同生共死：复用结果时也要复用扫描错误
+            # 空仓库首启只登记名字与来源，不做文件树统计/内容哈希：本机 526 条
+            # 独有能省掉十几秒。只限真正的首启（tools 表还没有任何登记）：之后
+            # 即使仓库仍为空，也走完整扫描，避免独有看板长期停在 files=0、
+            # 同名副本不合并。必须在 sync_tools_from_adapters 之前取快照。
+            fresh_db = not con.execute("select 1 from tools limit 1").fetchone()
+            cfg["_unique_light"] = False
             if cfg.get("_load_error"):
                 skilllocker.log_event(con, "warn", cfg["_load_error"])
                 # events 表前端取不到（payload 恒 []），必须同时进 skilllocker.log
@@ -533,9 +547,47 @@ class Api:
             # _guard 返回 ok:false → 前端启动错误页如实展示，不给演示数据
             if not con.execute("select 1 from skills limit 1").fetchone():
                 skilllocker.rescan(con, cfg)
+                # 首启自动接管优先：安装版默认仓库是空的，但各 agent 目录里
+                # 往往早就汇聚到一份真仓库。先把它接管过来，共有看板首屏就是
+                # 满的；没有候选才退到「自动建库」。两者都只在空库首启跑。
+                if not con.execute("select 1 from skills limit 1").fetchone():
+                    adopted = skilllocker.auto_adopt_store(con, cfg)
+                    if adopted:
+                        cfg["_unique_light"] = False
+                        cfg["_unique_cache"] = None
+                        cfg["_unique_errors"] = []
+                        cfg["_seed_note"] = adopted.get("note")
+                        _LOG.info("first-run-adopt: %s", cfg["_seed_note"])
+                # 首启自动建库：接管后仓库仍为空才跑（DB 为空但 store 有内容
+                # 的升级/换库场景不能往里灌）。必须在 sync_tools 之后（候选扫描
+                # 依赖 tools 表）、seed_meta 之前；其余守卫在 seed_shared_store。
+                if not con.execute("select 1 from skills limit 1").fetchone():
+                    cfg["_unique_light"] = bool(fresh_db)
+                    seeded = skilllocker.seed_shared_store(con, cfg)
+                    if seeded:
+                        # 建库成功后仓库非空，后续 seed_meta / 快照走完整扫描
+                        cfg["_unique_light"] = False
+                        cfg["_unique_cache"] = None
+                        cfg["_unique_errors"] = []
+                        cfg["_seed_note"] = skilllocker.seed_note(seeded)
+                        # events 前端取不到，同时进 skilllocker.log 供排障
+                        if seeded.get("error"):
+                            _LOG.warning("first-run-seed-failed: %s", cfg["_seed_note"])
+                        else:
+                            _LOG.info("first-run-seed: %s（%dms，候选 %d）", cfg["_seed_note"],
+                                      seeded.get("ms") or 0, seeded.get("candidates") or 0)
             skilllocker.migrate_folders(con, cfg)
             skilllocker.seed_meta(con, cfg)
-            return _boards_payload(con, cfg)
+            payload = _boards_payload(con, cfg)
+            # 首屏耗时留痕：用户报「启动卡很久」时先看这一行，区分扫描 / 哈希 /
+            # 播种各占多少，不要再靠猜。events 前端取不到，直接进日志。
+            _LOG.info("bootstrap %dms · skills=%d unique=%d groups=%d seed=%s",
+                      int((time.monotonic() - started) * 1000),
+                      payload["data"]["meta"].get("skillCount", 0),
+                      payload["data"]["meta"].get("uniqueCount", 0),
+                      payload["data"]["meta"].get("uniqueLogical", 0),
+                      "yes" if cfg.get("_seed_note") else "no")
+            return payload
         finally:
             con.close()
 

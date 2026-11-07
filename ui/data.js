@@ -2,7 +2,7 @@
 window.SKILLLOCKER_DATA = {
  "meta": {
   "generated": "2026-10-29 22:16",
-  "version": "0.2.1",
+  "version": "0.3.4",
   "python": "3.12.6",
   "store": "D:\\skilllocker\\store",
   "storeSize": "54.4 MB",

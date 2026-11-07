@@ -21,13 +21,15 @@ import urllib.request
 
 import skilllocker_base as _base  # noqa: F401 - 统一从门面取常量时走这里
 from skilllocker_base import (  # noqa: F401 - 部分名字经 skilllocker 门面再导出
-    IGNORE_NAMES, db, delete_tree, dir_stats, has_skill_md, is_reparse, link_target,
-    log_event, make_junction, norm_path, parse_frontmatter, path_under, remove_link,
-    sha_tree, target_state, write_config)
+    FIRST_RUN_ADOPT_EVENT, FIRST_RUN_SEED_EVENT, IGNORE_NAMES, db, delete_tree,
+    dir_stats, has_first_run_action, has_skill_md, is_reparse,
+    link_target, log_event, make_junction, migrate_folders, norm_path, ordered_tools,
+    parse_frontmatter, path_under, remove_link, sha_tree, store_location,
+    target_state, write_config)
 from skilllocker_meta import clear_meta, seed_meta, set_meta
 from skilllocker_store import (
-    adoptable_rows, agent_managed_roots, find_unique_row, rescan,
-    skill_dirs_under, store_skill_dirs, unique_entries)
+    adoptable_rows, agent_managed_roots, find_existing_store, find_unique_row,
+    rescan, skill_dirs_under, store_skill_dirs, unique_entries)
 
 
 # ---------------------------------------------------------------- 分发状态
@@ -462,7 +464,9 @@ def promote_unique(con, cfg, tool_key, name):
         （name（段名））的 name 不是合法的仓库直属目录名，真身目录名一定合法。
       - 同名覆盖行（overridden）不收：中央已有同名副本，「谁覆盖谁」是冲突
         处置的决策（diff / resolve_conflict），一键覆盖太危险。
-      - foreign-link 不收：真身在别处、不归本工具管理。
+      - foreign-link 按真身收：解析 junction 指向的目录（含 SKILL.md、不在本
+        仓库内）拷进仓库；真身归第三方就原样保留，开关开着时链接改指本仓库，
+        关着时保留原链接并如实说明。
 
     源副本一律保留（非破坏）：拷贝完成后真身与中央内容一致，独有行自动从
     看板消失（_unique_item 按内容哈希判定）。main 直属行且该 agent 分发开关
@@ -475,21 +479,13 @@ def promote_unique(con, cfg, tool_key, name):
     u = find_unique_row(con, cfg, tool_key, name)
     if not u:
         raise RuntimeError("独有 skill 不存在（或 agent 未检测到）：%s/%s" % (tool_key, name))
-    if u["kind"] == "foreign-link":
-        raise RuntimeError("这是指向 agent 外部目录的链接，真身不归本工具管理，无法收编；"
-                           "确要入库请在中央仓库手动导入 %s" % u["path"])
-    if u["sameName"]:
-        raise RuntimeError("中央仓库已有同名但内容不同的副本，一键收编会覆盖它；"
-                           "请先在详情里「查看文件差异」处置冲突")
+    # 实体行直接收；foreign-link 先解析真身再收（真身可读且不在本仓库内）。
+    # 同名覆盖仍拒绝：中央已有同名副本，「谁覆盖谁」走冲突处置。
+    source, store_name, via = resolve_adopt_target(con, cfg, u)
     path = os.path.normpath(u["path"])
-    if not os.path.isdir(path):
-        raise RuntimeError("路径已不存在：%s" % path)
-    store_name = os.path.basename(path)
-    if store_name in ("", ".", ".."):
-        raise RuntimeError("无法从真身路径推导 skill 名：%s" % path)
     ukey = tool_key + "/" + u["name"]
     src_main = u.get("src") == "main" and u["name"] == store_name
-    import_dir(con, cfg, path, store_name)
+    import_dir(con, cfg, source, store_name)
     files, size = dir_stats(os.path.join(cfg["store"], store_name))
     um = con.execute("select display_name, note from skill_meta "
                      "where scope='unique' and key=?", (ukey,)).fetchone()
@@ -503,13 +499,14 @@ def promote_unique(con, cfg, tool_key, name):
             plan = do_sync(con, cfg, only_tools=[tool_key], only_skills=[store_name],
                            apply_changes=True)
             relinked = sum(1 for p in plan if p.get("done") == "relink")
-    log_event(con, "promote", "%s/%s -> 共有 %s（%d 文件，%s）" % (
+    log_event(con, "promote", "%s/%s -> 共有 %s（%d 文件，%s%s）" % (
         tool_key, u["name"], store_name, files,
+        "按真身收编，" if via == "link" else "",
         "源副本已转链接" if relinked else "源副本保留"))
     con.commit()
     return {"scope": "unique", "key": ukey, "tool": tool_key, "name": store_name,
             "path": path.replace(os.sep, "\\"), "files": files, "bytes": size,
-            "relinked": relinked}
+            "relinked": relinked, "via": via, "source": source.replace(os.sep, "\\")}
 
 
 # ---------------------------------------------------------------- 首启接管 / 一键收编
@@ -557,10 +554,12 @@ def adopt_store(con, cfg, path):
                            % target.replace("/", "\\"))
     old = cfg["store"]
     cfg["store"] = tp
+    cfg["storeIn"] = store_location(tp)  # 界面如实显示「自定义目录」，别继续标安装目录
     try:
         write_config(cfg)
     except RuntimeError:
         cfg["store"] = old
+        cfg["storeIn"] = store_location(old)
         raise
     count = rescan(con, cfg)
     log_event(con, "adopt-store", "接管已有中央仓库 %s（原 %s，登记 %d 个技能）"
@@ -571,77 +570,200 @@ def adopt_store(con, cfg, path):
             "skills": count, "dirCount": len(skills)}
 
 
-def adopt_local_skills(con, cfg, unique=None):
-    """首启一键收编：把各 agent 主目录直属的实体技能目录收进中央仓库。
+def auto_adopt_store(con, cfg, tools=None):
+    """首启自动接管：从各 agent 已有 junction 反推出真仓库后，直接指过去。
 
-    范围由 store.adoptable_rows 把关（只收 src=main 的直属实体行；外部 extra
-    目录、容器展开行、指向别处的 junction、同名不同内容的覆盖行一律不碰）。
-    语义与单行收编 promote_unique 一致，区别是把 N 次 rescan 合成 1 次：
-      1. 按真身目录名分组：同名多来源只收第一份，其余按内容哈希判定 ——
-         一致就一起算收编完成（源副本保留，独有行自动消失），不一致就跳过
-         让用户到独有看板逐条处置，绝不静默覆盖；
-      2. copy_tree_atomic 拷进仓库（崩溃残留的 .skpart-* 由下轮 rescan 清理）；
-      3. 独有行上的人工改名 / 备注迁给共有行；
-      4. 一次 rescan + 一次 seed_meta（新共有行按预置规则归档）；
-      5. 只对分发开关开着的 agent 做 do_sync 对齐，且**只对齐该 agent 主目录
-         直属的那些名字**：容器行（`容器/子目录`）的真身不在 skills_dir 直属位，
-         给它补一条 skills_dir/子目录 会让同一个 agent 从两个路径加载同名技能
-         （promote_unique 同口径，见其 src_main 判定）；开关关着的保留实体副本
-         不动（探测到 ≠ 授权分发）。
-    除第 5 步的链接对齐外全部非破坏，源目录保留。
+    v0.3.2 的自动建库在「本机已有仓库」时会主动退让，只留一次点击的接管面板。
+    但安装版的新用户绝大多数属于这种形态（别的管理器 / 老版本早就把 agent
+    目录链到同一仓库），于是首屏长期停在「共有 0 / 全是独有」，看起来像没修。
+
+    这里把「一次点击」变成自动动作，仍然复用 adopt_store 的完整守卫：
+      - 只有仓库为空、没登记过技能、没做过首启决策时才跑；
+      - seed_auto=false 或 config.json 显式写过 store 时不动用户选择；
+      - 目标必须在 agent 地盘外、含 SKILL.md、当前仓库可写；
+      - 只在候选成立（≥2 条链接 + ≥2 个技能）时接管，宁缺勿滥。
+
+    失败不抛：错误写进 cfg["_auto_adopt_error"]，bootstrap 照常出首屏并回退到
+    手动引导面板；成功则写 config.json + rescan，并打 FIRST_RUN_ADOPT_EVENT
+    一次性标记（之后清空仓库也不会再自动改指）。
     """
+    if not cfg.get("seed_auto", True):
+        return None
+    if cfg.get("_store_explicit"):
+        return None  # 用户自己配过仓库，不替他把指针改走
+    if has_first_run_action(con):
+        return None
     if not os.path.isdir(cfg["store"]):
-        raise RuntimeError("中央仓库目录不可用：%s" % cfg["store"].replace("/", "\\"))
-    rows = adoptable_rows(unique if unique is not None else unique_entries(con, cfg))
-    groups, index = [], {}      # [(name, [(tool, path)])]，保持扫描顺序
+        return None
+    try:
+        if store_skill_dirs(cfg):
+            return None  # 仓库非空：只服务真正的空库首启
+    except RuntimeError:
+        return None
+    cand = find_existing_store(con, cfg, tools)
+    if not cand:
+        return None
+    try:
+        got = adopt_store(con, cfg, cand["store"])
+    except (OSError, RuntimeError) as exc:
+        cfg["_auto_adopt_error"] = str(exc)
+        log_event(con, "warn", "首启自动接管失败：%s" % exc)
+        con.commit()
+        return None
+    log_event(con, FIRST_RUN_ADOPT_EVENT,
+              "首启自动接管 %s（%d 个技能，%d 条链接 / %d 个 agent）"
+              % (got["path"], got["skills"], cand["linkCount"], len(cand["tools"])))
+    con.commit()
+    got["candidate"] = cand
+    got["note"] = ("已接管本机已有的中央仓库：%s（%d 个技能，%d 条现有链接）"
+                   % (got["path"], got["skills"], cand["linkCount"]))
+    return got
+
+
+def resolve_adopt_target(con, cfg, row):
+    """把一条独有行的「可拷贝真身」解析出来：返回 (源目录, 入库名, via)。
+
+    单行 promote_unique 与批量 _adopt_groups / 首启建库共用这一套判定，
+    不再各写一份（旧实现 foreign-link 被整体排除，收编规则不完整）。
+    拒绝时抛 RuntimeError，原因直接给前端。
+    """
+    if not row:
+        raise RuntimeError("独有 skill 不存在（或 agent 未检测到）")
+    if row.get("sameName"):
+        raise RuntimeError("中央仓库已有同名但内容不同的副本，一键收编会覆盖它；"
+                           "请先在详情里「查看文件差异」处置冲突")
+    kind = row.get("kind")
+    path = os.path.normpath(str(row.get("path") or ""))
+    name = str(row.get("name") or "")
+    if kind == "unique":
+        # 实体行按真身目录名入库：容器行 / 扫描变体的行名不是合法的仓库直属
+        # 目录名（`容器/子目录`、`name（段名）`），真身目录名才是。
+        store_name = os.path.basename(path)
+        if store_name in ("", ".", ".."):
+            raise RuntimeError("无法从真身路径推导 skill 名：%s" % path)
+        check_skill_name(store_name)
+        if not os.path.isdir(path):
+            raise RuntimeError("路径已不存在：%s" % path)
+        if is_reparse(path) or os.path.islink(path):
+            raise RuntimeError("这条实体行已经变成链接，请刷新看板后重试")
+        if not has_skill_md(path):
+            raise RuntimeError("目标不是 skill 目录（缺 SKILL.md）：%s" % path)
+        return path, store_name, "dir"
+    check_skill_name(name)
+    if kind == "foreign-link":
+        if not (is_reparse(path) or os.path.islink(path)):
+            raise RuntimeError("这条外部链接已经变成实体目录，请刷新看板后重试")
+        real = link_target(path)
+        if not real:
+            raise RuntimeError("链接已断开，解析不到真身：%s" % path)
+        real = os.path.normpath(real)
+        if not os.path.isdir(real):
+            raise RuntimeError("链接真身目录不存在（断链）：%s" % real)
+        if not has_skill_md(real):
+            raise RuntimeError("链接真身不是 skill 目录（缺 SKILL.md）：%s" % real)
+        store = norm_path(cfg["store"])
+        rp = norm_path(real)
+        if rp == store or rp.startswith(store + "/"):
+            raise RuntimeError("链接真身已经在本仓库内，无需收编")
+        return real, name, "link"
+    raise RuntimeError("这种行形态不支持收编：%s（同名覆盖请走冲突处置）" % kind)
+
+
+def _adopt_groups(con, cfg, rows, budget=None, pick_first_on_diff=True,
+                  sync_links=True):
+    """收编内核：分组 → 同名哈希判定 → 原子拷贝 → meta 迁移 →（可选）链接对齐。
+
+    rows 为 adoptable_rows 过滤后的独有行；返回
+    {adopted, skipped, metaMoved, relinked, linked, files, bytes,
+     truncated, truncReason, remaining, failed, failure, direct}。
+    failed 只统计「本可以收、但读不了 / 拷不进去」的硬失败（不含同名冲突等
+    语义跳过）：调用方据此决定能不能算「首启已完成」，见 seed_shared_store。
+    budget=(截止 monotonic 时刻, 技能上限, 字节上限)，任一触顶就停止并置
+    truncated=True；已拷的每一项都是原子目录，保留。
+    pick_first_on_diff=False（首启建库）时，同名但内容不同的组整组不收，
+    绝不自动选边；True（用户显式收编）时收第一份、其余跳过并说明。
+    """
+    rows = rows or []
     direct = {}                 # tool -> {name}：主目录直属行，只有这些能补 / 对齐链接
+    groups, index, affected = [], {}, set()
+    skipped = []
+    failed, failure = 0, ""
+
+    def _fail(reason):
+        nonlocal failed, failure
+        failed += 1
+        if not failure:
+            failure = reason
+
     for u in rows:
-        path = os.path.normpath(u["path"])
-        name = os.path.basename(path)
-        if name in ("", ".", ".."):
+        try:
+            source, name, via = resolve_adopt_target(con, cfg, u)
+        except RuntimeError as exc:
+            _fail(str(exc))
+            skipped.append({"name": u.get("name"), "tool": u.get("tool"),
+                            "reason": str(exc)})
             continue
-        if u["name"] == name:
-            direct.setdefault(u["tool"], set()).add(name)
+        direct.setdefault(u["tool"], set()).add(name)
         if name in index:
-            groups[index[name]][1].append((u["tool"], path))
+            groups[index[name]][1].append((u["tool"], source, via))
         else:
             index[name] = len(groups)
-            groups.append((name, [(u["tool"], path)]))
-    adopted, skipped, meta_moved = [], [], 0
-    affected = set()
-    for name, items in groups:
-        try:
-            check_skill_name(name)
-        except RuntimeError as exc:
-            skipped.append({"name": name, "reason": str(exc)})
-            continue
+            groups.append((name, [(u["tool"], source, via)]))
+
+    deadline, max_skills, max_bytes = budget or (None, None, None)
+    adopted, truncated, trunc_reason, remaining = [], False, "", 0
+    total_files = total_bytes = 0
+    meta_moved = 0
+    for gi, (name, items) in enumerate(groups):
+        if max_skills is not None and len(adopted) >= max_skills:
+            truncated, trunc_reason, remaining = True, "数量上限", len(groups) - gi
+            break
+        if deadline is not None and time.monotonic() > deadline:
+            truncated, trunc_reason, remaining = True, "时间预算", len(groups) - gi
+            break
         central = os.path.join(cfg["store"], name)
         if os.path.lexists(central):
             skipped.append({"name": name, "reason": "中央仓库已有同名条目，不覆盖"})
             continue
         base = None
-        for tool, path in items:
+        diffs = []
+        for tool, source, via in items:
             try:
-                h = sha_tree(path)
+                h = sha_tree(source)
             except (OSError, RuntimeError):
+                _fail("目录不可读，已跳过")
                 skipped.append({"name": name, "tool": tool, "reason": "目录不可读，已跳过"})
                 continue
             if base is None:
-                base = (path, h)
-                affected.add(tool)
-            elif h == base[1]:
-                affected.add(tool)  # 同一份内容：收一次就够，其余源副本保留
+                base = (source, h, tool, via)
+            elif h != base[1]:
+                diffs.append((tool, source, via))
             else:
-                skipped.append({"name": name, "tool": tool,
-                                "reason": "与已收编的同名技能内容不同，请到独有看板单独处置"})
+                affected.add(tool)  # 同一份内容：收一次就够，其余源副本保留
         if base is None:
             continue
+        if diffs and not pick_first_on_diff:
+            skipped.append({"name": name, "reason": "同名技能内容不同，未自动选边"})
+            for tool, _source, _via in diffs:
+                skipped.append({"name": name, "tool": tool,
+                                "reason": "同名技能内容不同，未自动选边"})
+            continue
+        # 预算：拷前按源目录大小预估；这一项装不下就停，已收的保留
+        _files, size = dir_stats(base[0])
+        if max_bytes is not None and total_bytes + size > max_bytes:
+            truncated, trunc_reason, remaining = True, "总量上限", len(groups) - gi
+            break
         try:
             copy_tree_atomic(base[0], central)
         except (OSError, RuntimeError) as exc:
+            _fail("拷入中央仓库失败：%s" % exc)
             skipped.append({"name": name, "reason": "拷入中央仓库失败：%s" % exc})
             continue
-        for tool, _path in items:
+        affected.add(base[2])
+        for tool, _source, _via in diffs:
+            skipped.append({"name": name, "tool": tool,
+                            "reason": "与已收编的同名技能内容不同，请到独有看板单独处置"})
+        for tool, _source, _via in items:
             um = con.execute("select display_name, note from skill_meta "
                              "where scope='unique' and key=?",
                              (tool + "/" + name,)).fetchone()
@@ -654,15 +776,22 @@ def adopt_local_skills(con, cfg, unique=None):
                                            "note": um["note"] or ""})
             meta_moved += 1
         adopted.append(name)
-        log_event(con, "adopt", "收编 %s ← %s" % (name, base[0].replace(os.sep, "\\")))
+        f, s = dir_stats(central)
+        total_files += f
+        total_bytes += s
+        log_event(con, "adopt", "收编 %s ← %s%s" % (
+            name, base[0].replace(os.sep, "\\"),
+            "（按真身）" if base[3] == "link" else ""))
+
     if adopted:
+        # 链接对齐依赖 skills 表里的新行（do_sync 按名字查中央内容哈希），
+        # 所以先登记再对齐；调用方只需补 folders / meta 播种。
         rescan(con, cfg)
-        seed_meta(con, cfg)
     relinked = linked = 0
-    enabled = {r["key"] for r in con.execute(
-        "select key from tools where detected=1 and enabled=1")}
-    touched = sorted(affected & enabled)
-    if touched and adopted:
+    if sync_links and adopted:
+        enabled = {r["key"] for r in con.execute(
+            "select key from tools where detected=1 and enabled=1")}
+        touched = sorted(affected & enabled)
         # 逐个 agent 只对齐它主目录直属的那批名字：容器行不补链接（否则同一个
         # agent 会从「容器/子目录」和「子目录」两个路径加载到同名技能）
         plan = []
@@ -672,22 +801,238 @@ def adopt_local_skills(con, cfg, unique=None):
                 continue
             plan += do_sync(con, cfg, only_tools=[tool], only_skills=names,
                             apply_changes=True)
-        # relink = 开着分发的 agent 里那份同名实体被对齐成指向仓库的链接；
-        # junction/copy = 该 agent 还没有这个技能，按开关补一条分发链接（收编的
-        # 目的就是统一分发，补链与 promote_unique 的语义一致）
         relinked = sum(1 for p in plan if p.get("done") in ("relink", "recopy"))
         linked = sum(1 for p in plan if p.get("done") in ("junction", "copy"))
-    files = size = 0
-    for name in adopted:
-        f, s = dir_stats(os.path.join(cfg["store"], name))
-        files += f
-        size += s
+    return {"adopted": adopted, "skipped": skipped, "metaMoved": meta_moved,
+            "relinked": relinked, "linked": linked,
+            "files": total_files, "bytes": total_bytes,
+            "truncated": truncated, "truncReason": trunc_reason,
+            "remaining": remaining, "failed": failed, "failure": failure,
+            "direct": direct}
+
+
+def adopt_local_skills(con, cfg, unique=None):
+    """首启一键收编：把各 agent 主目录直属的可收技能收进中央仓库。
+
+    范围由 store.adoptable_rows 把关（src=main 的实体行 + 可解析真身的
+    foreign-link；extra 外部目录、容器展开行、同名不同内容的覆盖行不碰）。
+    语义与单行收编 promote_unique 一致，共用 _adopt_groups：
+      1. 同名同内容只收一份，同名不同内容收第一份、其余跳过（用户显式点收编）；
+      2. copy_tree_atomic 拷进仓库；源目录保留；
+      3. 独有行上的人工改名 / 备注迁给共有行；
+      4. 一次 rescan + seed_meta（新共有行按预置规则归档）；
+      5. 只对分发开关开着的 agent、且只对主目录直属名字做 do_sync 对齐。
+    """
+    if not os.path.isdir(cfg["store"]):
+        raise RuntimeError("中央仓库目录不可用：%s" % cfg["store"].replace("/", "\\"))
+    rows = adoptable_rows(unique if unique is not None else unique_entries(con, cfg), cfg)
+    res = _adopt_groups(con, cfg, rows, pick_first_on_diff=True, sync_links=True)
+    if res["adopted"]:
+        migrate_folders(con, cfg)
+        seed_meta(con, cfg)
     log_event(con, "adopt", "一键收编：进仓库 %d 个，跳过 %d 个，对齐链接 %d 处，补链 %d 处"
-              % (len(adopted), len(skipped), relinked, linked))
+              % (len(res["adopted"]), len(res["skipped"]), res["relinked"], res["linked"]))
     con.commit()
-    return {"adopted": adopted, "skipped": skipped, "relinked": relinked,
-            "linked": linked, "files": files, "bytes": size,
-            "metaMoved": meta_moved, "store": norm_path(cfg["store"]).replace("/", "\\")}
+    return {"adopted": res["adopted"], "skipped": res["skipped"],
+            "relinked": res["relinked"], "linked": res["linked"],
+            "files": res["files"], "bytes": res["bytes"],
+            "metaMoved": res["metaMoved"],
+            "store": norm_path(cfg["store"]).replace("/", "\\")}
+
+
+# ---------------------------------------------------------------- 首启自动建库
+def _seed_candidates(con, cfg, tools=None):
+    """首启建库的候选与共有判定（只读）。
+
+    候选 = adoptable_rows(unique_entries(...))；按入库名分组，shared(name) =
+    出现在多少个不同 agent 的主目录里。种子优先取 shared >= seed_min_agents；
+    没有任何名字达到阈值时退化为「全部候选」：
+      - 只有一个贡献 agent → 单 agent 用户也要能建库（single_agent）；
+      - 多个 agent 但技能各装各的、没有同名交叉 → 新用户不会看到空库
+        （fallback_all）。同名但内容不同的组仍由 _adopt_groups 整组跳过。
+    """
+    tools = tools if tools is not None else ordered_tools(con)
+    rows = adoptable_rows(unique_entries(con, cfg, tools), cfg)
+    groups, order = {}, []
+    for u in rows:
+        name = u["name"]
+        if name not in groups:
+            groups[name] = []
+            order.append(name)
+        groups[name].append(u)
+    contributors = {u["tool"] for u in rows}
+    shared = {name: len({u["tool"] for u in groups[name]}) for name in order}
+    min_agents = cfg.get("seed_min_agents", 2)
+    seeds = [name for name in order if shared[name] >= min_agents]
+    single, fallback_all = False, False
+    if not seeds and order:
+        seeds = list(order)
+        single = len(contributors) <= 1
+        fallback_all = not single
+    return {"rows": rows, "groups": groups, "order": order, "seeds": seeds,
+            "shared": shared, "contributors": contributors,
+            "single_agent": single, "fallback_all": fallback_all}
+
+
+def seed_preview(con, cfg, tools=None):
+    """CLI seed --dry：只报告将会收哪些名字、来自谁，不写盘、不改库。"""
+    plan = _seed_candidates(con, cfg, tools)
+    out = []
+    for name in plan["seeds"]:
+        items = plan["groups"][name]
+        hashes, read_errors = [], []
+        for u in items:
+            try:
+                source, _n, _v = resolve_adopt_target(con, cfg, u)
+                hashes.append(sha_tree(source))
+            except (OSError, RuntimeError) as exc:
+                read_errors.append({"tool": u["tool"], "reason": str(exc)})
+        out.append({
+            "name": name,
+            "tools": sorted({u["tool"] for u in items}),
+            "shared": plan["shared"].get(name, 0),
+            "consistent": len(set(hashes)) <= 1,
+            "instances": [{"tool": u["tool"], "path": u["path"], "kind": u["kind"]}
+                          for u in items],
+            "errors": read_errors,
+        })
+    # 与 seed_shared_store 同一组守卫：dry 也要说清「实际会不会执行」
+    blocked = []
+    if not cfg.get("seed_auto", True):
+        blocked.append("seed_auto=false")
+    if has_first_run_action(con):
+        blocked.append("first-run-done")
+    try:
+        if store_skill_dirs(cfg):
+            blocked.append("store-not-empty")
+    except RuntimeError:
+        blocked.append("store-unreadable")
+    if find_existing_store(con, cfg, tools):
+        blocked.append("candidate-store")
+    return {
+        "seeded": [g["name"] for g in out
+                   if g["consistent"] and not g["errors"] and not blocked],
+        "groups": out,
+        "candidates": len(plan["rows"]),
+        "single_agent": plan["single_agent"],
+        "fallback_all": plan["fallback_all"],
+        "min_agents": cfg.get("seed_min_agents", 2),
+        "contributors": sorted(plan["contributors"]),
+        "blocked": blocked,
+    }
+
+
+def seed_note(res):
+    """首启建库结果的一句话（进 meta.seedNote，toast + 状态栏留痕）。"""
+    n = len(res.get("seeded") or [])
+    agents = len(res.get("byAgent") or {})
+    skipped = len(res.get("skipped") or [])
+    failed = int(res.get("failed") or 0)
+    if res.get("error"):
+        return res["error"]
+    if res.get("truncated"):
+        return ("已收入 %d 个技能后停止（%s），剩余 %d 个请用「一键收编」手动处理"
+                % (n, res.get("truncReason") or "上限", res.get("remaining") or 0))
+    if not n and failed:
+        return ("首次启动建库失败：%d 个候选未能拷入中央仓库（%s）；"
+                "没有写入一次性标记，下次启动会自动重试"
+                % (failed, (res.get("failure") or "原因见日志")[:160]))
+    if res.get("single_agent"):
+        return "本机只检测到 1 个 agent，已把它目录里的 %d 个技能作为初始中央仓库" % n
+    if res.get("fallback_all") and n:
+        return ("本机各 agent 的技能没有同名交叉，已把 %d 个技能全部作为初始仓库"
+                "（来自 %d 个 agent）" % (n, agents))
+    if res.get("conflict_only"):
+        return ("首次启动检测到技能，但同名副本内容不同，未自动选边；"
+                "请在独有看板或「一键收编」里决定保留哪份")
+    if n:
+        text = "已自动建立中央仓库：收入 %d 个共有技能（来自 %d 个 agent）" % (n, agents)
+        if skipped:
+            text += "，跳过 %d 个" % skipped
+            text += ("（其中 %d 个拷入失败）" % failed) if failed else "（同名不同内容等）"
+        return text
+    return "首次启动检查完成：没有找到可自动收入的共有技能，可在独有看板一键收编"
+
+
+def seed_shared_store(con, cfg, tools=None):
+    """首启自动建库：把各 agent 的共有技能拷进空仓库，返回结果或 None。
+
+    守卫（任一不满足返回 None，不抛错，让 bootstrap 正常出首屏）：
+    seed_auto 关 / 首启已决策（建库、自动或手动接管，任一留痕）/
+    仓库根不可用 / 反推得出已有仓库（此时应引导接管，不能造第二份仓库）。
+    没有任何可收候选时返回 None 且不写标记 —— 等用户以后装了 agent 再跑。
+    全部候选都硬失败（目录读不了 / 拷不进去）时也不写标记：这不是「没有
+    候选」，下次启动要能重试，原因通过 seedNote 如实回给前端。
+    """
+    started = time.monotonic()
+    if not cfg.get("seed_auto", True):
+        return None
+    if has_first_run_action(con):
+        return None
+    if not os.path.isdir(cfg["store"]):
+        return None
+    try:
+        if store_skill_dirs(cfg):
+            return None  # ① 中央仓库非空：只服务真正的空库首启
+    except RuntimeError:
+        return None
+    if find_existing_store(con, cfg, tools):
+        return None
+    plan = _seed_candidates(con, cfg, tools)
+    if not plan["rows"]:
+        return None
+    seed_rows = []
+    for name in plan["seeds"]:
+        seed_rows.extend(plan["groups"][name])
+    deadline = started + cfg["seed_budget_s"]
+    res = _adopt_groups(
+        con, cfg, seed_rows,
+        budget=(deadline, cfg["seed_max_skills"], cfg["seed_max_bytes"]),
+        pick_first_on_diff=False, sync_links=False)
+    if res["adopted"]:
+        migrate_folders(con, cfg)
+        seed_meta(con, cfg)
+    by_agent = {}
+    for name in res["adopted"]:
+        for u in plan["groups"][name]:
+            by_agent[u["tool"]] = by_agent.get(u["tool"], 0) + 1
+    ms = int((time.monotonic() - started) * 1000)
+    out = {
+        "seeded": res["adopted"], "skipped": res["skipped"],
+        "byAgent": by_agent,
+        "shared": {n: plan["shared"].get(n, 0) for n in plan["seeds"]},
+        "truncated": res["truncated"], "truncReason": res["truncReason"],
+        "remaining": res["remaining"], "bytes": res["bytes"],
+        "files": res["files"], "ms": ms, "single_agent": plan["single_agent"],
+        "fallback_all": plan["fallback_all"],
+        "candidates": len(seed_rows),
+        "contributors": sorted(plan["contributors"]),
+        "failed": res.get("failed") or 0,
+        "failure": res.get("failure") or "",
+    }
+    # 有候选但一个都没收进来、也没有硬失败：只可能是同名内容不同的整组跳过。
+    # 给前端一句准确的原因，别让用户以为「没检测到技能」。
+    out["conflict_only"] = bool(
+        seed_rows and not res["adopted"] and not out["failed"]
+        and any("同名技能内容不同" in str(s.get("reason") or "")
+                for s in res["skipped"]))
+    if not res["adopted"] and out["failed"]:
+        # 一个都没收进来、且失败都是硬失败（权限 / 磁盘满 / 目录读取失败）：
+        # 这轮不算「首启已完成」。不写 first-run-seed，下次启动重试；
+        # 真实原因带给前端，别再显示「没有找到可自动收入的共有技能」。
+        reason = (out["failure"] or "原因见日志")[:160]
+        out["error"] = ("首启建库失败：%d 个候选未能拷入中央仓库（%s）；"
+                        "下次启动会自动重试" % (out["failed"], reason))
+        log_event(con, "warn", out["error"])
+        con.commit()
+        return out
+    detail = "收入 %d / 跳过 %d / 候选 %d / %dms%s" % (
+        len(res["adopted"]), len(res["skipped"]), len(seed_rows), ms,
+        (" / 截断：%s，剩余 %d" % (res["truncReason"], res["remaining"]))
+        if res["truncated"] else "")
+    log_event(con, FIRST_RUN_SEED_EVENT, detail)
+    con.commit()
+    return out
 
 
 def resolve_conflict(con, cfg, tool_key, name, direction):

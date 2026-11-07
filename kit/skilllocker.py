@@ -22,6 +22,7 @@ CLI:
   python skilllocker.py sync [--tool k] [--fix]  建立/修复分发
   python skilllocker.py import <dir> [--name 名字]  从目录导入
   python skilllocker.py remove <name>        删分发 + 删实体（永久，不入回收站）
+  python skilllocker.py seed [--dry]         首启自动建库（--dry 只打印将收的名字与来源）
   python skilllocker.py search <关键词>       skills.sh 在线检索（只读，不碰库）
   python skilllocker.py fetch <owner/repo/skill 名> [--branch b]
                                           在线获取：下载到 %TEMP%/skilllocker-dl，
@@ -40,12 +41,13 @@ from skilllocker_store import *  # noqa: F401,F403
 def main():
     p = argparse.ArgumentParser(prog="skilllocker")
     p.add_argument("cmd", choices=["scan", "status", "verify", "sync", "import", "remove",
-                                   "detect", "search", "fetch"])
+                                   "detect", "seed", "search", "fetch"])
     p.add_argument("arg", nargs="?", help="import 用目录 / remove 用 skill 名 / search 用关键词 / fetch 用 owner/repo/skill")
     p.add_argument("--tool", action="append")
     p.add_argument("--name")
     p.add_argument("--branch")
     p.add_argument("--fix", action="store_true")
+    p.add_argument("--dry", action="store_true", help="seed 用：只打印将收入的名字与来源")
     a = p.parse_args()
     # 在线检索 / 获取不碰本地库：不建连接、不读 config
     if a.cmd == "search":
@@ -83,6 +85,38 @@ def main():
         print("本机可用工具:", ", ".join(r[0] for r in rows))
     elif a.cmd == "scan":
         print("中央仓库 skill 数:", rescan(con, cfg))
+    elif a.cmd == "seed":
+        sync_tools_from_adapters(con, cfg)
+        if a.dry:
+            pre = seed_preview(con, cfg)
+            print("候选 %d 行 · 贡献 agent %s · 阈值 %d%s" % (
+                pre["candidates"], "/".join(pre["contributors"]) or "无",
+                pre["min_agents"],
+                "（单 agent 退化）" if pre["single_agent"]
+                else ("（无同名交叉，全收）" if pre.get("fallback_all") else "")))
+            if pre["blocked"]:
+                print("实际不会执行（%s）；下面是按规则会收入的名字："
+                      % ", ".join(pre["blocked"]))
+            for g in pre["groups"]:
+                flag = "将收入" if g["name"] in pre["seeded"] else "跳过（同名不同内容/不可读）"
+                print("  %-8s %-32s %s" % (flag, g["name"], "/".join(g["tools"])))
+                for it in g["instances"]:
+                    print("           - %s: %s" % (it["tool"], it["path"]))
+            if not pre["groups"]:
+                print("没有可自动收入的候选（各 agent 主目录里没有可收的技能）")
+        else:
+            got = seed_shared_store(con, cfg)
+            if got is None:
+                print("未执行自动建库：已跑过 / seed_auto=false / 仓库非空或不可用 / "
+                      "反推得出已有仓库（应先接管）/ 没有可收候选")
+            else:
+                print(seed_note(got))
+                print("收入 %d / 跳过 %d / 候选 %d / %dms" % (
+                    len(got["seeded"]), len(got["skipped"]),
+                    got["candidates"], got["ms"]))
+                for s in got["skipped"][:20]:
+                    print("  跳过 %s：%s" % (s.get("name"), s.get("reason")))
+    
     elif a.cmd == "status":
         st = matrix(con, cfg)
         counts = {}

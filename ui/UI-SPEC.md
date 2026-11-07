@@ -56,7 +56,7 @@
 | 看板 | 判定口径 | 当前数据 | 行的 key |
 |---|---|---|---|
 | 共有技能 `shared` | 同名目录同时存在于全部已启用 agent，且为 junction 指向中央仓库 | 49 条（7/7 agent 全覆盖；原型快照 51） | `skill.name`（如 `pdf`） |
-| 独有技能 `unique` | 只存在于某一个 agent：中央仓库无同名（`unique`）或同名但内容不同（`overridden`） | 2 条（`codex/.system`、`workbuddy/pdf`） | `tool + '/' + name`（如 `workbuddy/pdf`） |
+| 独有技能 `unique` | 只存在于某一个 agent：中央仓库无同名（`unique`）或同名但内容不同（`overridden`）；展示按「逻辑技能」聚合（同名同内容多 agent 副本 = 1 组 N 实例） | 2 条实例（`codex/.system`、`workbuddy/pdf`） | 实例 `tool/'+'name`（如 `workbuddy/pdf`）；组行 `g#name#hash` |
 | 智能体 `agents` | 本机已知 agent 的三态 + 分发开关（含 `external[]`：agent 自己读取的外部技能目录统计） | 10 个（6 已连接、4 已关闭、0 未安装） | `tool.key`（如 `claude_code`） |
 
 智能体行不是 skill：最左与共有 / 独有看板同为 26×26 序号列（按当前列表顺序 1..N，状态筛选后重新从 1 编，纯展示），列表列义为「序号 / AGENT / 状态 / 目录 / 分发开关」，状态筛为 全部 / 已连接 / 已关闭 / 未安装；开关打开=`do_sync(only_tools=[key])` 补 junction，关闭=二次确认后 `unlink_tool()` 只撤链接，中央实体不动；未安装的 agent 开关禁用。右侧详情栏展示目录、已链接数、冲突数与「打开目录 / 重新探测」。
@@ -206,8 +206,8 @@ window: 设计稿 1440 × 900（桌面默认 1200 × 760，min 1180 × 720），
 | 行网格 | `34px minmax(196px,1.3fr) 168px minmax(150px,1fr) 132px 18px`，gap 10，padding 0 14 |
 | 行内元素 | 首列序号 26 × 26 圆角 8（`--surface-3` 底、11.5px 等宽数字 `tabular-nums`，按当前列表顺序 1..N，纯展示；选中行数字转 accent）；名称 13；徽标 19 高；分类 chip 20 高；覆盖条 7 段 × 9 × 7，gap 2；尾部箭头 12 |
 | 行状态 | hover `surface-2`；选中 `accent 6%` + 左侧 2px accent；冲突选中 `danger 7%` + 左侧 2px danger |
-| 独有看板分组 | 仅根层级 + 列表视图：每 agent 一条 sticky 分割线（32 高，紧凑 26）：18 × 18 mark 块 + agent 名 + `N 个 skill · n 同名覆盖` + 通栏细线；组顺序按 unique 扫描顺序，组内保持当前排序，序号跨组连续 1..N；滚动时当前组名钉在列表顶部。agent 夹内与网格视图不走分组（平铺行 / 卡片流） |
-| 独有看板网格 | 与共有看板同款 folder-card 视觉：每个 agent 一张 agent 文件夹卡（bot 图标、颜色按 agent key 稳定散列取调色板、`N 个 skill` + 前 3 个 skill 预览 chip），点击进入该 agent 的独有技能（5 列列表 + 面包屑）；搜索态输出文件卡流（副标题 = 来源 agent）。独有 skill 不能跨 agent 移动：卡片不可拖拽、无 ⋯ 菜单、面包屑根节点不是投放区 |
+| 独有看板分组 | 根层级 + 列表视图 = **一行一个逻辑技能**（`g#name#hash`）：副标题「N 个 agent 各有一份 · 内容一致」；同名不同内容按哈希分组、绝不合并，组上标「同名不同内容」。点组行 → 详情栏列出实例（agent / 路径 / 文件数），「查看实例」进入对应 agent 夹并选中实例行。收藏视图仍按 agent 分割线列实例；agent 夹内平铺实例行。 |
+| 独有看板网格 | 按数据自适应：**发生合并时**（逻辑数 < 实例数）先「逻辑技能」文件卡（mark 取实例 agent 缩写、副标题同上）+ 下方「Agent 文件夹」段；**没有合并时**先「Agent 文件夹」段（每个 agent 一张 folder-card，点击进入该 agent 的 5 列实例列表），下方再给「全部独有技能」平铺卡。搜索态按逻辑技能去重输出卡流。独有 skill 不能跨 agent 移动：卡片不可拖拽、无 ⋯ 菜单、面包屑根节点不是投放区；组行不提供星标 / ⋯ 菜单（操作按实例）。 |
 | footer | 36 高，左提示 + 右计数，11px |
 
 ### 3.5 检查器（344px）
@@ -223,7 +223,7 @@ window: 设计稿 1440 × 900（桌面默认 1200 × 760，min 1180 × 720），
 | 差异块 | `danger-soft` 底 + 22% 红边，圆角 9，含 28 高「查看文件差异」按钮 |
 | 元信息 | 行高 ≥32，左列 58 宽灰标签，右列 mono 10.5 可省略 |
 | 路径盒 | padding 7 / 8，圆角 7，mono，右 22 × 22 复制按钮 |
-| 转共有块 | 仅独有实体行（`kind=unique` 且无同名覆盖）：`success-soft` 底 + 30% 绿边，圆角 10，标题「收进中央仓库」+ 10.5 说明（文件数 / 字节 / 源副本处置：main 来源且开关开着 = 按分发方式对齐，否则源目录不动）+ 整宽 `btn-primary`「转为共有技能」。确认弹窗后走 `promote_unique`（原子拷入中央仓库 + 迁移显示名/备注 + 独有 meta 由 prune 自动清），成功后跳到共有看板并选中新技能。同名覆盖（该走差异处置）与 foreign-link（真身不归本工具管）行不出现此块 |
+| 收编块 | 独有实体行（`kind=unique` 且无同名覆盖）：标题「收进中央仓库」+ 整宽 `btn-primary`「转为共有技能」。可解析真身的 `foreign-link` 行同样出现：文案改「按真身收进仓库」，说明真身内容会拷入仓库、开关开着链接改指仓库 / 关着保留原链接且不删第三方文件。确认后走 `promote_unique`（原子拷入 + meta 迁移），成功后跳到共有看板。同名覆盖不出现此块（走差异处置）。 |
 | 删除区 | `danger-soft` 底 + 22% 红边，圆角 10；整宽按钮「彻底删除 skill / 删除本地副本 / 卸载」+ 10.5 说明。独有行三选一：deletable（main 实体）→「删除本地副本」（`delete_skill`）；外部行（extra 目录 / 容器子目录）→「卸载（删除外部目录）」、foreign-link →「摘除链接（卸载）」（均为 `uninstall_unique`，二次确认、危险按钮，卸载文案给出完整路径 / 文件数与「agent 可能重新安装」提示） |
 | 空态 | 居中，图标 40，文案 11 |
 
@@ -260,7 +260,7 @@ window: 设计稿 1440 × 900（桌面默认 1200 × 760，min 1180 × 720），
 | 搜索 | `Ctrl+K` 聚焦；空格分词按 AND；名称优先（显示名 / 原名 / label，支持连续子串与同段跳字模糊）；只有当前筛选下名称无命中时，才回退到 备注 / 分类名 / 描述（连续子串）；实时过滤 + 计数 `命中 / 总数`；过滤后选中项失效则自动选中首条结果 |
 | 筛选 | ⚠️ 已取代：侧栏为导航（共有 = 全部技能 / 各夹 / 未归档，带计数、可投放；独有 = 全部独有 / 各 agent 文件夹，带计数、可点击；智能体仍为状态筛） |
 | 排序 | 「名称 A→Z」（`localeCompare zh-Hans-CN`）/「最近编辑」 |
-| 视图 | 顶栏分段「网格 / 列表」（共有与独有看板的根层级出现，按看板各记一份偏好 `prefs.views = { shared, unique }`，旧单一 `prefs.view` 首次启动自动迁移，刷新保持）：共有网格 = 分类夹卡片 + 未归档文件卡 + 搜索结果卡流；独有网格 = agent 文件夹卡 + 搜索结果卡流；列表 = 6 列（共有根）/ 5 列（夹内与独有） |
+| 视图 | 顶栏分段「网格 / 列表」（共有与独有看板的根层级出现，按看板各记一份偏好 `prefs.views = { shared, unique }`，旧单一 `prefs.view` 首次启动自动迁移，刷新保持）：共有网格 = 分类夹卡片 + 未归档文件卡 + 搜索结果卡流；独有网格 = 逻辑技能卡 + agent 文件夹卡 + 搜索结果卡流；列表 = 6 列（共有根）/ 5 列（夹内与独有） |
 | 刷新 | 顶栏刷新按钮：桌面端 `rescan()`（同步 adapters.json + 重扫中央仓库）后整套重渲染，toast 报告扫描数与已连接 agent 数；原型只重渲染内置快照。看板 / 筛选 / 选中保留，列表滚动位置恢复；忙碌时按钮转圈并忽略重复点击 |
 | 密度 | 按钮切换 `body.compact`（行 60 → 48） |
 | 主题 | 按钮切换 `body.dark`，图标 moon ↔ sun |
@@ -298,28 +298,28 @@ design|taste|stitch|minimalist|brutalist|brandkit|imagegen|image-to-code|redesig
 | 卡片 | 520 宽居中：红色 `!` 图标 → 标题「后端启动失败」→ 副标题 → `<pre>` 错误详情（`err.message`，可滚动，`danger-soft` 底）→ 提示行「详细原因见安装目录 kit\skilllocker.log」→【重试】主色按钮 |
 | 重试 | `location.reload()` 重跑整条 boot 链路（后端恢复后自然成功） |
 | 数据 | **不调用 `hydrate`、不渲染任何演示快照数据**；`window.__SK_MODE = 'error'`、`data-mode=error`；`applyBootstrap()` 顶部守卫直接 return（刷新入口禁用） |
-| 降级边界 | 「桌面壳已连上但后端失败」与「桌面壳内 pywebview 注入超时」都走错误页；仅 `file://` 原型保留只读快照 + toast（原有行为） |
+| 降级边界 | 「桌面壳已连上但后端失败」与「桌面壳内 pywebview 注入超时」都走错误页；注入窗口 20s，超时先自动重载一次（URL 带 `bridgeRetry=1`），仍失败才出错误页；仅 `file://` 原型保留只读快照 + toast（原有行为） |
 | 启动动画 | 进入错误页前先 `BootFX.fail()` 收尾编排时钟，overlay 不会卡在加载态 |
 
 ---
 
-### 4.2 首启引导面板（中央仓库为空）
+### 4.2 首启：自动接管 / 自动建库提示 / 引导面板（v0.3.2）
 
-后端 `list_boards()` 在共有为 0 时回 `data.firstRun`（§1.3 of `kit/DESKTOP.md`），前端渲染 `#first-run`：
+后端 `list_boards()` 用 `data.firstRun` 表达三种形态（§1.3 of `kit/DESKTOP.md`），前端渲染 `#first-run`：
 
 | 项 | 规格 |
 |---|---|
-| 出现条件 | `MODE === 'db'` 且 `SKILLS.length === 0` 且 `firstRun` 非空且未被「以后再说」收起；`firstRun` 内容变化（候选仓库 / 可收编数）时忽略态自动复位 |
-| 内容区 | 面板出现时 `#list-card` 与 `#grid-root` **一起收起**（`renderContent` 顶部早退），不给「0 个 skill 的夹墙」和「没有匹配的 skill」两种假空态 |
-| 容器 | `border-radius:14px`，1px `color-mix(accent 20%, line)` 边框，`accent-soft` → `surface` 竖向渐变，`--shadow-1`；标题行 + 出口列表两段式 |
-| 标题 | 「中央仓库还是空的，所以「共有技能」是 0」+ 一行口径说明（共有 = 仓库 `<store 路径>`；独有 = 各 agent 能加载但仓库没有 / 内容不同）+ 本机计数（已检测 agent 数、独有行数） |
-| 出口①接管 | 仅 `firstRun.candidate` 存在时出现，排在首位：标题「接管本机已有的中央仓库」，正文给 `path`、`skillCount`、贡献链接的 agent 与前 3 个 agent 名 + `linkCount` 条链接；按钮【接管该仓库】→ `adopt_store(candidate.store)` |
-| 出口②收编 | `firstRun.adoptable` 非空时出现：标题「一键收编本机 N 个技能」，正文点明来源 agent、源目录保留、外部目录 / 指向别处的链接 / 同名不同内容不在范围；按钮【收编】→ `adopt_local_skills()` |
-| 出口③导入 | 恒有：【导入目录】直接打开现有导入弹窗（`impOpen('source')`），本地目录与 GitHub 两个来源都在里面 |
-| 确认与结果 | 两个写盘出口都先 `confirmModal`（路径、技能数、是否改链接、可逆说明），执行期 `runProgress` 收口，回包经 `applyBootstrap` 落数据；toast 汇报接管/收编数、跳过数与对齐链接数 |
-| 失败 | 桥 `ok:false` → toast『接管失败 / 收编失败』原样显示后端守卫文案（当前仓库非空、落在 agent 目录、同名不同内容等），界面不自行猜测 |
-| 留痕 | 首次渲染 `uiLog('firstrun', {store, unique, candidate, candidateSkills, adoptable})` 进 `skilllocker.log`；没这行就是面板没出现 |
-| 回归 | `python kit/test_firstrun_ui.py`（18 项，Playwright + 真实后端沙箱回包） |
+| 形态①自动接管 / 建库成功、仍有可收行 | `firstRun.strip = true` + `adoptable` 非空：渲染为**单行提示条** `.first-run.is-strip`（成功图标 + `seedNote` + 「还有 N 个独有技能可一键收编」+【补充收编】+ 关闭），不占内容区；`list-card` / `grid-root` 照常显示共有看板。自动接管与自动建库共用这一形态。N 按**去重技能数**计，不是各 agent 副本数 |
+| 形态②空仓库（被候选仓库 / `seed_auto=false` / 自动接管失败 / 无可收行阻断） | 整块面板：标题行 + 出口列表；内容区 `#list-card` 与 `#grid-root` 一起收起，不给假空态；`seedNote` / `seedBlocked` / `autoAdoptError` 说明「为什么没自动完成」。若独有技能都来自外部目录 / 容器（`adoptable` 为空但独有数 > 0），额外给一行说明：自动建库不会改动它们，可逐行「转为共有」或导入 |
+| 形态③正常有库且无可收行 | `firstRun = null`，不渲染任何提示 |
+| 出现条件 | `MODE === 'db'`、`firstRun` 非空、未被「以后再说」收起；内容签名（候选 / 可收编数）变化时忽略态自动复位；`.is-strip` 只在 `SKILLS.length > 0` 时生效 |
+| 出口①接管 | 仅空仓库且有 `candidate` 时出现：正文给 `path` / `skillCount` / 贡献 agent 与链接数；【接管该仓库】→ `adopt_store(candidate.store)`。正常情况下后端已在首启自动完成，这里只作失败兜底 |
+| 出口②收编 | `adoptable` 非空时出现：实体行与**可解析真身的 foreign-link** 都在范围内；按钮标题按**去重技能数**（如「一键收编本机 2 个技能」），正文说明磁盘上有几份副本、同名同内容只收一份；正文点明源目录保留、分发开关不改；【收编 / 补充收编】→ `adopt_local_skills()` |
+| 出口③导入 | 仅整块面板：打开现有导入弹窗（本地目录 / GitHub） |
+| 确认与结果 | 写盘出口先 `confirmModal`，执行期 `runProgress`，回包经 `applyBootstrap`；toast 汇报接管/收编数、跳过数与对齐链接数；`meta.seedNote` 在首启成功时额外 toast 一次并在状态栏显示「首启完成」 |
+| 失败 | 桥 `ok:false` → toast 原样显示后端守卫文案，界面不自行猜测；自动接管失败在面板顶部显示 `autoAdoptError` |
+| 留痕 | 首启渲染 `uiLog('firstrun', {...})`；自动接管写 `events(kind='first-run-adopt')`，自动建库写 `events(kind='first-run-seed')`，均进 `skilllocker.log` |
+| 回归 | `python kit/test_firstrun_ui.py`（49 项：三块引导面板 + 自动接管提示条 + 自动建库提示条 + 单 agent + 不重叠全收 + 按技能去重计数 + 逻辑技能组视图） |
 
 ---
 
@@ -331,11 +331,16 @@ design|taste|stitch|minimalist|brutalist|brandkit|imagegen|image-to-code|redesig
 {
   meta:   { generated, version, python, store, storeSize, db, scanAt,
             eventsTotal, skillCount, agentCount, disabledCount,
-            sharedCount, uniqueCount },
+            sharedCount, uniqueCount, uniqueLogical, storeIn,
+            seedNote, loadError, scanDegraded },
   skills: [ { name, label, description, hash, origin, agents:[toolKey], realIn:[toolKey] } ],
   tools:  [ { key, label, mark, sub, dir, enabled, mode:"junction", detected } ],
-  unique: [ { name, tool, toolLabel, mark, path, files, bytes,
-              sameName, kind:"unique"|"overridden", storeFiles, storeBytes } ],
+  unique: [ { name, tool, toolLabel, mark, path, files, bytes, hash, src,
+              sameName, kind:"unique"|"overridden"|"foreign-link",
+              storeFiles, storeBytes, deletable, agentEnabled } ],
+  unique_groups: [ { key, name, hash, count, tools:[toolKey], toolLabels, marks,
+                     instances:["tool/name"], files, bytes, kinds, srcs,
+                     sameName, hasForeign, deletable } ],
   events: [ { id, time:"10-29 22:16", kind, detail, object } ],
   conflict: {
     skill, tool,

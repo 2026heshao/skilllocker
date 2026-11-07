@@ -1985,7 +1985,10 @@ body.reduce-motion .run-step.doing .run-ic .icon { animation: none; }
 @keyframes modalIn { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes toastIn { from { opacity: 0; transform: translateX(18px) scale(0.97); } to { opacity: 1; transform: translateX(0) scale(1); } }
 @keyframes toastOut { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(18px); } }
-@keyframes rowIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+/* 只做位移，不做透明度：WebView2 在窗口被遮挡 / 启动瞬间可能把 CSS 动画
+   暂停在 0%，配合 animation-fill-mode:both 会让整列表永远看不见（计数有、
+   行空白）。装饰动画不能决定内容可见性。 */
+@keyframes rowIn { from { transform: translateY(3px); } to { transform: translateY(0); } }
 
 .row { animation: rowIn 220ms var(--ease) both; }
 .row.no-anim { animation: none; }
@@ -2608,3 +2611,27 @@ body.dark { color-scheme: dark; }
 .first-run .btn:disabled,
 .fr-dismiss:disabled { opacity: .55; cursor: default; }
 .first-run .btn:disabled:hover { filter: none; }
+
+/* 自动建库后的单行提示条：共有看板已可用，只提示还有独有技能可补收 */
+.first-run.is-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px 10px 14px;
+  border-radius: 12px;
+  border-color: var(--line);
+  background: var(--surface);
+}
+.fr-strip-main { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.fr-strip-main > .icon { flex: none; width: 18px; height: 18px; color: var(--success); }
+.fr-strip-main > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fr-strip-main b { font-size: 12px; font-weight: 620; color: var(--ink); }
+.fr-strip-main span { font-size: 11px; line-height: 1.5; color: var(--ink-3); }
+.fr-strip-actions { display: flex; align-items: center; gap: 4px; flex: none; }
+.fr-seed-note {
+  display: flex; align-items: flex-start; gap: 8px;
+  margin: 0 0 10px; padding: 8px 10px;
+  border-radius: 9px; background: var(--surface-3);
+  font-size: 11px; line-height: 1.55; color: var(--ink-2);
+}
+.fr-seed-note .icon { flex: none; width: 14px; height: 14px; margin-top: 1px; color: var(--accent); }

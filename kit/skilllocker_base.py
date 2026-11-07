@@ -22,14 +22,18 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 
 KIT = os.path.dirname(os.path.abspath(__file__))
 FROZEN = bool(getattr(sys, "frozen", False))
-# 安装版：程序文件只读，数据写到 %LOCALAPPDATA%\SkillLocker。
-# 源码运行：保持原来的 kit/ 旁 store、config、db，开发机零迁移。
+# 安装版：程序与中央仓库放在安装目录（用户看得见、带得走）；db / config /
+# 日志仍写 %LOCALAPPDATA%\SkillLocker（程序目录可能被同步/压缩软件碰）。
+# 源码运行：保持仓库根 store、kit/ 旁 config、db，开发机零迁移。
+# onedir 下 _MEIPASS 指向 <安装目录>\_internal，因此程序根 = RES_DIR 上一级。
 RES_DIR = getattr(sys, "_MEIPASS", KIT) if FROZEN else KIT
+APP_ROOT = os.path.dirname(RES_DIR) if FROZEN else os.path.dirname(KIT)
 DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"),
                         "SkillLocker") if FROZEN else KIT
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -38,11 +42,22 @@ ADAPTERS_FILE = os.path.join(RES_DIR, "adapters.json")
 DB_FILE = os.path.join(DATA_DIR, "skilllocker.db")
 HOME = os.path.expanduser("~")
 IGNORE_NAMES = {".git", ".DS_Store", "Thumbs.db", ".gitignore"}
-# 源码运行默认中央仓库跟随仓库根目录；安装版跟随 %LOCALAPPDATA%\SkillLocker。
-DEFAULT_STORE = os.path.normpath(
-    os.path.join(DATA_DIR if FROZEN else os.path.dirname(KIT), "store")
-).replace(os.sep, "/")
-APP_VERSION = "0.3.1"
+# 中央仓库：源码运行 = 仓库根 store/；安装版 = <安装目录>/store/。
+def default_store_for(res_dir, frozen):
+    """由资源目录推导默认仓库（纯函数，供自检/单测打桩）。
+
+    onedir 冻结版 res_dir = <安装目录>\\_internal，仓库在它上一级；
+    源码运行 res_dir = kit/，仓库在 kit 上一级（仓库根）。
+    """
+    app_root = os.path.dirname(res_dir) if frozen else os.path.dirname(KIT)
+    return os.path.normpath(os.path.join(app_root, "store")).replace(os.sep, "/")
+
+
+DEFAULT_STORE = default_store_for(RES_DIR, FROZEN)
+APP_VERSION = "0.3.4"
+# 首启自动建库 / 自动接管的一次性标记（events.kind）。CLI / 桌面 / 自检共用。
+FIRST_RUN_SEED_EVENT = "first-run-seed"
+FIRST_RUN_ADOPT_EVENT = "first-run-adopt"
 
 # UI 上的两字母标记；不在表里的工具用 label 首字母推导
 TOOL_MARKS = {
@@ -62,22 +77,120 @@ EVENTS_KEEP = 5000  # events 表按条数轮转的目标水位
 
 
 # ---------------------------------------------------------------- 基础设施
+def _cfg_int(value, default, lo, hi):
+    """config 里的整数项：非数字 / 越界一律退回默认，绝不把非法值带进运行时。"""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return default
+    return min(max(n, lo), hi)
+
+
+def _cfg_bool(value, default):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        s = value.strip().lower()
+        if s in ("1", "true", "yes", "on"):
+            return True
+        if s in ("0", "false", "no", "off", ""):
+            return False
+    return default
+
+
+def store_has_content(path):
+    """仓库里至少有一个带 SKILL.md 的直属目录。用于「回退只发生在首启空库」判据。"""
+    try:
+        names = os.listdir(path)
+    except OSError:
+        return False
+    for n in names:
+        p = os.path.join(path, n)
+        if os.path.isdir(p) and has_skill_md(p):
+            return True
+    return False
+
+
+def _store_writable(path):
+    """默认仓库是否真的可写：必须实际写一次，不能只看 os.access。
+
+    Windows 的 os.access(dir, W_OK) 只反映只读属性，对 ACL 拒绝的目录
+    （Program Files / System32）仍返回 True；用它判断会让「安装目录不可写 →
+    回退 %LOCALAPPDATA%\\store」的守卫永远不触发。这里在目标目录（或最近
+    一级已存在的父目录）创建再删除一个临时文件，真正走一次写权限检查。
+    """
+    probe = path if os.path.isdir(path) else os.path.dirname(os.path.normpath(path))
+    if not os.path.isdir(probe):
+        return False
+    try:
+        fd, tmp = tempfile.mkstemp(prefix=".sk-write-", dir=probe)
+    except OSError:
+        return False
+    os.close(fd)
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+    return True
+
+
+def store_location(store):
+    """仓库落点分类：install = 安装目录默认位，localappdata = 回退位，custom = 用户改指。
+
+    首启接管会在运行中改 cfg["store"]，必须用同一个判据重算，否则界面会把
+    接管来的自定义仓库继续标成「安装目录」。
+    """
+    fallback = os.path.normpath(os.path.join(DATA_DIR, "store")).replace(os.sep, "/")
+    np = norm_path(store)
+    if np == norm_path(DEFAULT_STORE):
+        return "install"
+    if np == norm_path(fallback):
+        return "localappdata"
+    return "custom"
+
+
 def load_config():
     """读 config.json；文件损坏时退回默认值并在 cfg 里留痕（记事件用），
-    不能让刷新链路第一步就崩（与 agent_entries / extra_dirs_map 的容错同口径）。"""
+    不能让刷新链路第一步就崩（与 agent_entries / extra_dirs_map 的容错同口径）。
+
+    默认仓库在安装目录里。若它不可写（例如有人把包装到 Program Files 的机器级
+    安装），仅在空库首启时回退到 %LOCALAPPDATA%\\SkillLocker\\store 并写明原因；
+    已有内容的库绝不中途换落点，避免「两份仓库」。
+    """
     cfg = {"store": DEFAULT_STORE}
+    explicit_store = False
     if os.path.isfile(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, encoding="utf-8") as fh:
-                cfg.update(json.load(fh))
+                loaded = json.load(fh)
+            if isinstance(loaded, dict):
+                explicit_store = "store" in loaded
+                cfg.update(loaded)
         except (OSError, ValueError) as exc:
             cfg["_load_error"] = "config.json 解析失败，已退回默认配置: %s" % exc
+    # 用户是否在 config.json 里显式写过 store：首启自动接管只服务「没配置过
+    # 仓库」的安装版；显式配置再空也不替用户改指（他自己的选择优先）。
+    cfg["_store_explicit"] = explicit_store
     cfg["store"] = os.path.normpath(str(cfg.get("store") or "")).replace(os.sep, "/")
     if cfg["store"] in ("", ".", ".."):
         # 空串 / 相对根：normpath("") 得 "."，会把中央仓库指到 kit 目录本身，
         # 下一轮 rescan 在 kit 下扫不到 SKILL.md 就清库 + 清 meta
         cfg["_load_error"] = "config.json 的 store 为空或相对根，已退回默认仓库目录"
         cfg["store"] = os.path.normpath(DEFAULT_STORE).replace(os.sep, "/")
+    # 安装目录不可写：只在「用户没显式配置 store」且默认仓库还没内容时回退，
+    # 已有库 / 显式指定的坏路径绝不静默改指（后者由 _load_error 如实报错）
+    fallback = os.path.normpath(os.path.join(DATA_DIR, "store")).replace(os.sep, "/")
+    if (not explicit_store
+            and norm_path(cfg["store"]) == norm_path(DEFAULT_STORE)
+            and norm_path(fallback) != norm_path(DEFAULT_STORE)
+            and not store_has_content(cfg["store"])
+            and not _store_writable(cfg["store"])):
+        cfg["_load_error"] = (
+            "默认仓库目录不可写：%s；已回退到 %s。可把应用装到用户目录，"
+            "或手动修改 config.json 的 store" % (cfg["store"], fallback))
+        cfg["store"] = fallback
     try:
         os.makedirs(cfg["store"], exist_ok=True)
     except OSError as exc:
@@ -85,6 +198,15 @@ def load_config():
         # rescan 会抛「中央仓库目录不存在」，由前端错误页如实展示
         cfg["_load_error"] = ("中央仓库目录不可创建: %s（%s）；"
                               "请检查磁盘或修改 config.json 的 store" % (cfg["store"], exc))
+    # 界面/文档要如实显示仓库落在哪：install = 程序目录，localappdata = 回退/custom
+    cfg["storeIn"] = store_location(cfg["store"])
+    # 首启自动建库的可选参数（config.json 手写即可）。非法值回默认，不让启动崩。
+    cfg["seed_auto"] = _cfg_bool(cfg.get("seed_auto"), True)
+    cfg["seed_min_agents"] = _cfg_int(cfg.get("seed_min_agents"), 2, lo=1, hi=8)
+    cfg["seed_max_skills"] = _cfg_int(cfg.get("seed_max_skills"), 300, lo=1, hi=5000)
+    cfg["seed_budget_s"] = _cfg_int(cfg.get("seed_budget_s"), 20, lo=1, hi=120)
+    cfg["seed_max_bytes"] = _cfg_int(cfg.get("seed_max_bytes"), 400 << 20,
+                                     lo=1 << 20, hi=8 << 30)
     return cfg
 
 
@@ -92,13 +214,23 @@ def write_config(cfg):
     """把 store 写回 config.json（临时名 + os.replace 原子替换）。
 
     首启「接管已有中央仓库」是唯一会改仓库路径的入口，改完必须落盘，否则
-    下次启动又回到空的默认仓库。只持久化 store：_load_error 等运行期留痕
-    不进文件。失败抛 RuntimeError，由调用方（adopt_store）如实回给前端。
+    下次启动又回到空的默认仓库。**合并旧文件**：用户手写的 seed_auto /
+    seed_min_agents 等键不能被一次接管抹掉；_load_error 等运行期留痕不进文件。
+    失败抛 RuntimeError，由调用方（adopt_store）如实回给前端。
     """
     store = os.path.normpath(str(cfg.get("store") or "")).replace(os.sep, "/")
     if store in ("", ".", ".."):
         raise RuntimeError("拒绝写入空的中央仓库路径")
-    payload = {"store": store}
+    payload = {}
+    if os.path.isfile(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, encoding="utf-8") as fh:
+                old = json.load(fh)
+            if isinstance(old, dict):
+                payload.update({k: v for k, v in old.items() if not k.startswith("_")})
+        except (OSError, ValueError):
+            payload = {}  # 旧文件坏了：以本次 store 为准重写，不把损坏内容带回去
+    payload["store"] = store
     tmp = "%s.tmp-%d" % (CONFIG_FILE, os.getpid())
     try:
         with open(tmp, "w", encoding="utf-8") as fh:
@@ -155,6 +287,24 @@ def db():
     if "starred_at" not in _cols:
         con.execute("alter table skill_meta add column starred_at integer")
     return con
+
+
+def has_first_run_seed(con):
+    """首启自动建库是否跑过（幂等判据）。基础层唯一实现，CLI/桌面/自检共用。"""
+    return bool(con.execute("select 1 from events where kind=? limit 1",
+                            (FIRST_RUN_SEED_EVENT,)).fetchone())
+
+
+def has_first_run_action(con):
+    """首启是否已经自动建库 / 自动接管 / 手动接管过（幂等总判据）。
+
+    三种动作都会改变「中央仓库指针」或「仓库内容」，任意一条留痕都说明首启
+    已经做过决策；之后即使仓库被清空，也不该再自动改指，避免用户手动清库后
+    被下一轮启动灌回来。
+    """
+    return bool(con.execute(
+        "select 1 from events where kind in (?,?,?) limit 1",
+        (FIRST_RUN_SEED_EVENT, FIRST_RUN_ADOPT_EVENT, "adopt-store")).fetchone())
 
 
 def log_event(con, kind, detail):
@@ -318,18 +468,41 @@ def delete_tree(path):
 
 # ---------------------------------------------------------------- 内容解析
 def iter_files(root, onerror=None):
-    for dirpath, dirnames, filenames in os.walk(root, onerror=onerror):
-        dirnames[:] = [d for d in dirnames if d not in IGNORE_NAMES]
-        for f in sorted(filenames):
-            if f in IGNORE_NAMES:
+    """遍历目录内文件（不跟进链接 / junction）。
+
+    旧实现 os.walk + 每个路径一次 GetFileAttributesW（is_reparse）：本机
+    500+ 个独有目录要调 3.8 万次系统调用，首屏多花 4~5 秒。改用 os.scandir：
+    DirEntry 自带缓存属性，is_symlink / is_junction 一次拿够；输出顺序不变
+    （调用方 sha_tree / file_list 都会再排序）。
+    """
+    stack = [root]
+    while stack:
+        dirpath = stack.pop()
+        try:
+            entries = list(os.scandir(dirpath))
+        except OSError as exc:
+            if onerror is not None:
+                onerror(exc)
+            continue
+        subdirs = []
+        for entry in entries:
+            name = entry.name
+            if name in IGNORE_NAMES:
                 continue
-            p = os.path.join(dirpath, f)
-            if is_reparse(p):
+            try:
+                # 链接 / junction 一律不跟进：删库、哈希都不能顺着链接跑到别处
+                if entry.is_symlink() or getattr(entry, "is_junction", lambda: False)():
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    subdirs.append(entry.path)
+                elif entry.is_file(follow_symlinks=False):
+                    yield (os.path.relpath(entry.path, root).replace(os.sep, "/"),
+                           entry.path)
+            except OSError:
                 continue
-            yield os.path.relpath(p, root).replace(os.sep, "/"), p
-        for d in list(dirnames):
-            if is_reparse(os.path.join(dirpath, d)):
-                dirnames.remove(d)
+        # 逆序入栈，出栈时按路径升序（与旧 iter_files 的稳定顺序一致）
+        for d in sorted(subdirs, reverse=True):
+            stack.append(d)
 
 
 def sha_tree(root):

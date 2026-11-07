@@ -6,6 +6,7 @@
 adapters.json 路径等「单测会打补丁」的模块级常量，一律经 skilllocker_base 属性
 在调用时现读（_base.ADAPTERS_FILE），不做 import 时的值绑定。
 """
+import hashlib
 import json
 import os
 import re
@@ -181,32 +182,61 @@ def _resolve_extra_root(rel):
     return os.path.join(HOME, *rel.split("/"))
 
 
+def _stats(p, stats_cache):
+    """dir_stats 的按路径备忘：一次快照里 seed_meta 与 list_boards 会各扫一遍
+    同一批独有目录，重复全树遍历是首屏最大开销之一。缓存只活在单次桥调用
+    的 cfg 上（desktop 每次 load_config 都是新 dict），不会跨操作变旧。"""
+    if stats_cache is None:
+        return dir_stats(p)
+    key = norm_path(p)
+    if key not in stats_cache:
+        stats_cache[key] = dir_stats(p)
+    return stats_cache[key]
+
+
 def _unique_item(t, name, p, src, deletable, shared_with, agent_enabled,
-                 kind, same, skills, cfg, store_cache, hash_cache):
-    """拼一条独有行；与中央同名且内容一致时返回 None（那是共有技能，不算独有）。"""
+                 kind, same, skills, cfg, store_cache, hash_cache,
+                 stats_cache=None, light=False):
+    """拼一条独有行；与中央同名且内容一致时返回 None（那是共有技能，不算独有）。
+
+    hash 同时供两处使用：同名覆盖判定（与中央内容比）和独有看板的逻辑技能
+    聚合（同名同内容的多 agent 副本只算一个技能）。拿不到内容哈希时记 None，
+    聚合层按路径分组，绝不把「读不了」误并成一份。
+    """
     row = skills.get(name)
-    if row is not None and kind != "foreign-link":
-        h = _hash_tree(p, hash_cache)
+    # 只有与中央同名（判覆盖/已共有）或同名多实例（逻辑聚合）才需要内容哈希。
+    # 首屏曾对全部独有行无条件全树哈希，本机 150+ 个独有目录要多花数秒；
+    # 单实例名字的分组不需要哈希，交给 unique_entries 末尾按重名情况补算。
+    # light（空仓库首启面板）：仓库里没有可比的同名行，先不扫文件树/哈希，
+    # 只登记名字与来源；文件数 / 字节在真正建库或打开独有看板后按需补齐。
+    light_ok = light and row is None
+    h = None if light_ok else (_hash_tree(p, hash_cache) if row is not None else None)
+    if row is not None:
         if h is not None and h == row["content_hash"]:
+            # 内容与中央一致：无论实体还是指向别处的链接，agent 拿到的都是同一份
+            # 内容，不再算独有。foreign-link 收编后（开关关着、链接保留）也据此消失。
             return None
-        kind, same = "overridden", True
-    count, size = dir_stats(p)
+        same = True
+        if kind != "foreign-link":
+            kind = "overridden"
+    count, size = (0, 0) if light_ok else _stats(p, stats_cache)
     item = {
         "name": name, "tool": t["key"], "toolLabel": t["label"],
         "mark": _tool_mark(t), "path": os.path.normpath(p).replace(os.sep, "\\"),
         "files": count, "bytes": size, "sameName": same, "kind": kind,
-        "src": src, "deletable": deletable,
+        "src": src, "deletable": deletable, "hash": h,
         "sharedWith": shared_with, "agentEnabled": bool(agent_enabled),
     }
     if same:
         if name not in store_cache:
-            store_cache[name] = dir_stats(os.path.join(cfg["store"], name))
+            store_cache[name] = _stats(os.path.join(cfg["store"], name), stats_cache)
         item["storeFiles"], item["storeBytes"] = store_cache[name]
     return item
 
 
 def _scan_unique_root(t, root, src, deletable, shared_with, agent_enabled,
-                      skills, cfg, store_cache, hash_cache, out, errors):
+                      skills, cfg, store_cache, hash_cache, out, errors,
+                      stats_cache=None, light=False):
     """扫一个技能目录（agent 主目录或 extra 外部目录），独有条目追加进 out。
 
     - 指向中央仓库的链接是我们分发的 junction，不算独有；指向别处的链接
@@ -243,12 +273,12 @@ def _scan_unique_root(t, root, src, deletable, shared_with, agent_enabled,
                 continue  # 断链 / 不是 skill 目录
             out.append(_unique_item(t, n, p, src, False, shared_with, agent_enabled,
                                     "foreign-link", False, skills, cfg,
-                                    store_cache, hash_cache))
+                                    store_cache, hash_cache, stats_cache, light))
             continue
         if has_skill_md(p):
             out.append(_unique_item(t, n, p, src, deletable, shared_with, agent_enabled,
                                     "unique", False, skills, cfg,
-                                    store_cache, hash_cache))
+                                    store_cache, hash_cache, stats_cache, light))
             continue
         # 容器：顶层没有 SKILL.md，但里面装着 skill —— 展开一层收进来
         try:
@@ -264,11 +294,12 @@ def _scan_unique_root(t, root, src, deletable, shared_with, agent_enabled,
                 continue
             out.append(_unique_item(t, n + "/" + sub, sp, src, False, shared_with,
                                     agent_enabled, "unique", False, skills, cfg,
-                                    store_cache, hash_cache))
+                                    store_cache, hash_cache, stats_cache, light))
 
 
 def _scan_unique_sweep(t, root, src, shared_with, agent_enabled,
-                       skills, cfg, store_cache, hash_cache, out, errors):
+                       skills, cfg, store_cache, hash_cache, out, errors,
+                       stats_cache=None, light=False):
     """extra_dirs 的 `根/**` 写法：递归扫插件缓存 / 应用内置这类目录树。
 
     只认「父目录叫 skills 且自己含 SKILL.md」的目录，技能名取 SKILL.md 的
@@ -332,13 +363,13 @@ def _scan_unique_sweep(t, root, src, shared_with, agent_enabled,
                 seg = rel.split("/")[idx] if idx < len(rel.split("/")) else rel
                 item = _unique_item(t, "%s（%s）" % (name, seg), p, src, False,
                                     shared_with, agent_enabled, "unique", False,
-                                    skills, cfg, store_cache, hash_cache)
+                                    skills, cfg, store_cache, hash_cache, stats_cache, light)
                 if item:
                     out.append(item)
             continue
         for mt, rel, p in kept:
             item = _unique_item(t, name, p, src, False, shared_with, agent_enabled,
-                                "unique", False, skills, cfg, store_cache, hash_cache)
+                                "unique", False, skills, cfg, store_cache, hash_cache, stats_cache, light)
             if item:
                 out.append(item)
 
@@ -390,7 +421,8 @@ def _extra_sources(t, extra_dirs, skills, hash_cache=None):
     return out
 
 
-def unique_entries(con, cfg, tools=None, hash_cache=None, errors=None):
+def unique_entries(con, cfg, tools=None, hash_cache=None, errors=None,
+                   stats_cache=None, light=None):
     """独有技能：agent 能加载、但中央仓库没有（或同名但内容不同）的 skill。
 
     覆盖三类来源，行的 src 字段标注：
@@ -410,19 +442,33 @@ def unique_entries(con, cfg, tools=None, hash_cache=None, errors=None):
     errors：传入列表时收集「根目录临时不可枚举」的路径，list_boards 据此
     给快照打 scanDegraded 标记，prune_meta 跳过本轮（防误清 meta）。
     """
+    if errors is None:
+        errors = []
+    # bootstrap 会在 cfg 上放一个 None 哨兵：seed_meta 先扫一遍，list_boards
+    # 紧接着再要同一份只读结果时直接复用，避免把 150~500 个独有目录（含
+    # extra_dirs 的 /** 递归树）扫两遍。其他入口的 cfg 没有这个键，行为不变。
+    # 扫描错误必须与结果一起复用：缓存命中时若把 errors 留空，list_boards 会
+    # 误判「本轮扫描完整」，prune_meta 随后把暂时不可枚举目录里的改名 / 备注
+    # 当已删除清掉（M3 防线失效）。
+    if "_unique_cache" in cfg and cfg.get("_unique_cache") is not None:
+        errors.extend(cfg.get("_unique_errors") or [])
+        return cfg["_unique_cache"]
     if tools is None:
         tools = ordered_tools(con)
     skills = {r["name"]: dict(r) for r in con.execute("select * from skills")}
     store_cache = {}
     hash_cache = {} if hash_cache is None else hash_cache
-    if errors is None:
-        errors = []
+    if stats_cache is None:
+        stats_cache = cfg.get("_stats_cache")
+    if light is None:
+        light = bool(cfg.get("_unique_light"))
     tool_rels, rel_tools = extra_dirs_map(con)
     seen_extra = set()
     out = []
     for t in tools:
         _scan_unique_root(t, t["skills_dir"], "main", True, [], t["enabled"],
-                          skills, cfg, store_cache, hash_cache, out, errors)
+                          skills, cfg, store_cache, hash_cache, out, errors,
+                          stats_cache, light)
         for rel in tool_rels.get(t["key"]) or []:
             owner = (rel_tools.get(rel) or [t["key"]])[0]
             if owner != t["key"]:
@@ -437,10 +483,12 @@ def unique_entries(con, cfg, tools=None, hash_cache=None, errors=None):
             shared = [k for k in rel_tools[rel] if k != t["key"]]
             if sweep:
                 _scan_unique_sweep(t, root, root_rel, shared, t["enabled"],
-                                   skills, cfg, store_cache, hash_cache, out, errors)
+                                   skills, cfg, store_cache, hash_cache, out, errors,
+                                   stats_cache, light)
             else:
                 _scan_unique_root(t, root, rel, False, shared, t["enabled"],
-                                  skills, cfg, store_cache, hash_cache, out, errors)
+                                  skills, cfg, store_cache, hash_cache, out, errors,
+                                  stats_cache, light)
     # 同一 agent 下多个来源扫出同名技能时（如插件缓存与安装目录里的包源是
     # 同一份），保留先扫到的那个 —— extra_dirs 的声明顺序即优先级
     deduped, seen_names = [], set()
@@ -452,6 +500,18 @@ def unique_entries(con, cfg, tools=None, hash_cache=None, errors=None):
             continue
         seen_names.add(k)
         deduped.append(u)
+    # 逻辑技能聚合只需要「同名多实例」的内容哈希：给每个重名行补算一次，
+    # 唯一名字保持 None（group_unique 按路径成组），避免首屏全量哈希。
+    # light 也必须补：首屏若跳过，同一个技能在 N 个 agent 里会被按路径算成 N 条。
+    counts = {}
+    for u in deduped:
+        counts[u["name"]] = counts.get(u["name"], 0) + 1
+    for u in deduped:
+        if counts.get(u["name"], 0) > 1 and u.get("hash") is None:
+            u["hash"] = _hash_tree(os.path.normpath(u["path"]), hash_cache)
+    if "_unique_cache" in cfg:
+        cfg["_unique_cache"] = deduped
+        cfg["_unique_errors"] = list(errors)
     return deduped
 
 
@@ -470,31 +530,108 @@ def find_unique_row(con, cfg, tool_key, name):
 
 
 # ---------------------------------------------------------------- 首启探测
-def adoptable_rows(unique):
-    """一键收编的可行范围：agent 主目录**直属**的实体独有行。
+ADOPT_KINDS = ("unique", "foreign-link")
 
-    口径：src=main（真身就在该 agent skills_dir 的直属一层）、kind=unique
-    （不是 foreign-link）、sameName 为假（中央没有同名不同内容的副本），并且
-    行名 == 真身目录名。
+
+def _adoptable(u, cfg, kinds):
+    """单行可收性判据（批量与单行共用，见 links.resolve_adopt_target）。
+
+    - src=main：真身就在该 agent skills_dir 的直属一层；
+    - sameName 为假：中央没有同名不同内容的副本（那属于冲突处置）；
+    - 行名 == 链接/目录名：容器展开行（`容器/子目录`、`name（段名）`）入库后
+      名字与源路径不一致，独有行不会消失，批量与单行入口都不收；
+    - kind=unique：实体目录，含 SKILL.md 且不是链接；
+    - kind=foreign-link：解析真身，真身含 SKILL.md、可读、且不在本仓库内。
+    """
+    if u.get("src") != "main" or u.get("sameName"):
+        return False
+    kind = u.get("kind")
+    if kind not in kinds:
+        return False
+    path = os.path.normpath(str(u.get("path") or ""))
+    name = str(u.get("name") or "")
+    if not name or name != os.path.basename(path):
+        return False
+    if kind == "unique":
+        return (os.path.isdir(path) and not is_reparse(path)
+                and not os.path.islink(path) and has_skill_md(path))
+    if kind == "foreign-link":
+        if cfg is None or not (is_reparse(path) or os.path.islink(path)):
+            return False
+        real = link_target(path)
+        if not real or not os.path.isdir(real) or not has_skill_md(real):
+            return False
+        store = norm_path(cfg["store"])
+        rp = norm_path(real)
+        return not (rp == store or rp.startswith(store + "/"))
+    return False
+
+
+def adoptable_rows(unique, cfg=None, kinds=ADOPT_KINDS):
+    """一键收编 / 首启建库的可行范围：agent 主目录直属、能安全拿到内容的行。
+
+    口径：src=main（真身就在该 agent skills_dir 的直属一层）、kind ∈ kinds
+    （实体行 + 可解析真身的外部链接）、sameName 为假（中央没有同名不同内容的
+    副本），并且行名 == 真身目录名。
 
     容器展开行（`codex/.system/xxx` 这类顶层没有 SKILL.md、往下钻一层才找到的）
-    批量时不收：入库只能按真身目录名登记，行名与仓库名对不上，收完独有行不会
-    消失（内容比对按名字查），用户看到的是「转成功了但行还在」的假象。单行
-    promote_unique 保留这个能力（用户明确点某一行，且详情栏会说明源路径）。
+    不收：入库只能按真身目录名登记，行名与仓库名对不上，收完独有行不会
+    消失（内容比对按名字查），用户看到的是「转成功了但行还在」的假象。
 
-    extra 外部目录、指向别处的 junction 都不收 —— 那些真身归 agent 或第三方
-    安装器管，本工具往里写东西只会跟它们打架；用户真想收可以在独有看板逐行走
-    「转为共有」或手动导入。
+    extra 外部目录的实体不收 —— 那些真身归 agent 或第三方安装器管。指向别处
+    的 junction（foreign-link）按真身收：真身可读且不在本仓库内即可入库。
     """
-    out = []
-    for u in unique or []:
-        if u.get("src") != "main" or u.get("kind") != "unique" or u.get("sameName"):
-            continue
+    return [u for u in (unique or []) if _adoptable(u, cfg, kinds)]
+
+
+def group_unique(rows):
+    """把独有实例行聚成「逻辑技能」：同名 + 同内容 = 1 个技能、N 个实例。
+
+    分组键取 (name, content_hash)：同名不同内容必须分组，绝不合并 —— 那正是
+    需要人工处置的冲突。哈希拿不到（目录不可读）时按路径退化为独立组，
+    绝不把「读不了」误并成一份。返回顺序跟随扫描顺序，编号稳定。
+    """
+    groups, order = {}, []
+    for u in rows or []:
         name = str(u.get("name") or "")
-        if name != os.path.basename(os.path.normpath(str(u.get("path") or ""))):
-            continue
-        out.append(u)
-    return out
+        h = u.get("hash")
+        if h:
+            ident = h[:12]
+        else:
+            ident = "p" + hashlib.sha1(
+                str(u.get("path") or "").encode("utf-8")).hexdigest()[:10]
+        key = "%s#%s" % (name, ident)
+        g = groups.get(key)
+        if g is None:
+            g = {
+                "key": key, "name": name, "hash": h or "",
+                "count": 0, "tools": [], "toolLabels": [], "marks": [],
+                "instances": [], "files": 0, "bytes": 0,
+                "kinds": [], "srcs": [], "sameName": False,
+                "hasForeign": False, "deletable": True,
+            }
+            groups[key] = g
+            order.append(key)
+        g["count"] += 1
+        g["instances"].append("%s/%s" % (u.get("tool"), name))
+        g["files"] += int(u.get("files") or 0)
+        g["bytes"] += int(u.get("bytes") or 0)
+        if u.get("tool") not in g["tools"]:
+            g["tools"].append(u.get("tool"))
+            g["toolLabels"].append(u.get("toolLabel") or u.get("tool"))
+            g["marks"].append(u.get("mark") or "")
+        kind, src = u.get("kind"), u.get("src")
+        if kind and kind not in g["kinds"]:
+            g["kinds"].append(kind)
+        if src and src not in g["srcs"]:
+            g["srcs"].append(src)
+        if u.get("sameName"):
+            g["sameName"] = True
+        if kind == "foreign-link":
+            g["hasForeign"] = True
+        if u.get("deletable") is False:
+            g["deletable"] = False
+    return [groups[k] for k in order]
 
 
 def agent_managed_roots(con, tools=None):
