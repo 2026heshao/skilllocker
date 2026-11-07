@@ -1123,6 +1123,102 @@ def _():
                 second["data"]["unique"]
 
 
+# ---------------------------------------------------------------- 新技能自动分发
+# 用户语义：分发开关是持续状态，不是一次性动作。开关开着的 agent 应该收到
+# 之后新入库的 skill；开关关着的原样不动。旧实现 import / rescan 只登记不
+# 分发，必须手动点同步或重新开关一次，新技能才会出现在 agent 目录里。
+@case("import: 新 skill 自动分发给开关开着的 agent，关着的不动")
+def _():
+    if sys.platform != "win32":
+        raise AssertionError("仅 Windows（需要 junction）")
+    with tempfile.TemporaryDirectory() as td:
+        store = empty_store(td)
+        with sandbox(td, store=store, adapters=ADAPTERS,
+                     config={"seed_auto": False}) as (home, _s):
+            import desktop
+            api = desktop.Api()
+            assert api.bootstrap()["ok"]
+            con = skilllocker.db()
+            try:
+                con.execute("update tools set enabled=1 where key='claude_code'")
+                con.commit()
+            finally:
+                con.close()
+            src = skill_dir(os.path.join(td, "incoming"), "newbie")
+            res = api.import_skill(src, "newbie", "")
+            assert res.get("ok"), res
+            act = res.get("action") or {}
+            assert act.get("distributed") == 1, act
+            link = os.path.join(home, ".claude", "skills", "newbie")
+            assert skilllocker.is_reparse(link), "开关开着的 agent 应自动收到链接"
+            assert skilllocker.link_target(link) == skilllocker.norm_path(
+                os.path.join(store.replace("/", os.sep), "newbie")), \
+                skilllocker.link_target(link)
+            assert not os.path.lexists(os.path.join(home, ".cursor", "skills", "newbie")), \
+                "开关关着的 agent 不得被写入"
+
+
+@case("rescan: store 外部新增的 skill 登记后自动分发给开关开着的 agent")
+def _():
+    if sys.platform != "win32":
+        raise AssertionError("仅 Windows（需要 junction）")
+    with tempfile.TemporaryDirectory() as td:
+        store = empty_store(td)
+        with sandbox(td, store=store, adapters=ADAPTERS,
+                     config={"seed_auto": False}) as (home, _s):
+            import desktop
+            api = desktop.Api()
+            assert api.bootstrap()["ok"]
+            con = skilllocker.db()
+            try:
+                con.execute("update tools set enabled=1 where key='claude_code'")
+                con.commit()
+            finally:
+                con.close()
+            # 用户把技能目录直接放进中央仓库（拖拽 / 别的管理器 / 解压）
+            skill_dir(store, "dropped")
+            res = api.rescan()
+            assert res.get("ok"), res
+            dist = res.get("distributed") or {}
+            assert dist.get("skills") == ["dropped"], res
+            assert dist.get("changed") == 1, res
+            link = os.path.join(home, ".claude", "skills", "dropped")
+            assert skilllocker.is_reparse(link), "扫描登记后应自动补链"
+            assert not os.path.lexists(os.path.join(home, ".cursor", "skills", "dropped"))
+
+
+@case("bootstrap: 启动时发现仓库新增目录，登记并自动分发")
+def _():
+    if sys.platform != "win32":
+        raise AssertionError("仅 Windows（需要 junction）")
+    with tempfile.TemporaryDirectory() as td:
+        store = empty_store(td)
+        skill_dir(store, "seed-skill")
+        with sandbox(td, store=store, adapters=ADAPTERS,
+                     config={"seed_auto": False}) as (home, _s):
+            import desktop
+            api = desktop.Api()
+            first = api.bootstrap()
+            assert first.get("ok"), first
+            assert [s["name"] for s in first["data"]["skills"]] == ["seed-skill"], first
+            con = skilllocker.db()
+            try:
+                con.execute("update tools set enabled=1 where key='claude_code'")
+                con.commit()
+            finally:
+                con.close()
+            # 应用关着时往仓库里放了新技能：下一次启动就该被登记并分发，
+            # 不能要求用户先点一次「刷新扫描」。
+            skill_dir(store, "late-skill")
+            second = api.bootstrap()
+            assert second.get("ok"), second
+            assert "late-skill" in [s["name"] for s in second["data"]["skills"]], second
+            dist = second.get("distributed") or {}
+            assert dist.get("skills") == ["late-skill"], second
+            link = os.path.join(home, ".claude", "skills", "late-skill")
+            assert skilllocker.is_reparse(link), "启动时也应自动补链"
+
+
 def main():
     failed = []
     for name, fn in CASES:

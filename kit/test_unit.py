@@ -560,6 +560,179 @@ def _():
             skilllocker_base.DB_FILE = old
 
 
+# ---------------------------------------------------------------- 身份契约
+@case("contract_issue: 目录名==声明名合规 / 未声明合规 / 不同即违规")
+def _():
+    ci = skilllocker.contract_issue
+    assert ci("soft-skill", "soft-skill") is None
+    assert ci("soft-skill", "") is None          # 没声明 = 规范回落目录名，合规
+    assert ci("soft-skill", None) is None
+    assert ci("soft-skill", "high-end-visual-design") == ("mismatch", "high-end-visual-design")
+    assert ci("a", "con")[0] == "invalid"        # 声明名连目录名都做不出来
+    assert skilllocker.contract_text(("mismatch", "x"), "y") == "包内声明名 x ≠ 目录名 y"
+    assert skilllocker.contract_text(None, "y") == ""
+
+
+@case("rewrite_declared_name: 只改 name 行，正文/BOM/CRLF/其余键不动")
+def _():
+    with tempfile.TemporaryDirectory() as td:
+        # 常规：只换 name，description 与正文一字不改
+        p = os.path.join(td, "a", "SKILL.md")
+        write(p, "---\nname: old\n---\nbody 正文\n")
+        assert skilllocker.rewrite_declared_name(p, "new") is True
+        assert open(p, encoding="utf-8").read() == "---\nname: new\n---\nbody 正文\n"
+        # 幂等：再改一次没有变化，返回 False 且不重写文件
+        before = open(p, "rb").read()
+        assert skilllocker.rewrite_declared_name(p, "new") is False
+        assert open(p, "rb").read() == before
+        # CRLF + BOM 原样保留（Windows 上 SKILL.md 常见，不能改成 LF）
+        p2 = os.path.join(td, "b", "SKILL.md")
+        os.makedirs(os.path.dirname(p2), exist_ok=True)
+        with open(p2, "wb") as fh:
+            fh.write(b"\xef\xbb\xbf---\r\nname: old\r\ndescription: keep\r\n---\r\nx\r\n")
+        assert skilllocker.rewrite_declared_name(p2, "new") is True
+        raw = open(p2, "rb").read()
+        assert raw.startswith(b"\xef\xbb\xbf"), raw[:8]
+        assert b"\r\nname: new\r\n" in raw and b"description: keep" in raw, raw
+        # 没有 name 键：在块首插入，而不是把正文里同名的行当 frontmatter
+        p3 = os.path.join(td, "c", "SKILL.md")
+        write(p3, "---\ndescription: d\n---\n\nname: not-frontmatter\n")
+        assert skilllocker.rewrite_declared_name(p3, "nn") is True
+        assert open(p3, encoding="utf-8").read() == "---\nname: nn\ndescription: d\n---\n\nname: not-frontmatter\n"
+        # 无 frontmatter / 未闭合：原样返回 False，绝不无中生有造一个块
+        p4 = os.path.join(td, "d", "SKILL.md")
+        write(p4, "# just markdown\n")
+        assert skilllocker.rewrite_declared_name(p4, "zz") is False
+        assert open(p4, encoding="utf-8").read() == "# just markdown\n"
+        p5 = os.path.join(td, "e", "SKILL.md")
+        write(p5, "---\nname: unclosed\n")
+        assert skilllocker.rewrite_declared_name(p5, "zz") is False
+
+
+@case("import_dir: 入库即归一化，注册表 label 恒等于目录名")
+def _():
+    with tempfile.TemporaryDirectory() as td:
+        src = os.path.join(td, "elsewhere", "high-end-visual-design")
+        write(os.path.join(src, "SKILL.md"),
+              "---\nname: high-end-visual-design\ndescription: d\n---\nbody\n")
+        store = os.path.join(td, "store")
+        con, old = _temp_db(td)
+        try:
+            cfg = tmp_cfg(store)
+            name = skilllocker.import_dir(con, cfg, src, "soft-skill")
+            assert name == "soft-skill", name
+            # 仓库副本已对齐；第三方源目录保持原样（不是我们的地盘）
+            assert skilllocker.declared_name(os.path.join(store, name)) == "soft-skill"
+            assert skilllocker.declared_name(src) == "high-end-visual-design"
+            row = con.execute("select label from skills where name=?", (name,)).fetchone()
+            assert row["label"] == "soft-skill", dict(row)
+            assert skilllocker.contract_rows(con, cfg) == []
+        finally:
+            con.close()
+            skilllocker_base.DB_FILE = old
+
+
+@case("contract_rows 是活的守卫：手工塞一个违规目录，rescan 后必须报红")
+def _():
+    # 守卫必须能变红 —— 否则「0 违规」只是检测器没跑。这里绕过 import_dir
+    # 直接往仓库里放一个声明名不符的包，模拟用户手动拖进 store / adopt_store
+    # 接管既有仓库这两条不归一化的路径。
+    with tempfile.TemporaryDirectory() as td:
+        store = os.path.join(td, "store")
+        write(os.path.join(store, "soft-skill", "SKILL.md"), "---\nname: high-end-visual-design\n---\n")
+        write(os.path.join(store, "ui-new__skillhub", "SKILL.md"), "---\nname: ui-design-system\n---\n")
+        write(os.path.join(store, "ui-design-system", "SKILL.md"), "---\nname: ui-design-system\n---\n")
+        con, old = _temp_db(td)
+        try:
+            cfg = tmp_cfg(store)
+            skilllocker.rescan(con, cfg)
+            rows = skilllocker.contract_rows(con, cfg)
+            got = {r["name"]: r for r in rows}
+            assert set(got) == {"soft-skill", "ui-new__skillhub"}, rows
+            assert got["soft-skill"]["kind"] == "mismatch"
+            assert got["soft-skill"]["declared"] == "high-end-visual-design"
+            # 两个目录声明同一个名字 = 按名注册的 agent 里必然互相遮蔽
+            assert got["ui-new__skillhub"]["shadowed_by"] == ["ui-design-system"], rows
+            assert skilllocker.repair_contract(con, cfg, apply_changes=False) != []
+            assert skilllocker.declared_name(os.path.join(store, "soft-skill")) \
+                == "high-end-visual-design", "预览不得动盘"
+            skilllocker.repair_contract(con, cfg, apply_changes=True)
+            assert skilllocker.contract_rows(con, cfg) == []
+            assert skilllocker.declared_name(os.path.join(store, "soft-skill")) == "soft-skill"
+            assert skilllocker.declared_name(os.path.join(store, "ui-new__skillhub")) == "ui-new__skillhub"
+        finally:
+            con.close()
+            skilllocker_base.DB_FILE = old
+
+
+@case("repair_contract: 只修指定名字，坏盘不炸整批")
+def _():
+    with tempfile.TemporaryDirectory() as td:
+        store = os.path.join(td, "store")
+        write(os.path.join(store, "a", "SKILL.md"), "---\nname: wrong-a\n---\n")
+        write(os.path.join(store, "b", "SKILL.md"), "---\nname: wrong-b\n---\n")
+        con, old = _temp_db(td)
+        try:
+            cfg = tmp_cfg(store)
+            skilllocker.rescan(con, cfg)
+            plan = skilllocker.repair_contract(con, cfg, ["a"], apply_changes=True)
+            assert [p["skill"] for p in plan] == ["a"], plan
+            assert skilllocker.declared_name(os.path.join(store, "b")) == "wrong-b", "点名修不得顺手改别的"
+            assert {r["name"] for r in skilllocker.contract_rows(con, cfg)} == {"b"}
+            # SKILL.md 缺失（目录不算合法包）→ 报 error 而不是抛穿整批
+            os.remove(os.path.join(store, "b", "SKILL.md"))
+            skilllocker.rescan(con, cfg)
+            assert skilllocker.repair_contract(con, cfg, apply_changes=True) == []
+            # 注册表过期（盘上已改好但库里还记着违规）：done 必须为 False，
+            # desktop.align_name 靠这个把「什么都没改」报成错误而不是假成功
+            write(os.path.join(store, "c", "SKILL.md"), "---\nname: wrong-c\n---\n")
+            skilllocker.rescan(con, cfg)
+            con.execute("update skills set label='wrong-c' where name='c'")
+            with open(os.path.join(store, "c", "SKILL.md"), "w", encoding="utf-8") as fh:
+                fh.write("---\nname: c\n---\n")
+            got = skilllocker.repair_contract(con, cfg, ["c"], apply_changes=True)
+            assert len(got) == 1 and got[0]["done"] is False, got
+            assert not skilllocker.rewrite_declared_name(
+                os.path.join(store, "c", "SKILL.md"), "c"), "已一致时不得重写"
+        finally:
+            con.close()
+            skilllocker_base.DB_FILE = old
+
+
+@case("orphan_links: 死链与无 SKILL.md 的目录要报，注册表内的名字不双报")
+def _():
+    # matrix 只遍历注册表，仓库之外的死链在分发矩阵里一格都不占 —— 这个用例
+    # 就是钉住那半边盲区：agent 目录里有条目、任何 agent 都加载不了。
+    if sys.platform != "win32":
+        raise AssertionError("仅 Windows（需要 junction）")
+    with tempfile.TemporaryDirectory() as td:
+        store = os.path.join(td, "store")
+        agent = os.path.join(td, "agent", "skills")
+        write(os.path.join(store, "known", "SKILL.md"), "---\nname: known\n---\n")
+        elsewhere = os.path.join(td, "elsewhere")
+        write(os.path.join(elsewhere, "SKILL.md"), "---\nname: gone\n---\n")
+        skilllocker.make_junction(os.path.join(agent, "tabbit"), elsewhere)
+        shutil.rmtree(elsewhere)  # 目标消失：模拟第三方 App 被卸载后留下的死 junction
+        os.makedirs(os.path.join(agent, "empty-dir"))
+        write(os.path.join(agent, "state.json"), "{}\n")  # agent 自己的状态文件
+        con, old = _temp_db(td)
+        try:
+            cfg = tmp_cfg(store)
+            insert_tool(con, "t1", agent)
+            skilllocker.rescan(con, cfg)
+            got = skilllocker.orphan_links(con, cfg)
+            kinds = {(g["name"], g["kind"]) for g in got}
+            assert ("tabbit", "dead-link") in kinds, got
+            assert ("empty-dir", "no-skill-md") in kinds, got
+            assert "state.json" not in {g["name"] for g in got}, "散文件不是技能候选"
+            # 注册表里已有的名字交给 matrix 的 broken-link / conflict-dir 报，不双报
+            shutil.copytree(os.path.join(store, "known"), os.path.join(agent, "known"))
+            assert "known" not in {g["name"] for g in skilllocker.orphan_links(con, cfg)}
+        finally:
+            con.close()
+            skilllocker_base.DB_FILE = old
+
+
 @case("scan_unique: .skpart-* 崩溃残留不进独有列表（L5）")
 def _():
     with tempfile.TemporaryDirectory() as td:
@@ -803,12 +976,89 @@ def _():
             assert act["name"] == "flink" and act["via"] == "link", act
             assert act["relinked"] == 1, act
             with open(os.path.join(store, "flink", "SKILL.md"), encoding="utf-8") as fh:
-                assert "name: body" in fh.read()
+                text = fh.read()
+            # 身份契约：入库时把包内声明名对齐到目录名（body → flink），否则
+            # agent 注册出来的名字与分发路径不一致，UI 显示的 label 在 agent 里
+            # 根本不存在。正文与第三方真身都不受影响（下一行仍断真身未被改动）。
+            assert "name: flink" in text, text
+            assert "name: body" not in text, text
             assert os.path.isfile(os.path.join(elsewhere, "SKILL.md")), "第三方真身不得改动"
+            with open(os.path.join(elsewhere, "SKILL.md"), encoding="utf-8") as fh:
+                assert "name: body" in fh.read(), "归一化只改仓库副本，不改源"
             link = os.path.join(agent, "flink")
             assert skilllocker.is_reparse(link), link
             assert skilllocker.link_target(link) == skilllocker.norm_path(
                 os.path.join(store, "flink")), skilllocker.link_target(link)
+        finally:
+            con.close()
+            skilllocker_base.DB_FILE = old
+
+
+@case("auto_distribute: 只发给开关开着的 agent，单个 agent 失败不影响其他")
+def _():
+    if sys.platform != "win32":
+        raise AssertionError("仅 Windows（需要 junction）")
+    with tempfile.TemporaryDirectory() as td:
+        store = os.path.join(td, "store")
+        os.makedirs(os.path.join(store, "s1"))
+        write(os.path.join(store, "s1", "SKILL.md"), "---\nname: s1\n---\n")
+        good = os.path.join(td, "good", "skills")
+        bad = os.path.join(td, "bad", "skills")
+        off = os.path.join(td, "off", "skills")
+        for p in (good, off):
+            os.makedirs(p)
+        os.makedirs(os.path.dirname(bad))
+        write(bad, "不是目录，makedirs 会失败")
+        con, old = _temp_db(td)
+        try:
+            cfg = tmp_cfg(store)
+            skilllocker.rescan(con, cfg)
+            insert_tool(con, "good", good)
+            insert_tool(con, "bad", bad)
+            insert_tool(con, "off", off, enabled=0)
+            res = skilllocker.auto_distribute(con, cfg, ["s1"])
+            assert res["tools"] == ["bad", "good"], res["tools"]
+            assert res["changed"] == 1, res
+            assert len(res["errors"]) == 1 and res["errors"][0]["tool"] == "bad", res
+            link = os.path.join(good, "s1")
+            assert skilllocker.is_reparse(link), "好 agent 不该被坏 agent 拖累"
+            assert not os.path.lexists(os.path.join(off, "s1")), "关闭的 agent 不得分发"
+            # skip_tools：收编容器行时源 agent 不补主目录链接
+            res2 = skilllocker.auto_distribute(con, cfg, ["s1"], skip_tools=("good",))
+            assert res2["tools"] == ["bad"] and res2["changed"] == 0, res2
+        finally:
+            con.close()
+            skilllocker_base.DB_FILE = old
+
+
+@case("promote_unique: 收编后分发给其他开关开着的 agent（容器行不补源链接）")
+def _():
+    if sys.platform != "win32":
+        raise AssertionError("仅 Windows（需要 junction）")
+    with tempfile.TemporaryDirectory() as td:
+        store = os.path.join(td, "store")
+        agent1 = os.path.join(td, "agent1", "skills")
+        agent2 = os.path.join(td, "agent2", "skills")
+        os.makedirs(store)
+        os.makedirs(agent2)
+        skill_dir = os.path.join(agent1, "cont", "inner")
+        write(os.path.join(skill_dir, "SKILL.md"), "---\nname: inner\n---\n")
+        con, old = _temp_db(td)
+        try:
+            cfg = tmp_cfg(store)
+            insert_tool(con, "t1", agent1)   # 源 agent：容器子目录行
+            insert_tool(con, "t2", agent2)   # 另一个开着的 agent
+            skilllocker.rescan(con, cfg)
+            act = skilllocker.promote_unique(con, cfg, "t1", "cont/inner")
+            assert act["name"] == "inner", act
+            assert act["relinked"] == 0 and act["linked"] == 1, act
+            # 源 agent 的容器路径原样保留，且不补 skills_dir/inner（避免双路径加载）
+            assert os.path.isdir(os.path.join(agent1, "cont", "inner"))
+            assert not os.path.lexists(os.path.join(agent1, "inner"))
+            link = os.path.join(agent2, "inner")
+            assert skilllocker.is_reparse(link), "其他开着的 agent 应收到共享副本"
+            assert skilllocker.link_target(link) == skilllocker.norm_path(
+                os.path.join(store, "inner")), skilllocker.link_target(link)
         finally:
             con.close()
             skilllocker_base.DB_FILE = old

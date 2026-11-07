@@ -114,6 +114,7 @@
     chooseDir: function () { return call('choose_dir'); },
     importPreflight: function (src, name) { return call('import_preflight', src, name); },
     importSkill: function (src, name, folder) { return call('import_skill', src, name, folder); },
+    alignName: function (name) { return call('align_name', name); },
     onlineSearch: function (q, limit) { return call('online_search', q, limit); },
     onlineFetch: function (source, name) { return call('online_fetch', source, name); },
     onlineFetchCancel: function () { return call('online_fetch_cancel'); },

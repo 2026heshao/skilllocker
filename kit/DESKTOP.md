@@ -28,6 +28,7 @@
 
 - **首次入库默认关闭**：`sync_tools_from_adapters` 探测到的新 agent 一律 `enabled=0`（状态「已关闭」）——探测到 ≠ 授权分发。用户打开开关时才经 `set_agent → do_sync` 建 junction。首次启动即自动探测（`bootstrap()` 内置，无需手动「重新探测」），老库已有行的 enabled 不受影响。
 - **开**：`do_sync(only_tools=[key], apply_changes=True)`，按中央仓库补齐链接，不覆盖冲突目录。
+- **持续状态**：开关开着时，之后新入库、扫描到新增或内容变更的 skill 会自动补链（桌面导入 / 刷新扫描 / 启动时发现仓库新目录 / CLI `import` / 独有转共有），不用再重新开关一次。分发仍走 `do_sync`（junction 优先，copy 模式刷新副本）；单个 agent 失败不影响其他 agent，错误进 `events` 并在导入 / 刷新提示里如实计数。
 - **关**：二次确认后 `unlink_tool()` —— 只删除本工具建立的 junction、以及内容与中央一致的拷贝；**中央仓库的 skill 实体一个不动**。冲突副本会保留，并在 toast 里报告保留数量。
 - **事件入口只认 `change`**：开关的 `<input>` 是透明覆盖层（`position:absolute; inset:0; z-index:2`），点 `label` 或装饰 `i` 时 Chromium 还会把点击转发给 `input`，一次按下会派发 **两个 `click`**；且 `click` 冒到 `document` 时 `checked` **已经是翻转后的值**。因此 `click` 里读 `!box.checked` 再取反正好反了——点「开」着的开关反而又发一次 open（界面表现为「关不掉链接」）。现在 `click` 只负责拦下（不触发行选中），真正动作在 `document` 的 `change` 里按 `box.checked`（= 目标状态）走 `requestAgent(key, checked)`，一次按下只产生一个 change。
 - 取消/失败回滚：`requestAgent(key, on, onAbort)` 的 `onAbort` 会把开关恢复到数据模型的值（`confirmModal` 支持 `opts.onCancel`，取消、右上角关闭、点遮罩都会触发）。

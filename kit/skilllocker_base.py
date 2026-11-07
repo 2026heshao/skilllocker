@@ -566,6 +566,185 @@ def parse_frontmatter(md_path):
     return out
 
 
+# ---------------------------------------------------------------- skill 名与身份契约
+#
+# 不变量：**中央仓库的目录名 == SKILL.md frontmatter 的 name**。
+#
+# 为什么这是硬约束而不是风格问题：目录名是唯一被所有 agent 和分发逻辑使用的
+# 注册名（skills.name → `<skills_dir>/<目录名>`，见 target_state / do_sync），
+# 而 frontmatter name 是 Agent Skills 规范里 agent 实际注册技能时读的名字。
+# 两者一分叉，「链接建好了」就不再等于「用得上」，而且坏得很安静：
+#   - UI 把 frontmatter name 当 label 显示在第二行，用户照着它在 agent 里输
+#     `/high-end-visual-design`，而 agent 只认识 `soft-skill` —— 看起来就是
+#     「分发 7/7 全绿，但技能没接入」；
+#   - 两个目录声明同一个 name 时，按 name 注册的 agent 里必然互相遮蔽，被遮
+#     的那个永远调用不到（本仓库 4 组 `__skillhub` 副本使用数全是 0）。
+# 所以：入口归一化（adopt_declared_name）+ 扫描期检出（contract_rows）+
+# 一键修复（repair_contract），三层都指向同一个判据 contract_issue。
+def check_skill_name(name):
+    """skill 名 = 中央仓库 / skills_dir 的直属目录名，所有删除与导入入口共用。
+
+    - 路径分隔符 / . .. ：copytree、delete_tree 会写到目录树之外
+    - Windows 保留名（CON/NUL/COM1...）：copytree 失败或产出无法访问的目录
+    - 尾点 / 尾空格：NTFS 静默吞掉，注册名与磁盘名不一致
+    - 冒号：NTFS 备用数据流语法，不是目录名
+    """
+    if not name or name in (".", "..") or os.path.basename(name) != name:
+        raise RuntimeError("非法 skill 名: %s（不能含路径分隔符）" % name)
+    if re.match(r"^(con|prn|aux|nul|com[1-9]|lpt[1-9])$", str(name).lower()):
+        raise RuntimeError("非法 skill 名: %s（Windows 保留名）" % name)
+    if name != name.rstrip(". ") or ":" in name:
+        raise RuntimeError("非法 skill 名: %s（不能以点/空格结尾或含冒号）" % name)
+    return name
+
+
+def skill_md_of(dirpath):
+    """包内主说明文件：SKILL.md 优先，其次 skill.md（与 has_skill_md 同一口径）。"""
+    for n in ("SKILL.md", "skill.md"):
+        p = os.path.join(dirpath, n)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
+def declared_name(dirpath):
+    """包内声明名 = SKILL.md frontmatter 的 name；没声明或读不到返回 ''。"""
+    md = skill_md_of(dirpath)
+    if not md:
+        return ""
+    return str(parse_frontmatter(md).get("name") or "").strip()
+
+
+def contract_issue(dir_name, declared):
+    """目录名与声明名的契约检查。合规返回 None，否则 (kind, declared)。
+
+    '' = 包内没声明 name，规范回落到目录名，算合规（不算违规，避免逼用户给
+    每个手写包补 frontmatter）。
+    """
+    declared = str(declared or "").strip()
+    if not declared or declared == dir_name:
+        return None
+    try:
+        check_skill_name(declared)
+    except RuntimeError:
+        return "invalid", declared
+    return "mismatch", declared
+
+
+_CONTRACT_TEXT = {
+    "mismatch": "包内声明名 %s ≠ 目录名 %s",
+    "invalid": "包内声明名 %s 不是合法技能名（目录名 %s 才是注册名）",
+}
+
+
+def contract_text(issue, dir_name):
+    """违规的人类可读说明；issue 为 None 时返回 ''。"""
+    if not issue:
+        return ""
+    kind, declared = issue
+    return _CONTRACT_TEXT[kind] % (declared, dir_name)
+
+
+def rewrite_declared_name(md_path, new_name):
+    """把 SKILL.md frontmatter 的 name 改成 new_name，正文与其余键一字不动。
+
+    只动第一个 frontmatter 块里行首的 `name:`；没有该键就在块首插入。文件没有
+    frontmatter 时原样返回（没声明就等于用目录名，本来就合规）。写盘走同级临时
+    文件 + os.replace：中途崩溃或杀软拦截不会留下半份 SKILL.md。
+    返回 True 表示真的改了内容。
+    """
+    try:
+        raw = open(md_path, "rb").read()
+    except OSError as exc:
+        raise RuntimeError("SKILL.md 读不了: %s（%s）" % (md_path, exc))
+    bom = raw.startswith(b"\xef\xbb\xbf")
+    text = raw.decode("utf-8-sig") if bom else raw.decode("utf-8")
+    nl = "\r\n" if "\r\n" in text else "\n"
+    lines = text.split(nl)
+    if not lines or lines[0].strip() != "---":
+        return False
+    end = None
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            end = i
+            break
+    if end is None:
+        return False
+    hit = None
+    for i in range(1, end):
+        line = lines[i]
+        if line[:1] in (" ", "\t") or not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if line.partition(":")[0].strip() == "name":
+            hit = i
+            break
+    if hit is None:
+        lines.insert(1, "name: %s" % new_name)
+    else:
+        lines[hit] = "name: %s" % new_name
+    out = (b"\xef\xbb\xbf" if bom else b"") + nl.join(lines).encode("utf-8")
+    if out == raw:
+        return False
+    tmp = md_path + ".skname.tmp"
+    try:
+        with open(tmp, "wb") as fh:
+            fh.write(out)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, md_path)
+    except OSError as exc:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise RuntimeError("SKILL.md 写不回: %s（%s）" % (md_path, exc))
+    return True
+
+
+def adopt_declared_name(dirpath):
+    """入口归一化：把包内声明名改成目录名，保证进中央仓库的包恒满足契约。
+
+    import / seed / promote 三条「新建仓库目录」的路径都过这里。返回改前的
+    声明名（没改返回 ''），调用方可据此记日志。
+    """
+    name = os.path.basename(os.path.normpath(dirpath))
+    declared = declared_name(dirpath)
+    if not contract_issue(name, declared):
+        return ""
+    md = skill_md_of(dirpath)
+    if not md:
+        return ""
+    if rewrite_declared_name(md, name):
+        return declared
+    return ""
+
+
+def contract_rows(con, cfg=None):
+    """按注册表列出身份契约违规，供 verify / CLI / 看板使用。
+
+    判据只用 skills 表现有列（label 就是 rescan 从 frontmatter 读到的 name），
+    不加新表、不加新列，也就没有迁移风险：label != name 与契约违规严格等价。
+    顺带报出「多个目录声明同一名字」的分组 —— 那是遮蔽的直接原因。
+    """
+    out = []
+    rows = [dict(r) for r in con.execute("select name,label from skills order by name")]
+    by_label = {}
+    for r in rows:
+        if r["label"]:
+            by_label.setdefault(r["label"], []).append(r["name"])
+    for r in rows:
+        issue = contract_issue(r["name"], r["label"])
+        if not issue:
+            continue
+        # 同一声明名被几个目录占用：这些目录在按 name 注册的 agent 里互相遮蔽。
+        # 必须从全表分组取，只统计违规行的话，被合规正本「占用同名」这一半证据
+        # 会漏掉（正本自己合规，不进违规清单）。
+        out.append({"name": r["name"], "declared": issue[1], "kind": issue[0],
+                    "detail": contract_text(issue, r["name"]),
+                    "shadowed_by": [n for n in by_label.get(issue[1], []) if n != r["name"]]})
+    return out
+
+
 # ---------------------------------------------------------------- 统计与工具表基元
 def fmt_bytes(n):
     n = int(n or 0)

@@ -18,7 +18,7 @@
 ## 功能
 
 - 扫描中央仓库：登记技能名称、分类、备注与内容哈希
-- 分发矩阵：一键建立 / 修复各工具的 skill 链接，识别缺失、漂移与冲突
+- 分发矩阵：一键建立 / 修复各工具的 skill 链接；新入库技能按「分发开关」自动补链，识别缺失、漂移与冲突
 - 导入外部 skill、撤链、删除，以及把「独有」技能转为「共有」
 - 内容哈希冲突检测，`verify` 只报告不改动
 - 无边框桌面界面（pywebview）与完整 CLI
@@ -64,11 +64,11 @@ python desktop.py --debug   :: 打开 WebView2 调试面板
 
 ```bat
 cd kit
-python skilllocker.py scan                     :: 重新扫描中央仓库
+python skilllocker.py scan                     :: 重新扫描；新增技能按分发开关自动补链
 python skilllocker.py status                   :: 打印分发矩阵摘要
 python skilllocker.py verify                   :: 检查漂移（只报告）
 python skilllocker.py sync [--tool 工具] [--fix] :: 建立 / 修复分发
-python skilllocker.py import <目录> [--name 名称] :: 从目录导入
+python skilllocker.py import <目录> [--name 名称] :: 从目录导入并分发给开关开着的 agent
 python skilllocker.py remove <名称>             :: 删除分发与实体
 python skilllocker.py seed [--dry]              :: 首启自动建库（--dry 只打印将收的名字与来源）
 python skilllocker.py search <关键词>           :: skills.sh 在线检索

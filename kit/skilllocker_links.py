@@ -21,11 +21,12 @@ import urllib.request
 
 import skilllocker_base as _base  # noqa: F401 - 统一从门面取常量时走这里
 from skilllocker_base import (  # noqa: F401 - 部分名字经 skilllocker 门面再导出
-    FIRST_RUN_ADOPT_EVENT, FIRST_RUN_SEED_EVENT, IGNORE_NAMES, db, delete_tree,
-    dir_stats, has_first_run_action, has_skill_md, is_reparse,
+    FIRST_RUN_ADOPT_EVENT, FIRST_RUN_SEED_EVENT, IGNORE_NAMES, adopt_declared_name,
+    check_skill_name, contract_issue, contract_rows, contract_text, db, delete_tree,
+    declared_name, dir_stats, has_first_run_action, has_skill_md, is_reparse,
     link_target, log_event, make_junction, migrate_folders, norm_path, ordered_tools,
-    parse_frontmatter, path_under, remove_link, sha_tree, store_location,
-    target_state, write_config)
+    parse_frontmatter, path_under, remove_link, rewrite_declared_name, sha_tree,
+    skill_md_of, store_location, target_state, write_config)
 from skilllocker_meta import clear_meta, seed_meta, set_meta
 from skilllocker_store import (
     adoptable_rows, agent_managed_roots, find_existing_store, find_unique_row,
@@ -115,22 +116,57 @@ def do_sync(con, cfg, only_tools=None, only_skills=None, apply_changes=True):
     return plan
 
 
-# ---------------------------------------------------------------- 增删
-def check_skill_name(name):
-    """skill 名 = 中央仓库 / skills_dir 的直属目录名，所有删除与导入入口共用。
+def auto_distribute(con, cfg, names, skip_tools=(), apply_changes=True):
+    """把刚入库的名字分发给「分发开关开着」的 agent。
 
-    - 路径分隔符 / . .. ：copytree、delete_tree 会写到目录树之外
-    - Windows 保留名（CON/NUL/COM1...）：copytree 失败或产出无法访问的目录
-    - 尾点 / 尾空格：NTFS 静默吞掉，注册名与磁盘名不一致
-    - 冒号：NTFS 备用数据流语法，不是目录名
+    分发开关是持续状态：用户打开某个 agent 时授权的是「按中央仓库同步」，
+    之后新入库的 skill 也属于这份授权。旧实现只有 set_agent 会调 do_sync，
+    import / rescan 只登记不补链，于是每加一个技能都得手动重新开关一次。
+
+    与 set_agent 走同一条 do_sync，不引入第二套链接语义：
+      - 只处理 names（本次新登记 / 内容变更的名字），不碰存量；
+      - 只选 detected=1 且 enabled=1 的工具，skip_tools 排除指定 agent
+        （收编容器 / extra 来源时，源 agent 已有自己的加载路径，补主目录
+        链接会让它从两个路径加载同名技能）；
+      - 单个 agent 失败（权限 / 目录被占用）不影响其他 agent，也绝不把
+        已成功的导入回滚；错误进 events，回包如实计数；
+      - conflict / 不可读格口 do_sync 本来就不动手，这里不额外判定。
+    返回 {skills, tools, changed, plan, errors}，调用方只读汇总。
     """
-    if not name or name in (".", "..") or os.path.basename(name) != name:
-        raise RuntimeError("非法 skill 名: %s（不能含路径分隔符）" % name)
-    if re.match(r"^(con|prn|aux|nul|com[1-9]|lpt[1-9])$", name.lower()):
-        raise RuntimeError("非法 skill 名: %s（Windows 保留名）" % name)
-    if name != name.rstrip(". ") or ":" in name:
-        raise RuntimeError("非法 skill 名: %s（不能以点/空格结尾或含冒号）" % name)
-    return name
+    names = sorted({str(n) for n in (names or []) if n})
+    out = {"skills": names, "tools": [], "changed": 0, "plan": [], "errors": []}
+    if not names:
+        return out
+    tools = [r["key"] for r in con.execute(
+        "select key from tools where detected=1 and enabled=1 order by key")]
+    skip = set(skip_tools or ())
+    tools = [k for k in tools if k not in skip]
+    out["tools"] = tools
+    for key in tools:
+        try:
+            plan = do_sync(con, cfg, only_tools=[key], only_skills=names,
+                           apply_changes=apply_changes)
+        except Exception as exc:  # noqa: BLE001 - 单 agent 失败不能拖垮整批
+            out["errors"].append({"tool": key, "error": str(exc)})
+            log_event(con, "warn", "自动分发 %s 失败：%s" % (key, exc))
+            try:
+                con.commit()
+            except Exception:  # noqa: BLE001 - 已写的事件尽力而为
+                pass
+            continue
+        out["plan"].extend(plan)
+    out["changed"] = sum(1 for p in out["plan"] if p.get("done"))
+    if out["changed"] or out["errors"]:
+        log_event(con, "auto-sync", "%d 个技能 → %d 个 agent，%d 处链接%s" % (
+            len(names), len(tools), out["changed"],
+            "，%d 个 agent 失败" % len(out["errors"]) if out["errors"] else ""))
+        con.commit()
+    return out
+
+
+# ---------------------------------------------------------------- 增删
+# check_skill_name 已上移到 skilllocker_base（身份契约原语与目录名校验必须同源，
+# 否则 rescan / import / UI 各拿一套标准）；这里经门面 import 继续可用。
 
 
 def copy_tree_atomic(src, dst):
@@ -198,10 +234,106 @@ def import_dir(con, cfg, src, name=None):
     if os.path.lexists(central):
         raise RuntimeError("中央仓库已有同名 skill：%s（先改名或删掉再导入）" % name)
     copy_tree_atomic(src, central)
+    # 身份契约入口归一化：第三方包的 frontmatter name 几乎必然不等于我们落盘
+    # 的目录名（soft-skill 包声明 high-end-visual-design 就是这一类）。不在这
+    # 里对齐，注册表就会存下 label != name 的行，UI 显示的名字在 agent 里不存在。
+    adopt_declared_name(central)
     rescan(con, cfg)
     log_event(con, "import", "%s <- %s" % (name, src))
     con.commit()
     return name
+
+
+def repair_contract(con, cfg, names=None, apply_changes=True):
+    """把「目录名 != 包内声明名」的中央仓库包对齐到目录名。
+
+    这是 soft-skill 那类「分发 7/7 全绿但 agent 里叫不出名字」的修复入口。
+    只改 SKILL.md frontmatter 的 name 一行，正文、description、其余键一字不动；
+    改完 rescan，label 回到与 name 一致，agent 侧因为本来就用目录名，链接与
+    注册名都不受影响 —— 所以对齐方向是「文件跟目录走」，不是重命名目录：
+    后者要重建 7 个 agent 的 junction、改 skills 主键、迁移使用统计，且会让
+    用户已经习惯的名字全部失效。
+
+    默认预览（apply_changes=False 只报将改什么），与 do_sync 的 --fix 同一语义。
+    """
+    only = set(names or [])
+    plan = []
+    for row in contract_rows(con, cfg):
+        name = row["name"]
+        if only and name not in only:
+            continue
+        central = os.path.join(cfg["store"], name)
+        md = skill_md_of(central)
+        entry = {"skill": name, "declared": row["declared"], "kind": row["kind"],
+                 "detail": row["detail"], "shadowed_by": row["shadowed_by"],
+                 "path": md.replace(os.sep, "/") if md else "",
+                 "done": False}
+        if not md:
+            entry["error"] = "找不到 SKILL.md（目录不是合法技能包）"
+        elif not apply_changes:
+            entry["action"] = "rewrite-name"
+        else:
+            try:
+                entry["done"] = rewrite_declared_name(md, name)
+                entry["action"] = "rewritten"
+            except RuntimeError as exc:
+                entry["error"] = str(exc)
+        plan.append(entry)
+    done = [p for p in plan if p["done"]]
+    if done:
+        rescan(con, cfg)
+        log_event(con, "contract-fix", "对齐 %d 个包的声明名：%s"
+                  % (len(done), ", ".join(p["skill"] for p in done)))
+        con.commit()
+    return plan
+
+
+def orphan_links(con, cfg):
+    """agent 的 skills 目录里「条目在、但任何 agent 都加载不了」的孤儿。
+
+    为什么 matrix 抓不到：matrix 只遍历中央仓库注册表（skills 表），仓库之外的
+    条目根本不占格口，于是「目录里明明有个 tabbit，agent 里却查无此技能」这种
+    状态在分发矩阵里是完全隐形的 —— 而它和用户报的「7/7 全绿但用不上」是同一
+    类问题。这里补上另一半视野：
+      - dead-link：链接指向的目标已经不存在（卸载 / 搬迁后留下的 junction）；
+      - no-skill-md：目录里没有 SKILL.md，不算技能包。
+    只报告不删：agent 目录里可能有第三方安装器自己建的条目（tabbit 就是），
+    归属没确认前本工具不该动别人的地盘；要清理由用户点名后自行处理。
+    已在注册表里的名字交给 matrix 的 broken-link / conflict-dir 报，避免双报。
+    """
+    known = {r["name"] for r in con.execute("select name from skills")}
+    out = []
+    for t in ordered_tools(con):
+        if t["mode"] == "off" or not t["skills_dir"]:
+            continue
+        try:
+            names = sorted(os.listdir(t["skills_dir"]))
+        except OSError:
+            continue  # 目录读不了（权限 / 盘没挂）：不下结论，交给 tools 检测
+        for n in names:
+            if n in known or n in IGNORE_NAMES or n.startswith(".") or ".skpart-" in n:
+                continue
+            p = os.path.join(t["skills_dir"], n)
+            if not os.path.lexists(p):
+                continue  # 连条目都不在了（枚举间隙被删），不是孤儿
+            if os.path.isfile(p):
+                continue  # 散文件是 agent 自己的状态文件（如 _bm_skillid_migration.json）
+            # 判据必须与 target_state 同一口径用 has_skill_md：死 junction 的
+            # os.path.isdir / isfile 全都返回 False，用它们当「是不是目录」的门槛
+            # 会让死链在第一步就被 continue 掉，正好漏掉本函数唯一要抓的东西。
+            if is_reparse(p) or os.path.islink(p):
+                if not has_skill_md(p):
+                    out.append({"tool": t["key"], "tool_label": t["label"], "name": n,
+                                "kind": "dead-link",
+                                "detail": "%s -> %s（目标不存在或已无 SKILL.md）" % (
+                                    p.replace(os.sep, "/"), link_target(p))})
+                # 能解析到 SKILL.md 的链接是 foreign-link，已由独有看板报，不双报
+                continue
+            if not has_skill_md(p):
+                out.append({"tool": t["key"], "tool_label": t["label"], "name": n,
+                            "kind": "no-skill-md",
+                            "detail": "%s（目录里没有 SKILL.md）" % p.replace(os.sep, "/")})
+    return out
 
 
 def _preflight_tree(base, cap=6):
@@ -469,12 +601,13 @@ def promote_unique(con, cfg, tool_key, name):
         关着时保留原链接并如实说明。
 
     源副本一律保留（非破坏）：拷贝完成后真身与中央内容一致，独有行自动从
-    看板消失（_unique_item 按内容哈希判定）。main 直属行且该 agent 分发开关
-    开着时，顺手 do_sync 把源副本对齐分发——junction 模式下 takeover →
-    relink 成指向中央的链接，agent 无感续用；copy 模式内容一致 ok-copy 不动。
-    容器 / 变体行不走这段：真身不在 skills_dir 直属位，补链接会让 agent 从
-    两个路径加载到同名的两份。独有 meta 里写过的显示名 / 备注迁给共有行
-    （归属夹本就不参与；独有 meta 行随后由 prune_meta 按行消失自动清理）。
+    看板消失（_unique_item 按内容哈希判定）。收编即共有，随后按分发开关
+    自动补链（auto_distribute）：main 直属行连同源 agent 一起对齐——junction
+    模式下 takeover → relink 成指向中央的链接，agent 无感续用；copy 模式内容
+    一致 ok-copy 不动。容器 / 变体 / extra 行的真身不在 skills_dir 直属位，
+    给源 agent 补主目录链接会让它从两个路径加载到同名的两份，因此只分发给
+    其他开着的 agent，源目录原样保留。独有 meta 里写过的显示名 / 备注迁给
+    共有行（归属夹本就不参与；独有 meta 行随后由 prune_meta 按行消失自动清理）。
     """
     u = find_unique_row(con, cfg, tool_key, name)
     if not u:
@@ -492,21 +625,24 @@ def promote_unique(con, cfg, tool_key, name):
     if um and (um["display_name"] or um["note"]):
         set_meta(con, "shared", store_name, {"display": um["display_name"] or "",
                                              "note": um["note"] or ""})
-    relinked = 0
-    if src_main:
-        trow = con.execute("select * from tools where key=?", (tool_key,)).fetchone()
-        if trow and trow["detected"] and trow["enabled"]:
-            plan = do_sync(con, cfg, only_tools=[tool_key], only_skills=[store_name],
-                           apply_changes=True)
-            relinked = sum(1 for p in plan if p.get("done") == "relink")
-    log_event(con, "promote", "%s/%s -> 共有 %s（%d 文件，%s%s）" % (
+    # 收编即共有：分发开关开着的 agent 都该收到。主目录直属行 / 可解析真身的
+    # 链接（src=main）连同源 agent 一起对齐；容器子目录与 extra 外部目录的
+    # 真身不在 skills_dir 直属位，给源 agent 补主目录链接会让它重复加载同名
+    # 技能 —— 只分发给其他开着的 agent，源目录原样保留。
+    skip = () if src_main else (tool_key,)
+    dist = auto_distribute(con, cfg, [store_name], skip_tools=skip)
+    relinked = sum(1 for p in dist["plan"] if p.get("done") == "relink")
+    linked = sum(1 for p in dist["plan"] if p.get("done") in ("junction", "copy"))
+    log_event(con, "promote", "%s/%s -> 共有 %s（%d 文件，%s%s%s）" % (
         tool_key, u["name"], store_name, files,
         "按真身收编，" if via == "link" else "",
-        "源副本已转链接" if relinked else "源副本保留"))
+        "源副本已转链接" if relinked else "源副本保留",
+        "，分发 %d 处" % linked if linked else ""))
     con.commit()
     return {"scope": "unique", "key": ukey, "tool": tool_key, "name": store_name,
             "path": path.replace(os.sep, "\\"), "files": files, "bytes": size,
-            "relinked": relinked, "via": via, "source": source.replace(os.sep, "\\")}
+            "relinked": relinked, "linked": linked, "via": via,
+            "source": source.replace(os.sep, "\\")}
 
 
 # ---------------------------------------------------------------- 首启接管 / 一键收编
@@ -759,6 +895,7 @@ def _adopt_groups(con, cfg, rows, budget=None, pick_first_on_diff=True,
             _fail("拷入中央仓库失败：%s" % exc)
             skipped.append({"name": name, "reason": "拷入中央仓库失败：%s" % exc})
             continue
+        adopt_declared_name(central)  # 与 import_dir 同一契约，收编路径不能漏
         affected.add(base[2])
         for tool, _source, _via in diffs:
             skipped.append({"name": name, "tool": tool,
@@ -1059,6 +1196,7 @@ def resolve_conflict(con, cfg, tool_key, name, direction):
             raise RuntimeError("内容与中央仓库一致，无需回收")
         delete_tree(central)
         copy_tree_atomic(local, central)
+        adopt_declared_name(central)  # 回收本地版同样要满足目录名 == 声明名
         remove_link(local) if (is_reparse(local) or os.path.islink(local)) else delete_tree(local)
         rescan(con, cfg)
         log_event(con, "resolve", "%s: 本地版收进中央仓库" % name)

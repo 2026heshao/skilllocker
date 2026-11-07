@@ -663,6 +663,26 @@
     return '';
   }
 
+  // 身份契约：agent 注册用的名字永远是目录名（分发就是按 <skills_dir>/<目录名>
+  // 建链接），而 SKILL.md 里 frontmatter 的 name 是规范声明的注册名。两者一旦
+  // 分叉，链接全绿也用不上 —— 用户照着第二行的名字在 agent 里输，那个名字根本
+  // 不存在（soft-skill 声明 high-end-visual-design 就是这一类）。判据与 Python
+  // 侧 skilllocker_base.contract_issue 同一口径：label 为空视为未声明，合规。
+  function contractIssue(r) {
+    if (!r || r.board !== 'shared') return '';
+    var declared = String(r.label || '');
+    return declared && declared !== r.name ? declared : '';
+  }
+
+  function contractFlagHtml(r) {
+    var declared = contractIssue(r);
+    if (!declared) return '';
+    return '<span class="mini-flag conflict" title="包内声明名 ' + esc(declared) +
+      ' ≠ 目录名 ' + esc(r.name) +
+      '；agent 只按目录名注册，第二行那个名字在 agent 里不存在。详情里可一键对齐">' +
+      icon('alert') + '名字不符</span>';
+  }
+
   /* ---------------------------------------------------------- search */
   // 名称优先：先只匹配名称（显示名 / 原名 / label），名称有命中就只显示名称结果；
   // 名称全部没命中时，才回退到备注 / 分类 / 描述等字段。
@@ -1517,7 +1537,9 @@
     var isSel = state.selected === r.key;
     var conflictFlag;
     if (r.board === 'shared') {
-      conflictFlag = r.conflict ? '<span class="mini-flag conflict">' + icon('alert') + '冲突</span>' : '';
+      conflictFlag = (r.conflict
+        ? '<span class="mini-flag conflict">' + icon('alert') + '冲突</span>' : '') +
+        contractFlagHtml(r);
     } else if (r.entry.sameName) {
       conflictFlag = '<span class="mini-flag conflict">同名覆盖</span>';
     } else if (r.entry.kind === 'foreign-link') {
@@ -2005,6 +2027,19 @@
         '</div></div>';
     }
 
+    var contractHtml = '';
+    if (r.board === 'shared' && contractIssue(r)) {
+      contractHtml = '<div class="field-block"><div class="diff-box">' +
+        '<div class="diff-title">' + icon('alert') + '包内声明名与目录名不一致</div>' +
+        '<div class="diff-text">目录名 <b>' + esc(r.name) + '</b> 才是各 agent 实际注册的' +
+        '名字（分发就是按它建链接）；SKILL.md 里声明的是 <b>' + esc(contractIssue(r)) +
+        '</b>。名字分叉时链接照样全绿，但按第二行那个名字在 agent 里调用一定失败。' +
+        '对齐只会改写 SKILL.md 的 name 一行，正文、描述与所有 agent 的链接都不动。</div>' +
+        '<button class="btn btn-sm" data-align-name="' + esc(r.name) + '">' +
+        icon('check') + '把声明名对齐到目录名</button>' +
+        '</div></div>';
+    }
+
     var desc = r.board === 'shared' && r.skill.description
       ? '<div class="field-block"><div class="field-label">描述</div><div class="desc-text">' + esc(r.skill.description) + '</div></div>'
       : '';
@@ -2058,6 +2093,7 @@
         '<div class="note-meta"><span>自动保存到' + (MODE === 'db' ? ' skilllocker.db' : '本机') + '</span><span id="note-count">' + r.note.length + ' / 400</span></div>' +
       '</div>' +
       starMetaHtml +
+      contractHtml +
       diffHtml +
       '<div class="divider"></div>' +
       '<div class="field-block">' +
@@ -2960,6 +2996,30 @@
     });
   }
 
+  // 身份契约修复：把包内声明名改成目录名。改的是中央仓库那一份 SKILL.md 的
+  // name 一行 —— agent 侧本来就按目录名注册与分发，所以链接、正文、描述都不
+  // 受影响，修完不需要再同步一次。
+  function alignName(name) {
+    if (!name) return;
+    confirmModal('把声明名对齐到目录名',
+      '将把中央仓库里 ' + name + ' 的 SKILL.md 中 name 一行改写为目录名 ' + name +
+      '。正文、描述与其余文件不动，各 agent 的链接也不动。' +
+      '改完后第二行显示的名字就和 agent 实际能调用的名字一致。',
+      '对齐', function () {
+      closeModal();
+      runProgress(600, function () {
+        SKB.alignName(name).then(function (res) {
+          applyBootstrap(res);
+          setState({ selected: name });
+          toast('ok', '已对齐声明名',
+            '「' + name + '」的包内声明名已改为目录名，agent 注册名与界面显示一致了。');
+        }).catch(function (err) {
+          toast('bad', '对齐失败', String(err && err.message || err));
+        });
+      });
+    });
+  }
+
   /* ---------------------------------------------------------- 导入 skill */
   /* SPEC-skill-import.md：外部目录 → import_preflight 预检 → import_dir 落库。
      状态机 source → review(扫描/报告) → running → done / error，单弹窗内推进；
@@ -3341,12 +3401,13 @@
     return impHead('导入完成', 'finish', false) +
       '<div class="modal-body">' +
         '<div class="hero ok"><span class="hero-ic">' + icon('ok') + '</span>' +
-          '<h3>' + esc(act.name || imp.name) + '</h3><span>已进入中央仓库，等待分发给 agent</span></div>' +
+          '<h3>' + esc(act.name || imp.name) + '</h3><span>已进入中央仓库，并按分发开关同步给 agent</span></div>' +
         '<div class="meta-list" style="margin-top:12px">' +
           '<div class="meta-row"><span>位置</span><b>' + esc(act.path || (STORE + '\\' + imp.name)) + '</b></div>' +
           '<div class="meta-row"><span>规模</span><b>' + (act.files != null ? act.files + ' 个文件 · ' + fmtBytes(act.bytes) : '—') + '</b></div>' +
           '<div class="meta-row"><span>归档</span><b>' + (f ? esc(f.name) : '未归档（可拖拽归档）') + '</b></div>' +
-          '<div class="meta-row"><span>分发</span><b>' + linked + '/' + ENABLED.length + ' agent' + (linked ? '' : ' — 未同步') + '</b></div>' +
+          '<div class="meta-row"><span>分发</span><b>' + linked + '/' + ENABLED.length + ' agent' +
+            (linked ? ' — 已同步' : (ENABLED.length ? ' — 有冲突或失败，见智能体页' : ' — 暂无已连接的 agent')) + '</b></div>' +
         '</div>' +
         '<div class="cta-row">' +
           '<button class="btn" data-act="imp-finish">完成</button>' +
@@ -3479,8 +3540,12 @@
         state.selected = imp.lastAction.name || imp.name;
         renderChrome(); renderContent(false); renderInspector();
         if (finished) { imp.step = 'done'; impRender(); }
+        var dist = imp.lastAction.distributed || 0;
+        var distErr = (imp.lastAction.distributeErrors || []).length;
         toast('ok', '已导入中央仓库', (imp.lastAction.name || imp.name) + ' · ' +
-          imp.lastAction.files + ' 个文件 · ' + (imp.folder ? '已归档' : '未归档'));
+          imp.lastAction.files + ' 个文件 · ' + (imp.folder ? '已归档' : '未归档') +
+          (dist ? ' · 已分发 ' + dist + ' 个 agent' : '') +
+          (distErr ? ' · ' + distErr + ' 个 agent 分发失败' : ''));
       }).catch(function (err) {
         imp.lastError = String(err && err.message || err);
         if (imp.step === 'running') { imp.step = 'error'; impRender(); }
@@ -4117,8 +4182,13 @@
           applyBootstrap(res);
           if (listBody) listBody.scrollTop = scrollTop;
           done();
+          var dist = res.distributed || {};
+          var distN = dist.changed || 0;
+          var distErr = (dist.errors || []).length;
           toast('ok', '已刷新', '扫描到 ' + (res.scanned != null ? res.scanned : SKILLS.length) +
-            ' 个 skill · ' + agentCounts(agentRows()).connected + ' 个 agent 已连接');
+            ' 个 skill · ' + agentCounts(agentRows()).connected + ' 个 agent 已连接' +
+            (distN ? ' · 新增/变更已分发 ' + distN + ' 处链接' : '') +
+            (distErr ? ' · ' + distErr + ' 个 agent 分发失败' : ''));
         }).catch(function (err) {
           done();
           toast('bad', '刷新失败', String(err && err.message || err));
@@ -4652,6 +4722,9 @@
         }
         return;
       }
+
+      var alignEl = t.closest('[data-align-name]');
+      if (alignEl) { alignName(alignEl.getAttribute('data-align-name')); return; }
 
       var diffEl = t.closest('[data-diff]');
       if (diffEl) {

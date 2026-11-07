@@ -19,6 +19,7 @@ CLI:
   python skilllocker.py scan                 重新扫描中央仓库，刷新注册表
   python skilllocker.py status               打印 skill x tool 分发矩阵摘要
   python skilllocker.py verify               检查漂移（只报告，不改）
+  python skilllocker.py contract [--fix]     检查/修复身份契约（目录名 == 包内声明名）
   python skilllocker.py sync [--tool k] [--fix]  建立/修复分发
   python skilllocker.py import <dir> [--name 名字]  从目录导入
   python skilllocker.py remove <name>        删分发 + 删实体（永久，不入回收站）
@@ -40,8 +41,8 @@ from skilllocker_store import *  # noqa: F401,F403
 
 def main():
     p = argparse.ArgumentParser(prog="skilllocker")
-    p.add_argument("cmd", choices=["scan", "status", "verify", "sync", "import", "remove",
-                                   "detect", "seed", "search", "fetch"])
+    p.add_argument("cmd", choices=["scan", "status", "verify", "contract", "sync", "import",
+                                   "remove", "detect", "seed", "search", "fetch"])
     p.add_argument("arg", nargs="?", help="import 用目录 / remove 用 skill 名 / search 用关键词 / fetch 用 owner/repo/skill")
     p.add_argument("--tool", action="append")
     p.add_argument("--name")
@@ -84,7 +85,19 @@ def main():
             print("  %-18s %-22s %s" % (k, label, sd.replace(HOME, "~")))
         print("本机可用工具:", ", ".join(r[0] for r in rows))
     elif a.cmd == "scan":
-        print("中央仓库 skill 数:", rescan(con, cfg))
+        before = {r["name"] for r in con.execute("select name from skills")}
+        count = rescan(con, cfg)
+        after = {r["name"] for r in con.execute("select name from skills")}
+        new = sorted(after - before)
+        dist = auto_distribute(con, cfg, new)
+        print("中央仓库 skill 数:", count)
+        if new:
+            print("新增 %d 个：%s" % (len(new), "、".join(new)))
+        if dist["tools"]:
+            print("自动分发 %d 处链接到 %d 个开着的 agent%s" % (
+                dist["changed"], len(dist["tools"]),
+                "（%d 个 agent 失败，见 events / skilllocker.log）"
+                % len(dist["errors"]) if dist["errors"] else ""))
     elif a.cmd == "seed":
         sync_tools_from_adapters(con, cfg)
         if a.dry:
@@ -132,6 +145,36 @@ def main():
         print("漂移 %d 处" % len(bad))
         for c in bad[:80]:
             print("  %-16s %-34s %-13s %s" % (c["tool"], c["skill"], c["state"], c["detail"]))
+        # 链接在不在只说明「分发过」；包内声明名不等于目录名时，agent 注册的
+        # 名字和用户看到的就是两套，链接再绿也用不上，所以漂移之外还要报契约。
+        cr = contract_rows(con, cfg)
+        print("身份契约违规 %d 个（skilllocker contract --fix 可对齐到目录名）" % len(cr))
+        for c in cr[:80]:
+            print("  %-34s %s" % (c["name"], c["detail"]))
+        orph = orphan_links(con, cfg)
+        print("孤儿条目 %d 个（agent 目录里存在但加载不了；只报告，本工具不删别人的东西）" % len(orph))
+        for c in orph[:80]:
+            print("  %-16s %-28s %s" % (c["tool"], c["name"], c["detail"]))
+    elif a.cmd == "contract":
+        if a.fix:
+            got = repair_contract(con, cfg, [a.arg] if a.arg else None, apply_changes=True)
+            done = [g for g in got if g["done"]]
+            print("已对齐 %d 个包的声明名" % len(done))
+            for g in got:
+                if g.get("error"):
+                    print("  失败 %-32s %s" % (g["skill"], g["error"]))
+            left = contract_rows(con, cfg)
+            print("剩余违规 %d 个" % len(left))
+        else:
+            plan = repair_contract(con, cfg, [a.arg] if a.arg else None, apply_changes=False)
+            print("违规 %d 个（这是预览，加 --fix 才真正改 SKILL.md）" % len(plan))
+            for g in plan:
+                print("  %-34s %s" % (g["skill"], g["detail"]))
+                if g["shadowed_by"]:
+                    print("  %-34s 与 %s 声明同名，按名注册的 agent 里会互相遮蔽"
+                          % ("", "/".join(g["shadowed_by"])))
+            if not plan:
+                print("中央仓库全部满足「目录名 == 包内声明名」")
     elif a.cmd == "sync":
         plan = do_sync(con, cfg, a.tool, apply_changes=a.fix)
         todo = [x for x in plan if x["action"]]
@@ -143,7 +186,17 @@ def main():
     elif a.cmd == "import":
         if not a.arg:
             raise SystemExit("import 需要目录参数")
-        print("导入为:", import_dir(con, cfg, a.arg, a.name))
+        name = import_dir(con, cfg, a.arg, a.name)
+        # 与桌面端同一语义：导入即按各 agent 当前分发开关补齐链接
+        dist = auto_distribute(con, cfg, [name])
+        print("导入为:", name)
+        if dist["tools"]:
+            print("已分发 %d 处链接到 %d 个开着的 agent%s" % (
+                dist["changed"], len(dist["tools"]),
+                "（%d 个 agent 失败，见 events / skilllocker.log）"
+                % len(dist["errors"]) if dist["errors"] else ""))
+        else:
+            print("没有开着的 agent，暂不分发（到智能体页打开分发开关即可）")
     elif a.cmd == "remove":
         if not a.arg:
             raise SystemExit("remove 需要 skill 名")

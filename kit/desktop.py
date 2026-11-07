@@ -545,6 +545,7 @@ class Api:
             # 全新数据库：中央仓库内容从未登记过，自动扫一次（仅 skills 表为空时，
             # 避免每次启动都全量哈希 store）。store 不可读时 rescan 抛错 →
             # _guard 返回 ok:false → 前端启动错误页如实展示，不给演示数据
+            startup_dist = None
             if not con.execute("select 1 from skills limit 1").fetchone():
                 skilllocker.rescan(con, cfg)
                 # 首启自动接管优先：安装版默认仓库是空的，但各 agent 目录里
@@ -576,9 +577,42 @@ class Api:
                         else:
                             _LOG.info("first-run-seed: %s（%dms，候选 %d）", cfg["_seed_note"],
                                       seeded.get("ms") or 0, seeded.get("candidates") or 0)
+            else:
+                # 上次运行后仓库里被放进新技能（拖拽 / 解压 / 别的管理器）：
+                # 一次 listdir 对账就够，有新增才 rescan + 分发，避免每次启动
+                # 全量哈希。仓库不可读时保持现状，交给用户手动刷新，绝不在
+                # 启动路径上把「暂时看不见」当「已删除」。
+                try:
+                    present = {n for n, _p in skilllocker.store_skill_dirs(cfg)}
+                except RuntimeError as exc:
+                    present = None
+                    _LOG.warning("bootstrap store check: %s", exc)
+                if present:
+                    known = {r["name"] for r in con.execute(
+                        "select name from skills")}
+                    fresh = sorted(present - known)
+                    if fresh:
+                        before = {r["name"]: r["content_hash"] for r in con.execute(
+                            "select name,content_hash from skills")}
+                        skilllocker.rescan(con, cfg)
+                        after = {r["name"]: r["content_hash"] for r in con.execute(
+                            "select name,content_hash from skills")}
+                        new = sorted(n for n in after if n not in before)
+                        updated = sorted(n for n in after
+                                         if n in before and before[n] != after[n])
+                        dist = skilllocker.auto_distribute(con, cfg, new)
+                        startup_dist = {
+                            "skills": dist["skills"], "new": new,
+                            "updated": updated, "tools": dist["tools"],
+                            "changed": dist["changed"], "errors": dist["errors"],
+                        }
+                        _LOG.info("startup auto-sync: %s（%d 处链接）",
+                                  ", ".join(dist["skills"]), dist["changed"])
             skilllocker.migrate_folders(con, cfg)
             skilllocker.seed_meta(con, cfg)
             payload = _boards_payload(con, cfg)
+            if startup_dist:
+                payload["distributed"] = startup_dist
             # 首屏耗时留痕：用户报「启动卡很久」时先看这一行，区分扫描 / 哈希 /
             # 播种各占多少，不要再靠猜。events 前端取不到，直接进日志。
             _LOG.info("bootstrap %dms · skills=%d unique=%d groups=%d seed=%s",
@@ -760,12 +794,18 @@ class Api:
             got = skilllocker.import_dir(con, cfg, src, name)
             if folder:
                 skilllocker.set_meta(con, "shared", got, {"folder": folder})
+            # 分发开关是持续状态：导入即按各 agent 当前开关补齐链接。旧实现
+            # 只落库不补链，用户必须再手动同步 / 重开一次开关才能用上。
+            dist = skilllocker.auto_distribute(con, cfg, [got])
             payload = _boards_payload(con, cfg)
             files, size = skilllocker.dir_stats(os.path.join(cfg["store"], got))
             payload["action"] = {
                 "name": got,
                 "path": os.path.join(cfg["store"], got).replace(os.sep, "/"),
                 "files": files, "bytes": size, "folder": folder or "",
+                "distributed": dist["changed"],
+                "distributedTools": dist["tools"],
+                "distributeErrors": dist["errors"],
             }
             return payload
         finally:
@@ -921,9 +961,57 @@ class Api:
         try:
             cfg = skilllocker.load_config()
             skilllocker.sync_tools_from_adapters(con, cfg)
+            before = {r["name"]: r["content_hash"] for r in con.execute(
+                "select name,content_hash from skills")}
             count = skilllocker.rescan(con, cfg)
+            after = {r["name"]: r["content_hash"] for r in con.execute(
+                "select name,content_hash from skills")}
+            new = sorted(n for n in after if n not in before)
+            updated = sorted(n for n in after
+                             if n in before and before[n] != after[n])
+            # 只自动分「新增」：内容变更不在这里静默重拷 —— copy 模式下 agent
+            # 目录里的实体可能被用户手改过，扫描一下就覆盖太危险；需要刷新
+            # 副本时到智能体页重新打开开关（那是一次明确的同步动作）。
+            dist = skilllocker.auto_distribute(con, cfg, new)
             payload = _boards_payload(con, cfg)
             payload["scanned"] = count
+            payload["distributed"] = {
+                "skills": dist["skills"], "new": new, "updated": updated,
+                "tools": dist["tools"], "changed": dist["changed"],
+                "errors": dist["errors"],
+            }
+            return payload
+        finally:
+            con.close()
+
+    @_guard
+    @_serialized
+    def align_name(self, name):
+        """把某个包 SKILL.md 的声明名对齐到目录名（身份契约修复，见 base.contract_issue）。
+
+        只重写中央仓库里那一个包的 SKILL.md name 一行，不动正文、不动任何 agent
+        的链接；改完 rescan 让注册表 label 回到与 name 一致，再回一份新看板。
+        """
+        con = skilllocker.db()
+        try:
+            cfg = skilllocker.load_config()
+            plan = skilllocker.repair_contract(con, cfg, [name], apply_changes=True)
+            if not plan:
+                raise RuntimeError("这个包的名字本来就与目录名一致，无需对齐")
+            bad = [p for p in plan if p.get("error")]
+            if bad:
+                raise RuntimeError(bad[0]["error"])
+            aligned = [p["skill"] for p in plan if p["done"]]
+            if not aligned:
+                # 违规在注册表里、盘上却已经一致：说明注册表是旧的（用户直接改了
+                # SKILL.md / 换了仓库目录）。此时必须报错而不是回一个 ok=True ——
+                # 否则界面弹「已对齐」，用户以为修好了，实际什么都没发生。
+                raise RuntimeError("注册表显示名字不符，但仓库文件里已经没有要改的行 —— "
+                                   "注册表是旧的，请先点顶栏「刷新扫描」再试")
+            skilllocker.sync_tools_from_adapters(con, cfg)
+            payload = _boards_payload(con, cfg)
+            payload["action"] = {"aligned": aligned,
+                                 "declared": [p["declared"] for p in plan]}
             return payload
         finally:
             con.close()
