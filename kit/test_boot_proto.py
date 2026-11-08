@@ -121,17 +121,26 @@ with sync_playwright() as p:
     page3.close()
 
     # ---------- 4) 桌面壳内注入超时 → 启动错误页（评审 M-2 / M-1）----------
-    # file:// + ?desktop=1 但不注入 pywebview：桥 6s 判死（M-1 对齐后轮询不再
-    # 提前 1.6s 判死），boot() 必须走错误页，绝不退回内置演示快照
+    # file:// + ?desktop=1 但不注入 pywebview：boot() 必须走错误页，绝不退回内置
+    # 演示快照。时序按实测写死（2026-11-08 三轮：40.05 / 40.13 / 40.14s）：
+    # bridge.js 的 INJECT_TIMEOUT=20000（首装文件刚落地，WebView2 冷启动 + 杀软
+    # 扫描可能拖过 6s，M-1 时代那个常量早就放宽了，测试一直没跟上），桌面壳里
+    # 判死后 boot() 自动重载一次再等 20s —— 所以是 2 轮 ≈ 40s，且只重载一次。
     page4 = browser.new_page(viewport={"width": 1200, "height": 760})
-    errors4 = []
+    errors4, navs4 = [], []
     page4.on("pageerror", lambda e: errors4.append(str(e)))
+    page4.on("framenavigated", lambda f: navs4.append(f.url))
     page4.goto(URL + "?desktop=1")
     t4 = time.time()
-    page4.wait_for_selector("#boot-error", timeout=12000)
+    page4.wait_for_selector("#boot-error", timeout=75000)
     t_err = time.time() - t4
     check("注入超时走错误页", page4.is_visible("#boot-error"), "t=%.2fs" % t_err)
-    check("超时判定对齐 6s（M-1）", 5.0 <= t_err <= 9.0, "t=%.2fs" % t_err)
+    check("判死=20s 注入窗口 × 2 轮（含自动重载）", 38.0 <= t_err <= 55.0, "t=%.2fs" % t_err)
+    # 自动重载只能有一次：多了就是重载风暴，用户永远看不到错误页
+    reloads = [u for u in navs4 if "bridgeRetry=1" in u]
+    check("自动重载恰好一次", len(reloads) == 1, "%d 次 · %s"
+          % (len(reloads), [u.split("index.html")[-1] for u in navs4]))
+    check("重载后 URL 带 bridgeRetry=1", "bridgeRetry=1" in page4.url, page4.url.split("index.html")[-1])
     title4 = page4.text_content("#boot-error h1").strip()
     detail4 = page4.text_content(".boot-error-detail").strip()
     check("注入超时错误详情", title4 == "后端启动失败" and "注入超时" in detail4,
