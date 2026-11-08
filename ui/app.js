@@ -5409,8 +5409,11 @@
             return;
           }
           MODE = 'error';
-          renderBootError(new Error("pywebview 注入超时：桌面壳已启动但桥未接上，"
-            + "通常是 WebView2 冷启动过慢，点「重试」重新加载"));
+          // 文案要如实交代「已经自动重试过、两轮各等多久」：用户在这页之前已经
+          // 对着启动动画等了 20+8 秒，不说清楚只会以为程序卡死。
+          renderBootError(new Error("pywebview 注入超时：桌面壳已启动但桥未接上。"
+            + "已自动重试 1 次（首轮等 20 秒、重试轮等 8 秒）仍未接上，"
+            + "通常是 WebView2 冷启动过慢或后端进程未能启动，点「重试」重新加载"));
           return;
         }
         bootLocal(window.SKILLLOCKER_DATA);

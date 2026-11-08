@@ -40,9 +40,13 @@
     if (!desktopHint) { settle(null); return; }
     if (fromInjection()) return;
     window.addEventListener('pywebviewready', fromInjection, { once: true });
-    // 首次安装 / 刚解压完的 exe 会被 Defender 扫描，WebView2 冷启动可能明显
-    // 超过 6s；注入窗口给到 20s，避免新用户第一次打开就停在「注入超时」。
-    var INJECT_TIMEOUT = 20000;
+    // 注入窗口分两轮，别用同一个常量硬等：
+    //   首轮 20s —— 首次安装 / 刚解压完的 exe 会被 Defender 扫描，WebView2
+    //     冷启动可能明显超过当年 M-1 的 6s，给窄了新用户第一次打开就停在「注入超时」。
+    //   重试轮 8s —— 首轮判死后 boot() 会自动整页重载一次（URL 带 bridgeRetry=1）。
+    //     那会儿进程已经热过一轮，再等 20s 只是让人对着启动动画白等（实测错误页
+    //     要 40s 才出现）。8s 接不上就是真接不上，直接给错误页 + 手动重试按钮。
+    var INJECT_TIMEOUT = /[?&]bridgeRetry=1/.test(location.search) ? 8000 : 20000;
     var tries = 0;
     tick = setInterval(function () {
       if (fromInjection()) return;

@@ -29,7 +29,12 @@ python 启动                     launch 日志
                   └ hydrate + start()  首次 renderAll → 可交互（记为 R）
 ```
 
-- `app.js` 的 `boot()`（`app.js:2883`）有三条路径：db 正常 / pywebview 注入超时降级 `bootLocal` / `bootstrap` 失败降级 `bootLocal`。**overlay 在所有路径都必须结束**（见 §5 兜底）。
+- `app.js` 的 `boot()` 有三类落点：db 正常；**桌面壳里桥没接上**（`?desktop=1` 但 `SKB.ready`
+  拿到 null）→ 自动整页重载一次（`bridgeRetry=1`），仍失败就 `MODE='error'` 走启动错误页，
+  **绝不**降级 `bootLocal`；非桌面壳（file:// 直开原型）才降级 `bootLocal`。
+  注入窗口分两轮：首轮 20s、重试轮 8s（`bridge.js`）。实测从打开到错误页 ≈28s
+  （2026-11-08 三轮 28.00 / 28.43 / 28.44s；两轮都 20s 时是 ≈40s）。
+  **overlay 在所有路径都必须结束**（见 §5 兜底）。
 - 实测 R ≈ 首帧后 0.6–1.2s；`applyBootstrap`（`app.js:2858`）同时服务刷新，**不得**在它里面触发 boot 相关逻辑。
 
 ---
@@ -152,7 +157,7 @@ z-index：overlay `60`，在 `.grips`(90) 与 `win-controls`(100) 之下；配�
 | R < 4420ms（常态） | R 时刻起把剩余时间轴提速：`timescale = clamp(剩余ms / 1200, 1, 4)` → 剩余部分约 1.2s 走完，总时长 ≈ `max(R + 1.2s, 1.8s)`（实测 R≈0.8s → 全程约 2.0–2.4s，不比 v0.2.0 慢多少） |
 | R ≥ 4420ms（慢机/大库） | 时间轴走完后停在「载入分类与元数据」94% 等待；R 到达后 600ms 内完成 就绪 → reveal |
 | R > 8s（桥卡死） | 硬上限：强制走就绪 + reveal（异常提示由现有 toast/降级路径负责，overlay 永不卡死） |
-| 失败/降级路径 | `bootstrap` catch、pywebview 注入超时、`bootLocal`：立即 `BootFX.ready()`（等价 fail），跳过剩余编排，保证 overlay 必然消失 |
+| 失败/降级路径 | `bootstrap` 失败（桌面壳里）与 pywebview 注入超时：先 `BootFX.fail()` 收尾 overlay，再由 `renderBootError` 接管整页 —— 错误页是 `position:fixed` 覆盖层，不是 `bootLocal`。非桌面壳的原型才走 `bootLocal`。三条路径 overlay 都必然消失 |
 | `?noboot=1` | `BootFX.disable()`：不启动编排，HTML 静态移除 overlay（JS 置 hidden），行为与 v0.2.0 完全一致 |
 | reduce-motion | 同 disable，但允许静态层显示到 R 后 200ms 再移除（避免完全无过渡） |
 | file:// 原型 | 走 1× 满速完整编排（可展示用）；`?noboot=1` 可关 |
