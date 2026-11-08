@@ -156,7 +156,7 @@ z-index：overlay `60`，在 `.grips`(90) 与 `win-controls`(100) 之下；配�
 |---|---|
 | R < 4420ms（常态） | R 时刻起把剩余时间轴提速：`timescale = clamp(剩余ms / 1200, 1, 4)` → 剩余部分约 1.2s 走完，总时长 ≈ `max(R + 1.2s, 1.8s)`（实测 R≈0.8s → 全程约 2.0–2.4s，不比 v0.2.0 慢多少） |
 | R ≥ 4420ms（慢机/大库） | 时间轴走完后停在「载入分类与元数据」94% 等待；R 到达后 600ms 内完成 就绪 → reveal |
-| R > 8s（桥卡死） | 硬上限：强制走就绪 + reveal（异常提示由现有 toast/降级路径负责，overlay 永不卡死） |
+| R > 8s（桥卡死） | 分两种情况。**桌面壳里桥还没落地**（`boot()` 已把 `SKB.ready` 交给 `BootFX.awaitBridge`）：不 reveal，停在「载入分类与元数据」94%，相位改「等待桌面端」、逐秒报「正在连接桌面端… 已等待 N 秒」；等待态自带 26s 绝对兜底（首轮注入窗口 20s + 余量），兜底到点或桥判死后交回原逻辑。**其余情况**（桥已接上、只是 bootstrap 慢）：仍按原硬上限强制走就绪 + reveal，overlay 永不卡死。实测（不注入 pywebview）：t≈10s 与 t≈17s 采样均为 `#boot` 未 hidden、`#app-window` 仍带 `booting`、rows=0；去掉等待态则同一时刻是 `hidden=True booting=False` + 「51 个技能就绪」的空壳 |
 | 失败/降级路径 | `bootstrap` 失败（桌面壳里）与 pywebview 注入超时：先 `BootFX.fail()` 收尾 overlay，再由 `renderBootError` 接管整页 —— 错误页是 `position:fixed` 覆盖层，不是 `bootLocal`。非桌面壳的原型才走 `bootLocal`。三条路径 overlay 都必然消失 |
 | `?noboot=1` | `BootFX.disable()`：不启动编排，HTML 静态移除 overlay（JS 置 hidden），行为与 v0.2.0 完全一致 |
 | reduce-motion | 同 disable，但允许静态层显示到 R 后 200ms 再移除（避免完全无过渡） |

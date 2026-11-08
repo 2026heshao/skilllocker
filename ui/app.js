@@ -5041,6 +5041,9 @@
     var iv = 0, revealTimer = 0;
     var disabled = false, reduce = false, fullSpeed = false;
     var begun = false, rSeen = false, okFired = false, finished = false;
+    // 桌面壳里「桥还没接上」的等待态：boot() 通过 awaitBridge() 交进来。
+    // 有它的时候，HARD_CAP 到点不再 reveal 一个空壳，而是停在 94% 如实报等待秒数。
+    var bridgeWait = null, connSecs = -1;
     var vt = 0, lastWall = 0, scale = 1, beginWall = 0, idx = 0, okVt = 0;
     var tgt = { n: 0, u: 0, m: 0, f: 0, py: '', store: '', size: '' };
     var marks = [], chips = [], parseSeq = [];
@@ -5175,6 +5178,21 @@
       vt += (w - lastWall) * scale; // 隐藏窗口定时器被节流也不丢时长：按墙钟差推进
       lastWall = w;
       if (!rSeen && w - beginWall > HARD_CAP) {
+        if (bridgeWait) {
+          // 桥还没落地就 reveal，用户看到的是「界面正常但全空」——比继续等更误导。
+          // 停在 94% 报真实等待秒数；但留一个绝对上限，绝不把动画永久卡死。
+          if (w - bridgeWait.t0 > bridgeWait.cap) {
+            bridgeWait = null;          // 兜底：桥这条 promise 本身也不 settle 时照常收尾
+          } else {
+            if (connSecs < 0) { setPhase('等待桌面端'); setPct(94); }
+            var secs = Math.floor((w - bridgeWait.t0) / 1000);
+            if (secs !== connSecs) {
+              connSecs = secs;
+              setLine('正在连接桌面端… 已等待 ' + (secs + 1) + ' 秒');
+            }
+            return;                     // 相位/装饰/计数器都冻在当前值，只更新等待文案
+          }
+        }
         rSeen = true;
         vt = Math.max(vt, OK_T);    // 强制走就绪：下一 tick 放行 hold 相位
       }
@@ -5268,6 +5286,24 @@
       iv = setInterval(tick, 40);
     }
 
+    /* 桥接等待态：boot() 把 SKB.ready 这条 promise 交进来。
+       - 接上了：撤掉等待态，并把硬上限的计时起点推到这一刻 —— 桥接花掉的 20 秒
+         不该再算进 bootstrap 的 8s 预算，否则刚连上就被硬上限抢先 reveal。
+       - 判死（null）：撤掉等待态，接下来由 boot() 负责整页重载或出错误页。
+       capMs 是「连这条 promise 本身都不 settle」的绝对兜底，默认 26s：
+       覆盖首轮 20s 窗口 + 余量（重试轮 8s 更短，同一个值够用）。 */
+    function awaitBridge(promise, capMs) {
+      if (!promise || typeof promise.then !== 'function' || finished || disabled) return;
+      bridgeWait = { t0: Date.now(), cap: capMs || 26000 };
+      connSecs = -1;
+      promise.then(function (api) {
+        if (!bridgeWait) return;
+        bridgeWait = null;
+        connSecs = -1;
+        if (api) { beginWall = lastWall = Date.now(); }
+      }, function () { bridgeWait = null; });
+    }
+
     function data(d) {
       if (disabled || finished || !d) return;
       var before = marksKey(marks);
@@ -5278,6 +5314,8 @@
     function ready() {
       if (disabled || finished || rSeen) return;
       rSeen = true;
+      bridgeWait = null;   // R 都到了，桥接等待态没有意义（等待文案也不该再挂）
+      connSecs = -1;
       if (reduce) { revealTimer = setTimeout(reveal, 200); return; }
       if (fullSpeed) return;  // 原型不加速：R 必然早到，让 1× 时间轴走满
       // 常态（规格 §5）：剩余时间轴提速，总时长 ≈ max(R + 1.2s, 1.8s)；
@@ -5290,6 +5328,7 @@
     function disable() {
       disabled = true;
       finished = true;
+      bridgeWait = null;
       stop();
       if (revealTimer) { clearTimeout(revealTimer); revealTimer = 0; }
       if (el) el.hidden = true;
@@ -5299,6 +5338,7 @@
 
     return {
       begin: begin,
+      awaitBridge: awaitBridge,
       data: data,
       ready: ready,
       fail: ready,  // 降级路径等价就绪：overlay 同样立即收尾，绝不陪等
@@ -5395,6 +5435,9 @@
   function boot() {
     BootFX.begin(); // 编排时钟起点＝脚本执行（首帧前）；noboot / reduce-motion 在这里分叉
     if (!SKB) { bootLocal(window.SKILLLOCKER_DATA); return; }
+    // 桥这条 promise 交给启动编排：桌面壳里它可能要 20 秒（重试轮 8 秒）才判死，
+    // 期间动画停在 94% 报等待秒数，而不是按硬上限 reveal 出一个空壳。
+    BootFX.awaitBridge(SKB.ready);
     SKB.ready.then(function (api) {
       if (!api) {
         BootFX.fail();

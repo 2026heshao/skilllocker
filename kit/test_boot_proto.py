@@ -132,6 +132,32 @@ with sync_playwright() as p:
     page4.on("framenavigated", lambda f: navs4.append(f.url))
     page4.goto(URL + "?desktop=1")
     t4 = time.time()
+
+    # 桥没接上时不许 reveal 空壳：硬上限到点应改停在「等待桌面端」并报真实秒数。
+    # 采样点落在首轮 20s 窗口内（8s 硬上限之后、20s 判死之前）。
+    def sample():
+        return page4.evaluate("""() => {
+          const boot = document.getElementById('boot'), win = document.getElementById('app-window');
+          const q = (s) => { const e = boot && boot.querySelector(s); return e ? (e.textContent || '').trim() : null; };
+          return {hidden: !boot || boot.hidden === true, booting: !!win && win.classList.contains('booting'),
+                  phase: q('.boot-ph'), line: q('.boot-line'),
+                  rows: document.querySelectorAll('.row, .file-card, .folder-card:not(.ghost)').length};
+        }""")
+
+    page4.wait_for_timeout(10000)
+    s1 = sample()
+    check("桥未落地时不 reveal 空壳（t≈10s）",
+          not s1["hidden"] and s1["booting"] and s1["rows"] == 0,
+          "hidden=%s booting=%s rows=%s" % (s1["hidden"], s1["booting"], s1["rows"]))
+    check("停在等待相位并报真实秒数",
+          "等待桌面端" in (s1["phase"] or "") and "正在连接桌面端" in (s1["line"] or "")
+          and "已等待" in (s1["line"] or ""),
+          "%s | %s" % (s1["phase"], s1["line"]))
+    page4.wait_for_timeout(7000)
+    s2 = sample()
+    check("等待文案按秒数推进（t≈17s）",
+          "已等待" in (s2["line"] or "") and (s2["phase"] or "") == s1["phase"]
+          and not s2["hidden"], "%s" % s2["line"])
     page4.wait_for_selector("#boot-error", timeout=60000)
     t_err = time.time() - t4
     check("注入超时走错误页", page4.is_visible("#boot-error"), "t=%.2fs" % t_err)
@@ -161,6 +187,47 @@ with sync_playwright() as p:
     check("boot overlay 已收尾", page4.is_hidden("#boot"))
     check("注入超时页 0 条 JS 错误", not errors4, "; ".join(errors4[:3]))
     page4.close()
+
+    # ---------- 5) 桌面壳里桥正常接上 → 编排照常收尾（回归防线）----------
+    # 等待态（BootFX.awaitBridge）只该在桥没落地时接管硬上限；桥按时接上就必须
+    # 走正常首屏：不进「等待桌面端」，reveal 照常完成。这条是那次改动的回归护栏。
+    page5 = browser.new_page(viewport={"width": 1200, "height": 760})
+    errors5 = []
+    page5.on("pageerror", lambda e: errors5.append(str(e)))
+    page5.add_init_script("""
+      (function () {
+        window.pywebview = { api: {
+          // 300ms 后成功返回：模拟真实桌面壳里桥按时接上、bootstrap 正常回包
+          bootstrap: function () {
+            return new Promise(function (resolve) {
+              setTimeout(function () {
+                resolve({ ok: true, data: window.SKILLLOCKER_DATA, meta: {} });
+              }, 300);
+            });
+          },
+          log_ui: function () { return Promise.resolve({ ok: true }); }
+        } };
+      })();
+    """)
+    page5.goto(URL + "?desktop=1")
+    page5.wait_for_timeout(3000)
+    s5a = page5.evaluate("""() => {
+      const boot = document.getElementById('boot');
+      const q = (s) => { const e = boot && boot.querySelector(s); return e ? (e.textContent || '').trim() : null; };
+      return {phase: q('.boot-ph'), line: q('.boot-line')};
+    }""")
+    check("桥按时接上时不进等待态",
+          "等待桌面端" not in (s5a["phase"] or "") and "正在连接桌面端" not in (s5a["line"] or ""),
+          "%s | %s" % (s5a["phase"], s5a["line"]))
+    page5.wait_for_selector("#boot", state="hidden", timeout=10000)
+    mode5 = page5.evaluate("window.__SK_MODE")
+    rows5 = page5.eval_on_selector_all(".row, .file-card, .folder-card:not(.ghost)",
+                                       "els => els.length")
+    booting5 = page5.evaluate("document.getElementById('app-window').classList.contains('booting')")
+    check("桥正常：主界面照常 reveal", mode5 == "db" and rows5 > 0 and not booting5,
+          "mode=%s rows=%d booting=%s" % (mode5, rows5, booting5))
+    check("桥正常路径 0 条 JS 错误", not errors5, "; ".join(errors5[:3]))
+    page5.close()
     browser.close()
 
 fails = [r for r in results if not r[1]]
