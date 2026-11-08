@@ -31,18 +31,26 @@
   var SCAN = '22:16';
 
   function hydrate(data) {
+    // 两段式刷新的第一段不带独有数据（扫描要 1~2 秒，见后端 rescan_shared）：
+    // meta.uniquePending=true 时沿用上一轮的独有行，界面不闪空、计数不跳水，
+    // 第二段 rescan_unique 回来后带完整快照正常覆盖。
+    var pending = !!(data && data.meta && data.meta.uniquePending);
+    var prevU = pending ? UNIQUE : null;
+    var prevG = pending ? UNIQUE_GROUPS : null;
+    var prevC = pending ? CONFLICT : null;
+    var prevF = pending ? FIRST_RUN : null;
     D = data || {};
     META = D.meta || {};
     SKILLS = D.skills || [];
     TOOLS = D.tools || [];
     ENABLED = TOOLS.filter(function (t) { return t.enabled; });
-    UNIQUE = D.unique || [];
-    UNIQUE_GROUPS = D.unique_groups || localUniqueGroups(UNIQUE);
+    UNIQUE = pending ? prevU : (D.unique || []);
+    UNIQUE_GROUPS = pending ? prevG : (D.unique_groups || localUniqueGroups(UNIQUE));
     AGENTS = D.agents || [];
-    CONFLICT = (D.conflict && D.conflict.skill) ? D.conflict : null;
+    CONFLICT = pending ? prevC : ((D.conflict && D.conflict.skill) ? D.conflict : null);
     // 首启引导：后端只在「仓库里一个技能都没有」时给这个块，接管 / 收编成功后
     // 下一次快照自然为 null，面板随之消失；内容变化时清掉「以后再说」的忽略态
-    var frNext = D.firstRun || null;
+    var frNext = pending ? prevF : (D.firstRun || null);
     var frSig = frNext ? JSON.stringify([frNext.candidate && frNext.candidate.store,
                                         (frNext.adoptable || []).length]) : '';
     if (frSig !== firstRunSig) { firstRunSig = frSig; firstRunDismissed = false; firstRunLogged = false; }
@@ -2660,13 +2668,17 @@
     root.querySelector('#set-detect').addEventListener('click', function () {
       closeModal();
       if (MODE === 'db' && SKB) {
-        runProgress(600, function () {
-          SKB.rescan().then(function (res) {
-            applyBootstrap(res);
-            toast('ok', '探测完成', '识别到 ' + TOOLS.length + ' 个 agent，其中 ' + ENABLED.length + ' 个已启用');
-          }).catch(function (err) {
-            toast('bad', '探测失败', String(err && err.message || err));
-          });
+        // 与全局刷新共用防重入：并发两条扫描链会各自渲染、各自弹提示，
+        // 后端 OPS_LOCK 只是保证不把盘搞坏，救不了界面重复画
+        if (refreshBusy) { toast('info', '扫描进行中', '请等待当前扫描完成'); return; }
+        refreshBusy = true;
+        var stop = startProgress(600);
+        refreshTwoPhase(function (res, err) {
+          stop();
+          refreshBusy = false;
+          if (err) { toast('bad', '探测失败', String(err && err.message || err)); return; }
+          toast('ok', '探测完成', '识别到 ' + TOOLS.length + ' 个 agent，其中 ' +
+            ENABLED.length + ' 个已启用');
         });
         return;
       }
@@ -2798,6 +2810,95 @@
       fill.style.width = '0%';
       done();
     }, ms);
+  }
+
+  /* 进度条（立刻开工版）：条子照常亮起来，工作当场开始，返回 stop() 收尾。
+     与 runProgress 的区别就是不再把 ms 的动画压在请求前面 —— 旧写法点一下
+     刷新要先空等 600ms 才发出桥调用。stop() 保证最短可见 ms，别让一闪而过
+     的条子看起来像没响应。 */
+  function startProgress(ms) {
+    var bar = document.getElementById('progress');
+    bar.classList.add('show');
+    var fill = bar.querySelector('i');
+    fill.style.width = '0%';
+    setTimeout(function () { fill.style.width = '72%'; }, 20);
+    var t0 = Date.now();
+    var closed = false;
+    return function () {
+      if (closed) return;
+      closed = true;
+      var left = Math.max(0, ms - (Date.now() - t0));
+      setTimeout(function () {
+        fill.style.width = '100%';
+        setTimeout(function () {
+          bar.classList.remove('show');
+          fill.style.width = '0%';
+        }, 160);
+      }, left);
+    };
+  }
+
+  /* 桌面端两段刷新：第一段（重扫中央仓库 + 共有/智能体看板）先画，
+     第二段（独有扫描，本机占一次刷新的一半以上时间）补完再并入。
+     cb(res, err)：res 是第二段回包（独有已补齐，meta 是修剪后的最终值）；
+     第二段单独失败时 res 回第一段结果 —— 共有看板已经是对的，
+     只补一句「独有扫描未完成」。 */
+  function refreshTwoPhase(cb) {
+    var first = null;
+    SKB.rescanShared().then(function (res) {
+      first = res;
+      applyRefreshSnapshot(res);
+      SKB.rescanUnique().then(function (snap) {
+        applyUniqueSnapshot(snap);
+        // 「扫到几个 skill / 分发了几处链接」是第一段的成果，第二段回包不带：
+        // 并进同一份结果，调用方的收尾提示才能报完整这一次刷新做了什么。
+        snap.scanned = first.scanned;
+        snap.distributed = first.distributed;
+        cb(snap, null);
+      }, function (err) {
+        // 独有段挂了：把「扫描中」的标记收掉，别让它一直挂在界面上不走；
+        // 下一轮刷新会重扫独有。
+        META.uniquePending = false;
+        renderAll(false);
+        toast('warn', '独有扫描未完成',
+              String(err && err.message || err) + ' · 共有看板已更新');
+        cb(first, null);
+      });
+    }, function (err) { cb(null, err); });
+  }
+
+  // 套用刷新回包：整块重渲染，列表滚动位置手动保住（applyBootstrap 会重建行）
+  function applyRefreshSnapshot(res) {
+    var listBody = document.getElementById('list-body');
+    var scrollTop = listBody ? listBody.scrollTop : 0;
+    applyBootstrap(res);
+    if (listBody) listBody.scrollTop = scrollTop;
+  }
+
+  /* 第二段并入：回包只带独有相关字段（后端不再重算共有 / 智能体看板），
+     所以这里逐块替换独有行、独有计数与 meta，不走整页 applyBootstrap ——
+     那会用第一段的数据再全量画一遍，白渲染一次还可能把滚动/选中抖一下。
+     meta 按 key 覆盖：第一段沿用下来的共有计数不能被这份局部回包抹掉。 */
+  function applyUniqueSnapshot(res) {
+    var d = (res && res.data) || {};
+    UNIQUE = d.unique || [];
+    UNIQUE_GROUPS = d.unique_groups || localUniqueGroups(UNIQUE);
+    CONFLICT = (d.conflict && d.conflict.skill) ? d.conflict : null;
+    var frNext = d.firstRun || null;
+    var frSig = frNext ? JSON.stringify([frNext.candidate && frNext.candidate.store,
+                                        (frNext.adoptable || []).length]) : '';
+    if (frSig !== firstRunSig) { firstRunSig = frSig; firstRunDismissed = false; firstRunLogged = false; }
+    FIRST_RUN = frNext;
+    ['uniqueCount', 'uniqueLogical', 'uniqueLight', 'scanDegraded',
+     'uniquePending'].forEach(function (k) {
+      if (d.meta && Object.prototype.hasOwnProperty.call(d.meta, k)) META[k] = d.meta[k];
+    });
+    setMetaMap(res.meta);
+    var listBody = document.getElementById('list-body');
+    var scrollTop = listBody ? listBody.scrollTop : 0;
+    renderAll(false);
+    if (listBody) listBody.scrollTop = scrollTop;
+    window.__SK_MODE = MODE;
   }
 
   /* ---------------------------------------------------------- interactions */
@@ -4156,15 +4257,26 @@
   function renderAll(animate) {
     renderChrome();
     renderContent(animate);
+    renderUniquePending();
     renderInspector();
+  }
+
+  /* 两段式刷新的第二段还在扫：独有看板的数据是上一轮的，标题行如实标一句
+     「独有扫描中…」，别让沿用下来的数字看起来像本次结论。判据只看后端标记：
+     uniquePending 只可能由第一段的回包置真，第二段回来自然消失。 */
+  function renderUniquePending() {
+    if (!META.uniquePending || state.board !== 'unique') return;
+    var sub = document.getElementById('page-sub');
+    if (sub) sub.textContent += ' · 独有扫描中…';
   }
 
   /* ---------------------------------------------------------- 全局刷新 */
   var refreshBusy = false;
 
-  // 全局刷新：桌面端 rescan()（同步 adapters.json + 重扫中央仓库）后整套重渲染；
-  // 原型只重渲染内置快照。忙碌时按钮转圈并忽略重复点击；看板、筛选、
-  // 分类与选中由 applyBootstrap 尽量保留，列表滚动位置手动恢复。
+  // 全局刷新：桌面端走两段（rescan_shared 先出共有看板，rescan_unique 再补独有），
+  // 进度条与请求并行，不再空等那 600ms 动画；原型只重渲染内置快照。
+  // 忙碌时按钮转圈并忽略重复点击；看板、筛选、分类与选中由 applyBootstrap
+  // 尽量保留，列表滚动位置手动恢复。
   function requestRefresh() {
     if (refreshBusy) return;
     refreshBusy = true;
@@ -4174,30 +4286,27 @@
       refreshBusy = false;
       if (btn) btn.classList.remove('is-busy');
     };
-    runProgress(600, function () {
-      if (MODE === 'db' && SKB) {
-        SKB.rescan().then(function (res) {
-          var listBody = document.getElementById('list-body');
-          var scrollTop = listBody ? listBody.scrollTop : 0;
-          applyBootstrap(res);
-          if (listBody) listBody.scrollTop = scrollTop;
-          done();
-          var dist = res.distributed || {};
-          var distN = dist.changed || 0;
-          var distErr = (dist.errors || []).length;
-          toast('ok', '已刷新', '扫描到 ' + (res.scanned != null ? res.scanned : SKILLS.length) +
-            ' 个 skill · ' + agentCounts(agentRows()).connected + ' 个 agent 已连接' +
-            (distN ? ' · 新增/变更已分发 ' + distN + ' 处链接' : '') +
-            (distErr ? ' · ' + distErr + ' 个 agent 分发失败' : ''));
-        }).catch(function (err) {
-          done();
-          toast('bad', '刷新失败', String(err && err.message || err));
-        });
-        return;
-      }
-      renderAll(true);
+    if (MODE !== 'db' || !SKB) {
+      runProgress(600, function () {
+        renderAll(true);
+        done();
+        toast('info', '已刷新', '原型模式：重新渲染内置快照');
+      });
+      return;
+    }
+    var stop = startProgress(600);
+    refreshTwoPhase(function (res, err) {
+      stop();
       done();
-      toast('info', '已刷新', '原型模式：重新渲染内置快照');
+      if (err) { toast('bad', '刷新失败', String(err && err.message || err)); return; }
+      var dist = res.distributed || {};
+      var distN = dist.changed || 0;
+      var distErr = (dist.errors || []).length;
+      toast('ok', '已刷新', '扫描到 ' + (res.scanned != null ? res.scanned : SKILLS.length) +
+        ' 个 skill · ' + agentCounts(agentRows()).connected + ' 个 agent 已连接 · ' +
+        uniqueLogicalCount() + ' 个独有技能' +
+        (distN ? ' · 新增/变更已分发 ' + distN + ' 处链接' : '') +
+        (distErr ? ' · ' + distErr + ' 个 agent 分发失败' : ''));
     });
   }
 
@@ -4633,16 +4742,13 @@
           if (refreshBusy) { toast('info', '扫描进行中', '请等待当前扫描完成'); return; }
           refreshBusy = true;
           var doneRs = function () { refreshBusy = false; };
-          runProgress(600, function () {
-            SKB.rescan().then(function (res) {
-              doneRs();
-              applyBootstrap(res);
-              toast('ok', '探测完成', '识别到 ' + agentCounts(agentRows()).connected +
-                ' 个已连接 agent');
-            }).catch(function (err) {
-              doneRs();
-              toast('bad', '重新探测失败', String(err && err.message || err));
-            });
+          var stopRs = startProgress(600);
+          refreshTwoPhase(function (res, err) {
+            stopRs();
+            doneRs();
+            if (err) { toast('bad', '重新探测失败', String(err && err.message || err)); return; }
+            toast('ok', '探测完成', '识别到 ' + agentCounts(agentRows()).connected +
+              ' 个已连接 agent');
           });
         } else {
           toast('info', '重新探测', '桌面端才会真的扫描本机目录');
@@ -4951,7 +5057,11 @@
       var en = enabledTools(d && d.tools);
       tgt = {
         n: meta.sharedCount != null ? meta.sharedCount : skills.length,
-        u: meta.uniqueCount != null ? meta.uniqueCount : 0,
+        // 两段式刷新的第一段没扫独有：这时独有计数是「还不知道」，不是 0。
+        // 启动动画还在跑时若按 0 收，动画里的独有数字会被一次刷新刷没；
+        // 保留上一轮目标值，第二段回来后自然更正。
+        u: meta.uniqueCount != null ? meta.uniqueCount
+          : (meta.uniquePending ? tgt.u : 0),
         m: meta.agentCount != null ? meta.agentCount : en.length,
         f: ((d && d.folders) || []).length,
         py: meta.python || '',

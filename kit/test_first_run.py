@@ -1219,6 +1219,122 @@ def _():
             assert skilllocker.is_reparse(link), "启动时也应自动补链"
 
 
+# ---------------------------------------------------------------- 两段式刷新
+_VOLATILE = ("generated", "scanAt", "eventsTotal", "db")
+
+
+def _snapshot(payload):
+    """归一化到可比较的快照：时间戳类字段与「本次分发了什么」都不参与判等。"""
+    p = json.loads(json.dumps(payload, ensure_ascii=False))
+    for f in _VOLATILE:
+        if f in p["data"]["meta"]:
+            p["data"]["meta"][f] = "<v>"
+    p["data"]["events"] = []
+    p.pop("distributed", None)
+    p.pop("scanned", None)
+    return p
+
+
+def _merge_two_phase(first, second):
+    """与 ui/app.js applyUniqueSnapshot 同一口径：第二段只并独有相关字段。"""
+    out = json.loads(json.dumps(first, ensure_ascii=False))
+    d2 = second["data"]
+    for k in ("unique", "unique_groups", "conflict", "firstRun"):
+        out["data"][k] = d2[k]
+    for k in ("uniqueCount", "uniqueLogical", "uniqueLight", "scanDegraded",
+              "uniquePending"):
+        out["data"]["meta"][k] = d2["meta"][k]
+    out["meta"] = second["meta"]
+    return out
+
+
+@case("刷新第一段：不扫独有、打 uniquePending，且绝不修剪独有 meta（防丢备注）")
+def _():
+    if sys.platform != "win32":
+        raise AssertionError("仅 Windows（需要 junction）")
+    with tempfile.TemporaryDirectory() as td:
+        with sandbox(td, adapters=ADAPTERS) as (home, _store):
+            import desktop
+            api = desktop.Api()
+            assert api.bootstrap()["ok"]
+            # agent 目录里一份仓库没有的实体技能 → 独有行；用户在上面写了备注
+            skill_dir(os.path.join(home, ".claude", "skills"), "agent-only")
+            con = skilllocker.db()
+            try:
+                con.execute("insert or replace into skill_meta(scope,key,note,updated_at) "
+                            "values('unique','claude_code/agent-only','手工备注',1)")
+                con.commit()
+            finally:
+                con.close()
+            res = api.rescan_shared()
+            assert res.get("ok"), res
+            m = res["data"]["meta"]
+            assert m.get("uniquePending") is True, "第一段必须标独有待补，前端据此沿用上一轮"
+            assert res["data"]["unique"] is None, "第一段带了独有行 = 独有扫描没被跳过"
+            assert res["data"]["skills"], "共有看板仍要照常给出"
+            con = skilllocker.db()
+            try:
+                # 这一段如果把 scope='unique' 当已删除剪掉，用户备注就永久丢了
+                row = con.execute("select note from skill_meta where scope='unique' "
+                                  "and key='claude_code/agent-only'").fetchone()
+                assert row and row["note"] == "手工备注", "第一段误剪独有 meta（数据丢失）"
+            finally:
+                con.close()
+
+
+@case("刷新第二段：只并独有字段，合并结果与一次性 rescan 逐字段一致")
+def _():
+    if sys.platform != "win32":
+        raise AssertionError("仅 Windows（需要 junction）")
+    with tempfile.TemporaryDirectory() as td:
+        with sandbox(td, adapters=ADAPTERS) as (home, _store):
+            import desktop
+            api = desktop.Api()
+            assert api.bootstrap()["ok"]
+            skill_dir(os.path.join(home, ".claude", "skills"), "agent-only")
+            skill_dir(os.path.join(home, ".cursor", "skills"), "agent-two")
+            first = api.rescan_shared()
+            second = api.rescan_unique()
+            assert first.get("ok") and second.get("ok"), (first, second)
+            # 第二段不许把共有 / 智能体看板再算一遍（那是第一段的活）
+            assert set(second["data"]) == {"unique", "unique_groups", "conflict",
+                                           "firstRun", "meta"}, sorted(second["data"])
+            assert second["data"]["meta"]["uniquePending"] is False
+            full = api.rescan()
+            assert full.get("ok"), full
+            merged = _snapshot(_merge_two_phase(first, second))
+            once = _snapshot(full)
+            assert merged == once, "两段合并与一次性快照不一致"
+
+
+@case("storeSize：用 rescan 顺路存的统计，与全树遍历逐字节一致且随内容更新")
+def _():
+    with tempfile.TemporaryDirectory() as td:
+        with sandbox(td, adapters=ADAPTERS) as (home, store):
+            import desktop
+            api = desktop.Api()
+            assert api.bootstrap()["ok"]
+            # 仓库根上的散装文件：不属于任何已登记技能。统计列只覆盖技能目录，
+            # 少了这一步补偿，storeSize 就会比真实体积小一截
+            write(os.path.join(store, "loose.txt"), "y" * 1000)
+            con = skilllocker.db()
+            try:
+                cfg = skilllocker.load_config()
+                got = skilllocker.store_size(con, cfg)
+                assert got == skilllocker.tree_stats(store), \
+                    "统计列口径与全树遍历不一致（仓库根下的散装内容漏计？）"
+                # 反向自测：技能包里加一个文件
+                write(os.path.join(store, "demo-skill", "extra.bin"), "x" * 4096)
+                # 只查库不重扫时，统计还没更新 —— 数字应当如实停在旧值
+                assert skilllocker.store_size(con, skilllocker.load_config()) == got
+                skilllocker.rescan(con, skilllocker.load_config())
+                grew = skilllocker.store_size(con, skilllocker.load_config())
+                assert grew == got + 4096, (got, grew)
+                assert grew == skilllocker.tree_stats(store)
+            finally:
+                con.close()
+
+
 def main():
     failed = []
     for name, fn in CASES:

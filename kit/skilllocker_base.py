@@ -254,7 +254,8 @@ def db():
         create table if not exists skills(
           name text primary key, label text, description text,
           content_hash text, enabled integer default 1,
-          origin text, added_at integer, updated_at integer);
+          origin text, added_at integer, updated_at integer,
+          files integer, bytes integer);
         create table if not exists tools(
           key text primary key, label text, skills_dir text, detect_dir text,
           enabled integer default 1, mode text default 'junction',
@@ -286,6 +287,14 @@ def db():
         con.execute("alter table skill_meta add column starred integer not null default 0")
     if "starred_at" not in _cols:
         con.execute("alter table skill_meta add column starred_at integer")
+    # 中央仓库统计列（刷新提速）：rescan 那一遍全树哈希本来就读到了文件数与
+    # 字节，顺路存下来，快照算 storeSize 就不用再走一遍全树。只增列不回填：
+    # NULL 由 store_size() 识别出来并退回真实遍历，下一轮 rescan 自动补齐。
+    _scols = {r[1] for r in con.execute("pragma table_info(skills)")}
+    if "files" not in _scols:
+        con.execute("alter table skills add column files integer")
+    if "bytes" not in _scols:
+        con.execute("alter table skills add column bytes integer")
     return con
 
 
@@ -467,13 +476,18 @@ def delete_tree(path):
 
 
 # ---------------------------------------------------------------- 内容解析
-def iter_files(root, onerror=None):
-    """遍历目录内文件（不跟进链接 / junction）。
+def iter_files_stat(root, onerror=None):
+    """遍历目录内文件（不跟进链接 / junction），产出 (相对路径, 绝对路径, 字节数)。
 
     旧实现 os.walk + 每个路径一次 GetFileAttributesW（is_reparse）：本机
     500+ 个独有目录要调 3.8 万次系统调用，首屏多花 4~5 秒。改用 os.scandir：
     DirEntry 自带缓存属性，is_symlink / is_junction 一次拿够；输出顺序不变
     （调用方 sha_tree / file_list 都会再排序）。
+
+    字节数一并产出，不再让调用方二次 stat：dir_stats / file_list 旧实现遍历完
+    还要 os.path.getsize(p) 一遍，实测一次刷新 5333 次 nt.stat ≈ 0.4s，而
+    DirEntry 早就把这个数拿到了。取不到大小按 0 计（与旧 getsize 的 OSError
+    分支同口径：计数照旧，体积少算这一个）。
     """
     stack = [root]
     while stack:
@@ -496,8 +510,12 @@ def iter_files(root, onerror=None):
                 if entry.is_dir(follow_symlinks=False):
                     subdirs.append(entry.path)
                 elif entry.is_file(follow_symlinks=False):
+                    try:
+                        size = entry.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        size = 0
                     yield (os.path.relpath(entry.path, root).replace(os.sep, "/"),
-                           entry.path)
+                           entry.path, size)
             except OSError:
                 continue
         # 逆序入栈，出栈时按路径升序（与旧 iter_files 的稳定顺序一致）
@@ -505,8 +523,21 @@ def iter_files(root, onerror=None):
             stack.append(d)
 
 
-def sha_tree(root):
+def iter_files(root, onerror=None):
+    """iter_files_stat 的旧接口形状：只给 (相对路径, 绝对路径)。"""
+    for rel, path, _size in iter_files_stat(root, onerror):
+        yield rel, path
+
+
+def sha_tree_stats(root):
+    """一次遍历同时得到 (内容哈希, 文件数, 总字节)。
+
+    rescan 每轮都要把中央仓库整树读一遍算哈希，只要哈希的话文件数 / 字节就
+    被丢掉了，list_boards 随后得为 storeSize 再走一遍全树（实测 190~440ms）。
+    哈希口径就是 sha_tree 的口径（同一份实现），两者不会漂移。
+    """
     h = hashlib.sha256()
+    count = size = 0
 
     def _onerror(exc):
         # 目录存在但（整体或子树）不可枚举（权限 / 杀软锁）时 os.walk 默认静默
@@ -515,18 +546,25 @@ def sha_tree(root):
         # 证据就抛错，展示用的 dir_stats / file_list 保持宽容（不传 onerror）。
         raise RuntimeError("目录不可枚举: %s" % exc)
 
-    for rel, p in sorted(iter_files(root, onerror=_onerror)):
+    for rel, p, fsize in sorted(iter_files_stat(root, onerror=_onerror)):
         try:
-            digest = hashlib.sha256(open(p, "rb").read()).hexdigest()
+            with open(p, "rb") as fh:
+                digest = hashlib.sha256(fh.read()).hexdigest()
         except OSError:
             # 单文件被杀软锁定 / 权限拒绝 / 扫描间隙被删（TOCTOU）：跳过这一个，
             # 别让整个 rescan / list_boards 毁掉（与 dir_stats 的容错同口径）
             continue
+        count += 1
+        size += fsize
         h.update(rel.encode("utf-8"))
         h.update(b"\0")
         h.update(digest.encode("ascii"))
         h.update(b"\0")
-    return h.hexdigest()
+    return h.hexdigest(), count, size
+
+
+def sha_tree(root):
+    return sha_tree_stats(root)[0]
 
 
 def parse_frontmatter(md_path):
@@ -760,18 +798,63 @@ def fmt_bytes(n):
 def dir_stats(path):
     count = size = 0
     if os.path.isdir(path):
-        for _rel, p in iter_files(path):
+        for _rel, _p, fsize in iter_files_stat(path):
             count += 1
-            try:
-                size += os.path.getsize(p)
-            except OSError:
-                pass
+            size += fsize
     return count, size
 
 
 def tree_stats(path):
     """目录总体积（含空目录也无所谓，只按文件算）。"""
     return dir_stats(path)[1]
+
+
+def store_size(con, cfg):
+    """中央仓库总体积（字节），给快照里的 storeSize 用。
+
+    已登记技能的体积直接取 skills.bytes —— rescan 那一遍全树哈希本来就读到了
+    文件数与字节，顺路存下来，快照就不用再为这个显示值重走一遍 store
+    （实测每次刷新省 190~440ms）。
+
+    仓库根下不属于任何已登记技能的东西（`_backup` 这类备份容器、还没入库的
+    散装目录、根上的零散文件）照旧真实遍历计入，所以结果与 tree_stats(store)
+    逐字节一致；这部分通常只有几十到几百个文件。判定为「已登记技能」的口径
+    是名字在 skills 表里且是个实体目录，与 tree_stats 一样不跟进链接。
+
+    有任一行的 bytes 还是 NULL（老库升级 / 别的入口写入）时整体退回全树遍历，
+    宁可慢不可错，下一次 rescan 会把统计补齐。
+    """
+    row = con.execute("select coalesce(sum(bytes), 0) as total, "
+                      "sum(case when bytes is null then 1 else 0 end) as missing "
+                      "from skills").fetchone()
+    if row["missing"]:
+        return tree_stats(cfg["store"])
+    total = int(row["total"] or 0)
+    known = {r["name"] for r in con.execute("select name from skills")}
+    root = cfg["store"]
+    try:
+        entries = list(os.scandir(root))
+    except OSError:
+        # 根不可枚举：已登记的这部分体积仍然可信，照实返回，别为了尾数把整块
+        # 显示值丢掉（与 extra_dirs_map / agent_entries 的容错同口径）
+        return total
+    for entry in entries:
+        name = entry.name
+        if name in IGNORE_NAMES:
+            continue
+        try:
+            is_link = entry.is_symlink() or getattr(entry, "is_junction", lambda: False)()
+            if is_link:
+                continue  # tree_stats 也不跟进链接
+            if entry.is_dir(follow_symlinks=False):
+                if name in known:
+                    continue  # 已计入 skills.bytes
+                total += dir_stats(entry.path)[1]
+            elif entry.is_file(follow_symlinks=False):
+                total += entry.stat(follow_symlinks=False).st_size
+        except OSError:
+            continue
+    return total
 
 
 def has_skill_md(p):
@@ -783,11 +866,7 @@ def has_skill_md(p):
 def file_list(path):
     out = []
     if os.path.isdir(path):
-        for rel, p in iter_files(path):
-            try:
-                size = os.path.getsize(p)
-            except OSError:
-                size = 0
+        for rel, _p, size in iter_files_stat(path):
             out.append({"name": rel, "size": size})
     out.sort(key=lambda f: (0 if f["name"] == "SKILL.md" else
                             1 if f["name"].endswith(".md") else 2, f["name"]))

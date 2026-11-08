@@ -60,6 +60,10 @@
   var CALL_TIMEOUT = {
     bootstrap: 180000,
     rescan: 180000,
+    // 两段式刷新：第一段重扫中央仓库 + 共有/智能体看板，第二段只扫独有技能。
+    // 预算与 rescan 同档（都是「把本机目录树走一遍」的量级）。
+    rescan_shared: 180000,
+    rescan_unique: 180000,
     delete_skill: 180000,
     uninstall_unique: 180000,
     promote_unique: 180000,
@@ -125,6 +129,8 @@
     folderDelete: function (id) { return call('folder_delete', id); },
     diff: function (scope, key) { return call('diff', scope, key); },
     rescan: function () { return call('rescan'); },
+    rescanShared: function () { return call('rescan_shared'); },
+    rescanUnique: function () { return call('rescan_unique'); },
     exportJson: function (name, payload) { return call('export_json', name, payload); },
     copyPath: function (text) { return call('copy_path', text); },
     openDir: function (scope, key) { return call('open_dir', scope, key); },

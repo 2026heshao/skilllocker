@@ -492,10 +492,16 @@ def _serialized(fn):
     return wrapper
 
 
-def _boards_payload(con, cfg, prune=True):
+def _boards_payload(con, cfg, prune=True, include_unique=True):
     """五个桥方法共用的看板回包：快照 →（可选）修剪 meta → 读 meta。
-    顺序有讲究：prune 会删行，get_meta 必须发生在它之后。"""
-    boards = skilllocker.list_boards(con, cfg)
+    顺序有讲究：prune 会删行，get_meta 必须发生在它之后。
+
+    include_unique=False（刷新第一段）：不扫独有技能，回包带 meta.uniquePending。
+    这种回包**必须** prune=False 一起用 —— prune 按 boards["unique"] 判存活，
+    拿没扫独有的快照去修会把用户写在独有行上的备注当成已删除清掉；
+    prune_meta 里另有同一条防呆，两道闸任何一道生效都不会出事。
+    """
+    boards = skilllocker.list_boards(con, cfg, include_unique=include_unique)
     if prune:
         skilllocker.prune_meta(con, boards)
     return {"ok": True, "data": boards, "meta": skilllocker.get_meta(con)}
@@ -957,13 +963,21 @@ class Api:
     @_guard
     @_serialized
     def rescan(self):
+        started = time.monotonic()
         con = skilllocker.db()
         try:
             cfg = skilllocker.load_config()
+            # 单次桥调用内的扫描备忘，与 bootstrap 同口径：独有看板的同名行要对
+            # 中央仓库补统计、外部来源要算内容哈希，不给缓存就是同一棵树在同一次
+            # 刷新里反复全走。下划线键不写进 config.json，每次调用新建，不会变旧。
+            cfg["_stats_cache"] = {}
+            cfg["_hash_cache"] = {}
             skilllocker.sync_tools_from_adapters(con, cfg)
+            t_tools = time.monotonic()
             before = {r["name"]: r["content_hash"] for r in con.execute(
                 "select name,content_hash from skills")}
             count = skilllocker.rescan(con, cfg)
+            t_scan = time.monotonic()
             after = {r["name"]: r["content_hash"] for r in con.execute(
                 "select name,content_hash from skills")}
             new = sorted(n for n in after if n not in before)
@@ -973,6 +987,7 @@ class Api:
             # 目录里的实体可能被用户手改过，扫描一下就覆盖太危险；需要刷新
             # 副本时到智能体页重新打开开关（那是一次明确的同步动作）。
             dist = skilllocker.auto_distribute(con, cfg, new)
+            t_dist = time.monotonic()
             payload = _boards_payload(con, cfg)
             payload["scanned"] = count
             payload["distributed"] = {
@@ -980,6 +995,93 @@ class Api:
                 "tools": dist["tools"], "changed": dist["changed"],
                 "errors": dist["errors"],
             }
+            # 刷新耗时留痕（与 bootstrap 同一行式样）：用户报「刷新慢」时先分清
+            # 是重扫仓库、自动分发还是看板扫描慢，不要再靠猜。events 前端取不到，
+            # 直接进 skilllocker.log。
+            _LOG.info("rescan %dms · 探测%d 扫描%d 分发%d 看板%d · skills=%d new=%d "
+                      "unique=%d dist=%d",
+                      int((time.monotonic() - started) * 1000),
+                      int((t_tools - started) * 1000),
+                      int((t_scan - t_tools) * 1000),
+                      int((t_dist - t_scan) * 1000),
+                      int((time.monotonic() - t_dist) * 1000),
+                      count, len(new),
+                      payload["data"]["meta"].get("uniqueCount", 0),
+                      dist["changed"])
+            return payload
+        finally:
+            con.close()
+
+    @_guard
+    @_serialized
+    def rescan_shared(self):
+        """刷新第一段：探测 agent + 重扫中央仓库 + 分发新增 + 共有/智能体看板。
+
+        与 rescan() 唯一的区别是不扫独有技能（本机实测占一次刷新的 55%~70%，
+        因为要把各 agent 声明的 extra_dirs —— 包括 `根/**` 这类应用安装树 ——
+        整个走一遍）。第二段 rescan_unique() 补上，界面上共有看板因此约早
+        1.5 秒出现。独有数据缺省期间前端沿用上一轮的行，meta.uniquePending
+        标记「还在扫」，所以这一轮绝不修剪 meta（见 _boards_payload）。
+        """
+        started = time.monotonic()
+        con = skilllocker.db()
+        try:
+            cfg = skilllocker.load_config()
+            cfg["_stats_cache"] = {}
+            cfg["_hash_cache"] = {}
+            skilllocker.sync_tools_from_adapters(con, cfg)
+            before = {r["name"]: r["content_hash"] for r in con.execute(
+                "select name,content_hash from skills")}
+            count = skilllocker.rescan(con, cfg)
+            after = {r["name"]: r["content_hash"] for r in con.execute(
+                "select name,content_hash from skills")}
+            new = sorted(n for n in after if n not in before)
+            updated = sorted(n for n in after
+                             if n in before and before[n] != after[n])
+            # 与 rescan() 同一条分发口径：只自动分「新增」，内容变更不静默重拷
+            dist = skilllocker.auto_distribute(con, cfg, new)
+            payload = _boards_payload(con, cfg, prune=False, include_unique=False)
+            payload["scanned"] = count
+            payload["distributed"] = {
+                "skills": dist["skills"], "new": new, "updated": updated,
+                "tools": dist["tools"], "changed": dist["changed"],
+                "errors": dist["errors"],
+            }
+            _LOG.info("rescan_shared %dms · skills=%d new=%d 分发=%d",
+                      int((time.monotonic() - started) * 1000), count, len(new),
+                      dist["changed"])
+            return payload
+        finally:
+            con.close()
+
+    @_guard
+    @_serialized
+    def rescan_unique(self):
+        """刷新第二段：只补独有技能看板（含依赖它的首启引导与同名冲突对照）。
+
+        中央仓库这一轮已经扫过、链接也补完了，所以这里既不再重扫仓库、也不再
+        重算共有 / 智能体看板 —— 那两遍在第一段刚算完并画过，第二段要的只多
+        是「独有」这份盘外扫描（见 skilllocker.unique_payload）。
+        修剪 meta 用第一段的共有名单（只查名字）+ 本段现扫的独有名单，口径与
+        一次性 rescan() 完全一致。
+        """
+        started = time.monotonic()
+        con = skilllocker.db()
+        try:
+            cfg = skilllocker.load_config()
+            cfg["_stats_cache"] = {}
+            cfg["_hash_cache"] = {}
+            snap = skilllocker.unique_payload(con, cfg)
+            skilllocker.prune_meta(con, {
+                "meta": snap["meta"],
+                "skills": [{"name": r["name"]}
+                           for r in con.execute("select name from skills")],
+                "unique": snap["unique"],
+            })
+            payload = {"ok": True, "data": snap, "meta": skilllocker.get_meta(con)}
+            _LOG.info("rescan_unique %dms · unique=%s",
+                      int((time.monotonic() - started) * 1000),
+                      snap["meta"]["uniqueCount"])
             return payload
         finally:
             con.close()

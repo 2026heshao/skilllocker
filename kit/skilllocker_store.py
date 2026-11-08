@@ -16,7 +16,7 @@ import skilllocker_base as _base
 from skilllocker_base import (  # noqa: F401 - 部分名字经 skilllocker 门面再导出
     HOME, IGNORE_NAMES, _hash_tree, _tool_mark, dir_stats, has_skill_md,
     is_reparse, link_target, log_event, norm_path, now_ms, ordered_tools,
-    parse_frontmatter, path_under, sha_tree, target_state)
+    parse_frontmatter, path_under, sha_tree, sha_tree_stats, target_state)
 
 AGENT_STATUS_LABEL = {"connected": "已连接", "off": "已关闭", "missing": "未安装"}
 
@@ -115,22 +115,29 @@ def rescan(con, cfg):
         if not os.path.isfile(md):
             md = os.path.join(path, "skill.md")
         fm = parse_frontmatter(md)
-        chash = sha_tree(path)
+        # 一次遍历同时拿哈希与文件数 / 字节：存进 skills 表后，快照算 storeSize
+        # 就不用再走一遍全树（见 skilllocker_base.store_size）
+        chash, files, size = sha_tree_stats(path)
         label = fm.get("name") or name
         desc = (fm.get("description") or "").strip()
         present.add(name)
         old = con.execute("select content_hash from skills where name=?", (name,)).fetchone()
         if old is None:
-            con.execute("insert into skills(name,label,description,content_hash,enabled,origin,added_at,updated_at) "
-                        "values(?,?,?,?,1,'scan',?,?)",
-                        (name, label, desc, chash, now_ms(), now_ms()))
+            con.execute("insert into skills(name,label,description,content_hash,enabled,origin,"
+                        "added_at,updated_at,files,bytes) "
+                        "values(?,?,?,?,1,'scan',?,?,?,?)",
+                        (name, label, desc, chash, now_ms(), now_ms(), files, size))
             log_event(con, "add", name)
         elif old["content_hash"] != chash:
-            con.execute("update skills set label=?,description=?,content_hash=?,updated_at=? where name=?",
-                        (label, desc, chash, now_ms(), name))
+            con.execute("update skills set label=?,description=?,content_hash=?,updated_at=?,"
+                        "files=?,bytes=? where name=?",
+                        (label, desc, chash, now_ms(), files, size, name))
             log_event(con, "content-changed", name)
         else:
-            con.execute("update skills set label=?,description=? where name=?", (label, desc, name))
+            # 内容没变：哈希与文件集合都没动，统计只是补写（老库升级后第一次
+            # 刷新就把 NULL 补齐，storeSize 从此走 SUM 而不是全树遍历）
+            con.execute("update skills set label=?,description=?,files=?,bytes=? where name=?",
+                        (label, desc, files, size, name))
     for r in con.execute("select name from skills"):
         if r["name"] not in present:
             con.execute("delete from skills where name=?", (r["name"],))
@@ -737,7 +744,8 @@ def find_existing_store(con, cfg, tools=None, min_links=2, min_skills=2):
 
 
 # ---------------------------------------------------------------- agent 看板
-def agent_entries(con, cfg, tools=None, skills=None, hash_cache=None):
+def agent_entries(con, cfg, tools=None, skills=None, hash_cache=None,
+                  state_rows=None):
     """智能体看板：本机所有已知 agent 的三态 + 实际链接数。
 
     status:
@@ -746,6 +754,10 @@ def agent_entries(con, cfg, tools=None, skills=None, hash_cache=None):
       missing   = detect_dir 不存在（未安装）
     linked 只统计真正生效的格口（ok-link / ok-copy）；冲突实体目录单独计数，
     保证界面上的数字来自磁盘而不是开关本身。
+
+    state_rows：{agent key: {skill name: target_state 原值}}，来自同一份快照里
+    共有看板已经算过的那一遍。传了就不再对这些 agent 重复查盘；缺键（比如
+    开关后打开的 agent）现算，结果不受影响。
     """
     tools = tools if tools is not None else [
         dict(r) for r in con.execute("select * from tools order by key")]
@@ -766,10 +778,13 @@ def agent_entries(con, cfg, tools=None, skills=None, hash_cache=None):
         conflicts = 0
         dir_exists = bool(t["skills_dir"]) and os.path.isdir(t["skills_dir"])
         if detected and dir_exists:
+            cached = (state_rows or {}).get(t["key"]) or {}
             for s in skills:
-                state, _detail = target_state(
-                    os.path.join(t["skills_dir"], s["name"]).replace(os.sep, "/"),
-                    cfg, s, t, hash_cache)
+                state = cached.get(s["name"])
+                if state is None:
+                    state, _detail = target_state(
+                        os.path.join(t["skills_dir"], s["name"]).replace(os.sep, "/"),
+                        cfg, s, t, hash_cache)
                 if state in ("ok-link", "ok-copy"):
                     linked += 1
                 elif state in ("conflict-dir", "conflict-file"):

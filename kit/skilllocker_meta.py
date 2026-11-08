@@ -187,8 +187,13 @@ def prune_meta(con, boards):
     快照带 scanDegraded 标记（某个扫描根目录临时不可枚举）时跳过本轮：
     把「暂时看不见」当「已删除」会永久清掉用户的改名 / 备注 / 分类，
     宁可等下一轮扫描完整时再清。
+
+    uniquePending（刷新第一段没扫独有）同样跳过：valid 集里没有独有行，
+    按下面的差集会把全部 scope='unique' 的 meta 判成已删除 —— 改名、备注、
+    分类一次清空。第二段拿到完整独有清单后再修，语义不受影响。
     """
-    if boards["meta"].get("scanDegraded"):
+    m = boards["meta"]
+    if m.get("scanDegraded") or m.get("uniquePending"):
         return 0
     valid = {("shared", s["name"]) for s in boards["skills"]}
     valid |= {("unique", u["tool"] + "/" + u["name"]) for u in boards["unique"]}
