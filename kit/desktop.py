@@ -611,6 +611,7 @@ class Api:
                             "skills": dist["skills"], "new": new,
                             "updated": updated, "tools": dist["tools"],
                             "changed": dist["changed"], "errors": dist["errors"],
+                            "isolated": dist.get("isolated", False),
                         }
                         _LOG.info("startup auto-sync: %s（%d 处链接）",
                                   ", ".join(dist["skills"]), dist["changed"])
@@ -994,6 +995,7 @@ class Api:
                 "skills": dist["skills"], "new": new, "updated": updated,
                 "tools": dist["tools"], "changed": dist["changed"],
                 "errors": dist["errors"],
+                "isolated": dist.get("isolated", False),
             }
             # 刷新耗时留痕（与 bootstrap 同一行式样）：用户报「刷新慢」时先分清
             # 是重扫仓库、自动分发还是看板扫描慢，不要再靠猜。events 前端取不到，
@@ -1046,6 +1048,7 @@ class Api:
                 "skills": dist["skills"], "new": new, "updated": updated,
                 "tools": dist["tools"], "changed": dist["changed"],
                 "errors": dist["errors"],
+                "isolated": dist.get("isolated", False),
             }
             _LOG.info("rescan_shared %dms · skills=%d new=%d 分发=%d",
                       int((time.monotonic() - started) * 1000), count, len(new),

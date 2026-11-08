@@ -331,6 +331,32 @@ body.moving, body.moving * { user-select: none; -webkit-user-select: none; }
   box-shadow: 0 0 0 2px var(--success-soft);
 }
 
+/* 隔离模式角标：安装包验收 / 冒烟跑起来时常驻标题栏。这个实例的中央仓库是
+   临时占位仓库，界面上的「共有 / 独有」数字全都不属于用户真库，必须一眼可辨。 */
+.iso-pill {
+  height: 20px;
+  padding: 0 7px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 9px;
+  border: 1px solid var(--warning);
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  margin-right: 6px;
+}
+
+.iso-pill i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--warning);
+}
+
+.iso-pill[hidden] { display: none; }
+
 .win-controls { display: flex; height: var(--titlebar-h); margin-left: 6px; }
 /* 桌面端：三键盖在缩放手柄之上，避免点关闭按钮时误触右上角缩放 */
 body.desktop .titlebar .win-controls { position: relative; z-index: 100; }

@@ -59,6 +59,10 @@ def matrix(con, cfg, only_tools=None, only_skills=None):
 
 
 def do_sync(con, cfg, only_tools=None, only_skills=None, apply_changes=True):
+    # 隔离模式（验收 / 冒烟）：只允许出计划。真建链、撤链、重拷都会往 agent
+    # 目录写东西，而那正是用户真实的 agent 地盘（见 base.ISOLATION_MSG）。
+    if apply_changes:
+        _base.guard_agent_write(cfg, "分发同步")
     plan = []
     tools = {r["key"]: dict(r) for r in con.execute(
         "select * from tools where detected=1 and enabled=1")}
@@ -134,8 +138,18 @@ def auto_distribute(con, cfg, names, skip_tools=(), apply_changes=True):
     返回 {skills, tools, changed, plan, errors}，调用方只读汇总。
     """
     names = sorted({str(n) for n in (names or []) if n})
-    out = {"skills": names, "tools": [], "changed": 0, "plan": [], "errors": []}
+    out = {"skills": names, "tools": [], "changed": 0, "plan": [], "errors": [],
+           "isolated": False}
     if not names:
+        return out
+    # 隔离模式：这里**不能**抛错。刷新（bootstrap / rescan）会自动调用它，一抛就
+    # 把整次刷新变成失败回包，用户看到的是「刷新报错」而不是「这次没补链」。
+    # 降级成只登记不补链，并把 isolated 带回回包，界面如实说明。
+    if apply_changes and _base.isolated(cfg):
+        out["isolated"] = True
+        log_event(con, "warn", "隔离模式：本次 %d 个新技能只登记不分发，未改动任何 agent 目录"
+                  % len(names))
+        con.commit()
         return out
     tools = [r["key"] for r in con.execute(
         "select key from tools where detected=1 and enabled=1 order by key")]
@@ -478,6 +492,7 @@ def unlink_skill(con, cfg, name, tool_key=None):
 
 def unlink_tool(con, cfg, key):
     """撤下某个工具的全部分发。"""
+    _base.guard_agent_write(cfg, "撤下某 agent 的全部分发")
     t = con.execute("select * from tools where detected=1 and key=?", (key,)).fetchone()
     if not t:
         return []
@@ -490,6 +505,7 @@ def unlink_tool(con, cfg, key):
 
 
 def remove_skill(con, cfg, name, purge=True):
+    _base.guard_agent_write(cfg, "删除共有技能")
     removed_links = []
     for t in con.execute("select * from tools where detected=1"):
         path = os.path.join(t["skills_dir"], name)
@@ -525,6 +541,7 @@ def remove_unique(con, cfg, tool_key, name):
 
     只允许删 skills_dir 的直属子目录，且拒绝链接 / 目录外路径，避免误删。
     """
+    _base.guard_agent_write(cfg, "删除 agent 本地副本")
     row = con.execute("select * from tools where key=?", (tool_key,)).fetchone()
     if not row:
         raise RuntimeError("未知 agent: %s" % tool_key)
@@ -558,6 +575,7 @@ def uninstall_unique(con, cfg, tool_key, name):
     main 直属实体仍走 remove_unique（delete_skill 原路径，防线不动）。
     路径一律来自 find_unique_row 现查，拒绝中央仓库内的任何路径。
     """
+    _base.guard_agent_write(cfg, "卸载独有技能")
     u = find_unique_row(con, cfg, tool_key, name)
     if not u:
         raise RuntimeError("独有 skill 不存在（或 agent 未检测到）：%s/%s" % (tool_key, name))
@@ -609,6 +627,7 @@ def promote_unique(con, cfg, tool_key, name):
     其他开着的 agent，源目录原样保留。独有 meta 里写过的显示名 / 备注迁给
     共有行（归属夹本就不参与；独有 meta 行随后由 prune_meta 按行消失自动清理）。
     """
+    _base.guard_agent_write(cfg, "独有转共有")
     u = find_unique_row(con, cfg, tool_key, name)
     if not u:
         raise RuntimeError("独有 skill 不存在（或 agent 未检测到）：%s/%s" % (tool_key, name))
@@ -661,6 +680,9 @@ def adopt_store(con, cfg, path):
         互相包含 —— 把 agent 的读取目录当仓库会让分发链接绕回原地；
       - 目标不是当前仓库自己。
     """
+    if _base.isolated(cfg):
+        raise RuntimeError("接管已有中央仓库被拒绝了：%s；接管会把仓库指针改到别处，"
+                         "之后的分发就会落到真实库上" % _base.ISOLATION_MSG)
     target = os.path.normpath(str(path or "").strip().strip('"')).replace(os.sep, "/")
     if not target or target in (".", ".."):
         raise RuntimeError("要接管的中央仓库路径为空")
@@ -960,6 +982,7 @@ def adopt_local_skills(con, cfg, unique=None):
       4. 一次 rescan + seed_meta（新共有行按预置规则归档）；
       5. 只对分发开关开着的 agent、且只对主目录直属名字做 do_sync 对齐。
     """
+    _base.guard_agent_write(cfg, "一键收编 agent 技能")
     if not os.path.isdir(cfg["store"]):
         raise RuntimeError("中央仓库目录不可用：%s" % cfg["store"].replace("/", "\\"))
     rows = adoptable_rows(unique if unique is not None else unique_entries(con, cfg), cfg)

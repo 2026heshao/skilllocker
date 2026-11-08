@@ -1335,6 +1335,89 @@ def _():
                 con.close()
 
 
+# ---------------------------------------------------------------- 隔离模式
+@case("隔离模式：开分发被拒绝，agent 目录零写入，开关不卡在已启用")
+def _():
+    if sys.platform != "win32":
+        raise AssertionError("仅 Windows（需要 junction）")
+    with tempfile.TemporaryDirectory() as td:
+        with sandbox(td, adapters=ADAPTERS, config={"isolated": True}) as (home, store):
+            import desktop
+            api = desktop.Api()
+            res = api.bootstrap()
+            assert res.get("ok"), res
+            assert res["data"]["meta"].get("isolated") is True, "回包必须带隔离标记给角标用"
+            r = api.set_agent("claude_code", True)
+            assert not r.get("ok"), r
+            assert "隔离模式" in (r.get("error") or ""), r
+            d = os.path.join(home, ".claude", "skills")
+            assert os.listdir(d) == [], "隔离模式绝不能往 agent 目录写链接：%s" % os.listdir(d)
+            con = skilllocker.db()
+            try:
+                en = con.execute("select enabled from tools where key='claude_code'").fetchone()["enabled"]
+            finally:
+                con.close()
+            assert not en, "拒绝后 enabled 要回写 0，否则界面卡在「开关开着、链接没建」"
+
+
+@case("隔离模式：刷新照常成功，新技能只登记不分发")
+def _():
+    if sys.platform != "win32":
+        raise AssertionError("仅 Windows（需要 junction）")
+    with tempfile.TemporaryDirectory() as td:
+        with sandbox(td, adapters=ADAPTERS, config={"isolated": True}) as (home, store):
+            import desktop
+            api = desktop.Api()
+            assert api.bootstrap()["ok"]
+            # 直接把开关置开（绕过被闸门挡住的 set_agent），模拟「验收实例本来就想分发」
+            con = skilllocker.db()
+            try:
+                con.execute("update tools set enabled=1 where key='claude_code'")
+                con.commit()
+            finally:
+                con.close()
+            skill_dir(store, "dropped")
+            res = api.rescan_shared()
+            assert res.get("ok"), "隔离模式不能让刷新变成失败回包：%s" % res
+            dist = res.get("distributed") or {}
+            assert dist.get("skills") == ["dropped"], dist
+            assert dist.get("isolated") is True, dist
+            assert dist.get("changed") == 0, dist
+            assert os.listdir(os.path.join(home, ".claude", "skills")) == []
+            assert api.rescan_unique().get("ok"), "第二段也必须照常回来"
+
+
+@case("隔离模式：删除 / 卸载 / 转共有 / 接管仓库全部被拒绝且盘上不动")
+def _():
+    with tempfile.TemporaryDirectory() as td:
+        with sandbox(td, adapters=ADAPTERS, config={"isolated": True}) as (home, store):
+            import desktop
+            assert desktop.Api().bootstrap()["ok"]
+            agent_only = skill_dir(os.path.join(home, ".cursor", "skills"), "agent-only")
+            cfg = skilllocker.load_config()
+            con = skilllocker.db()
+            try:
+                calls = [
+                    ("删除共有技能", skilllocker.remove_skill, (con, cfg, "demo-skill")),
+                    ("卸载独有技能", skilllocker.uninstall_unique, (con, cfg, "cursor", "agent-only")),
+                    ("独有转共有", skilllocker.promote_unique, (con, cfg, "cursor", "agent-only")),
+                    ("接管已有中央仓库", skilllocker.adopt_store, (con, cfg, store)),
+                    ("撤下某 agent 全部分发", skilllocker.unlink_tool, (con, cfg, "cursor")),
+                ]
+                for label, fn, args in calls:
+                    try:
+                        fn(*args)
+                        raise AssertionError("%s 在隔离模式下竟然执行了" % label)
+                    except AssertionError:
+                        raise
+                    except RuntimeError as exc:
+                        assert "隔离模式" in str(exc), "%s 文案不对：%s" % (label, exc)
+            finally:
+                con.close()
+            assert os.path.isdir(os.path.join(store, "demo-skill")), "仓库实体被删了"
+            assert os.path.isdir(agent_only), "agent 目录副本被动过"
+
+
 def main():
     failed = []
     for name, fn in CASES:

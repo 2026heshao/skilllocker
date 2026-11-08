@@ -823,6 +823,17 @@
       (META.db ? '\n数据：' + META.db + '（库文件与配置，升级/卸载不影响）' : '');
     document.getElementById('store-count').textContent = SKILLS.length;
     document.getElementById('store-size').textContent = META.storeSize || '—';
+    // 隔离模式角标（安装包验收 / 冒烟）：这个实例的仓库是临时占位仓库，界面上的
+    // 共有 / 独有数字都不属于用户真库，而且后端已经拒绝一切改动 agent 目录的操作
+    // ——两件事都要写在脸上，别让人对着假数据做判断。
+    var isoPill = document.getElementById('iso-pill');
+    if (isoPill) {
+      isoPill.hidden = !META.isolated;
+      isoPill.title = META.isolated
+        ? '隔离模式（config.json 的 isolated=true）：只读扫描，'
+          + '分发 / 撤链 / 删除 / 收编 / 接管都会被拒绝，不会改动任何 agent 目录'
+        : '';
+    }
     var healthDen = SKILLS.length + UNIQUE.length;
     document.getElementById('store-health').style.width =
       (healthDen ? (100 - (UNIQUE.length / healthDen) * 100).toFixed(1) : '0') + '%';

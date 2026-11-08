@@ -8,8 +8,8 @@ import sys
 
 from skilllocker_base import (  # noqa: F401 - 部分名字经 skilllocker 门面再导出
     APP_VERSION, HOME, _file_digest, _tool_mark, file_list, fmt_bytes,
-    folder_rows, last_scan_time, ordered_tools, store_size, target_state,
-    tree_stats)
+    folder_rows, isolated, last_scan_time, ordered_tools, store_size,
+    target_state, tree_stats)
 from skilllocker_store import (  # noqa: F401 - 门面再导出
     adoptable_rows, agent_entries, find_existing_store, group_unique, unique_entries)
 
@@ -152,6 +152,10 @@ def list_boards(con, cfg, include_unique=True):
             "uniqueCount": None if unique is None else len(unique),
             "uniqueLogical": None if unique_groups is None else len(unique_groups),
             "storeIn": cfg.get("storeIn") or "install",
+            # 隔离模式（验收 / 冒烟）：界面必须显性标出来。安装版被钉到临时仓库
+            # 跑验收时，用户看到的「共有 2 / 独有 205」全是假象，没有这个标记
+            # 就没人能一眼看出「这个窗口不是我的真库」。
+            "isolated": isolated(cfg),
             # 空仓库首启的轻量快照：同名副本尚未按内容合并，文件数/字节未统计
             "uniqueLight": bool(cfg.get("_unique_light")),
             # 首启自动建库的说明（仅在真正跑过的那次 bootstrap 上有值）

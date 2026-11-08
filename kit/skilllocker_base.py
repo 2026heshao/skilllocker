@@ -207,7 +207,34 @@ def load_config():
     cfg["seed_budget_s"] = _cfg_int(cfg.get("seed_budget_s"), 20, lo=1, hi=120)
     cfg["seed_max_bytes"] = _cfg_int(cfg.get("seed_max_bytes"), 400 << 20,
                                      lo=1 << 20, hi=8 << 30)
+    # 隔离模式（安装包验收 / 冒烟测试用）：非法值同样回默认 False。
+    cfg["isolated"] = _cfg_bool(cfg.get("isolated"), False)
     return cfg
+
+
+# --------------------------------------------------------------- 隔离模式
+# 为什么需要它（v0.3.5 验收实测踩过）：验收跑的是同一份代码、同一份
+# adapters.json，只把 config.json 的 store 钉到临时仓库，确实「不读不写用户
+# 真实仓库」—— 但分发写的根本不是仓库，而是各 agent 的 skills 目录。结果占位
+# 技能 verify-alpha / verify-beta 被 junction 铺进 6 个 agent 目录，用户的每个
+# agent 都真能加载到这两个假技能，而界面上他真实的 58 个技能反倒全成了「独有」。
+# isolated=true 就是把这一刀补上：扫描照常，任何改动 agent 目录的动作一律拒绝。
+ISOLATION_MSG = "隔离模式（config.json 的 isolated=true）不允许改动任何 agent 目录"
+
+
+def isolated(cfg):
+    """当前这份配置是否处于隔离模式（只读扫描，不碰 agent 目录）。"""
+    return _cfg_bool((cfg or {}).get("isolated"), False)
+
+
+def guard_agent_write(cfg, what):
+    """写 agent 目录前的统一闸门。
+
+    抛错而不是静默跳过：按钮点了没反应最坑人，报错会经 _guard 变成界面上的
+    明确提示，验收的人一眼就知道「这台机器被隔离保护着」。
+    """
+    if isolated(cfg):
+        raise RuntimeError("%s：%s" % (what, ISOLATION_MSG))
 
 
 def write_config(cfg):
