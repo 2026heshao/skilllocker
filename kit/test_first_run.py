@@ -1224,12 +1224,17 @@ _VOLATILE = ("generated", "scanAt", "eventsTotal", "db")
 
 
 def _snapshot(payload):
-    """归一化到可比较的快照：时间戳类字段与「本次分发了什么」都不参与判等。"""
+    """归一化到可比较的快照：时间戳类字段与「本次分发了什么」都不参与判等。
+
+    seq 是每次调用都 +1 的快照序号（给前端丢弃晚到的旧快照用），本来就是
+    「一次调用一个值」：两段式是两次调用、一次性是一次调用，比它没有意义。
+    """
     p = json.loads(json.dumps(payload, ensure_ascii=False))
     for f in _VOLATILE:
         if f in p["data"]["meta"]:
             p["data"]["meta"][f] = "<v>"
     p["data"]["events"] = []
+    p.pop("seq", None)
     p.pop("distributed", None)
     p.pop("scanned", None)
     return p
@@ -1282,6 +1287,33 @@ def _():
                 con.close()
 
 
+def _diff_paths(x, y, path="", limit=6):
+    """两条快照的差异定位：断言只说「不一致」等于没写，必须给出第一处差在哪。"""
+    out = []
+    if type(x) is not type(y):
+        return ["%s 类型不同 %r vs %r" % (path or "/", x, y)]
+    if isinstance(x, dict):
+        for k in sorted(set(x) | set(y)):
+            if k not in x:
+                out.append("%s.%s 只在第二段出现" % (path, k))
+            elif k not in y:
+                out.append("%s.%s 只在一次性出现" % (path, k))
+            else:
+                out += _diff_paths(x[k], y[k], "%s.%s" % (path, k))
+            if len(out) >= limit:
+                return out[:limit]
+    elif isinstance(x, list):
+        if len(x) != len(y):
+            out.append("%s 长度 %d vs %d" % (path or "/", len(x), len(y)))
+        for i, (a, b) in enumerate(zip(x, y)):
+            out += _diff_paths(a, b, "%s[%d]" % (path, i))
+            if len(out) >= limit:
+                return out[:limit]
+    elif x != y:
+        out.append("%s %r vs %r" % (path or "/", x, y))
+    return out[:limit]
+
+
 @case("刷新第二段：只并独有字段，合并结果与一次性 rescan 逐字段一致")
 def _():
     if sys.platform != "win32":
@@ -1304,7 +1336,8 @@ def _():
             assert full.get("ok"), full
             merged = _snapshot(_merge_two_phase(first, second))
             once = _snapshot(full)
-            assert merged == once, "两段合并与一次性快照不一致"
+            assert merged == once, ("两段合并与一次性快照不一致："
+                                    + " ├ ".join(_diff_paths(merged, once)))
 
 
 @case("storeSize：用 rescan 顺路存的统计，与全树遍历逐字节一致且随内容更新")
