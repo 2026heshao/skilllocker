@@ -61,7 +61,7 @@ def default_store_for(res_dir, frozen):
 
 
 DEFAULT_STORE = default_store_for(RES_DIR, FROZEN)
-APP_VERSION = "0.3.5"
+APP_VERSION = "0.3.6"
 # 首启自动建库 / 自动接管的一次性标记（events.kind）。CLI / 桌面 / 自检共用。
 FIRST_RUN_SEED_EVENT = "first-run-seed"
 FIRST_RUN_ADOPT_EVENT = "first-run-adopt"
