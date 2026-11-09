@@ -252,7 +252,7 @@ window: 设计稿 1440 × 900（桌面默认 1200 × 760，min 1180 × 720），
 | 切换看板 | 点看板卡或侧栏导航；同步 `body[data-view]`、标题/副标题、表头第 5 列（分发覆盖 / 来源）、列表、检查器；选中项重置为该看板首行 |
 | 选中行 | 单击任意行 → 检查器渲染该 skill；`↑ / ↓` 键可连续切换（输入框聚焦时禁用） |
 | 拖动窗口（桌面端） | 按住标题栏任意空白（含 skilllocker 品牌区）拖动；`pointerdown` 记起点，`pointermove` 按 `screenX/screenY` 绝对位移调 `win_set_bounds`，`pointerup` 补终值；搜索框 / 按钮 / LOCAL 胶囊 / 窗口三键不触发；最大化态先把窗口还原（`win_restore()`）再按还原后的外框继续拖。顶部约 5px（四角 13px）是缩放手柄，按在那里只会缩放，不会移动窗口 |
-| 分发开关（智能体页） | 动作只由原生 `change` 触发，`input.checked` = 目标状态 → `requestAgent(key, checked)`；`click` 只用来拦下事件、不读 `checked`（点击冒到 `document` 时它已被 Chromium 翻转，`label` 还会把点击转发给 `input`，一次按下出现两个 `click`）。关 = 二次确认后撤链接；取消 / 失败时开关回到数据模型的值，界面不撒谎 |
+| 分发开关（智能体页） | 动作只由原生 `change` 触发，`input.checked` = 目标状态 → `requestAgent(key, checked)`；`click` 只用来拦下事件、不读 `checked`（点击冒到 `document` 时它已被 Chromium 翻转，`label` 还会把点击转发给 `input`，一次按下出现两个 `click`）。关 = 二次确认后撤链接；取消 / 失败时开关回到数据模型的值，界面不撒谎。**在途口径（v0.3.6，连着拨多个开关时不许互相刷掉）**：请求发出即记 `AGENT_PENDING[key]=目标值`，该行按用户目标渲染（`.agent-row` 状态 chip 走 `is-pending` + 文案「连接中… / 关闭中…」，开关 `disabled` 挡重复工），回包 / 失败才由后端数据落定；每笔回包带后端在 `OPS_LOCK` 内发的单调 `seq`，`applyBootstrap` 遇到 `seq` 比已应用最大值小的旧快照只重画、不换数据（详见 `kit/DESKTOP.md` §5.1）。开关回包不扫独有（`data.uniqueDeferred`），独有行与独有计数沿用上一轮 |
 | 双击标题栏（桌面端） | 双击标题栏空白 = 最大化 / 还原；同上排除交互控件 |
 | 改名 | 输入即写 `meta[key].display`，**即时落盘不去抖**；行内名称、副标题（原目录名）、已编辑计数即时更新，**不整表重渲染**（避免失焦） |
 | 备注 | 同上；列表备注列同步，空值显示「添加备注…」占位 |

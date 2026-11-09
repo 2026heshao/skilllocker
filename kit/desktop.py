@@ -492,19 +492,41 @@ def _serialized(fn):
     return wrapper
 
 
-def _boards_payload(con, cfg, prune=True, include_unique=True):
-    """五个桥方法共用的看板回包：快照 →（可选）修剪 meta → 读 meta。
+# 看板快照的发号器：与 OPS_LOCK 分开，只管自增。发号点本身在调用方的锁内，
+# 这把锁是给将来某个不串行化也用 _boards_payload 的调用方留的兜底。
+_SEQ = [0]
+_SEQ_LOCK = threading.Lock()
+
+
+def _boards_payload(con, cfg, prune=True, include_unique=True, unique_pending=False):
+    """五个桥方法共用的看板回包：快照 →（可选）修剪 meta → 读 meta → 发序号。
     顺序有讲究：prune 会删行，get_meta 必须发生在它之后。
 
-    include_unique=False（刷新第一段）：不扫独有技能，回包带 meta.uniquePending。
+    include_unique=False（刷新第一段、开关切换）：不扫独有技能。这时回包带两个
+    各管各的标记：
+      data.uniqueDeferred = 本轮没扫独有，前端**沿用上一轮的独有行**（hydrate 的
+        判据），不是「这里没有独有技能」；
+      meta.uniquePending = 「第二段补扫还在路上」，只有刷新第一段该为 True（由
+        rescan_shared 显式传 unique_pending=True）。开关切换后面没有人补扫，
+        留 True 就是界面上一个永远不消失的「独有扫描中…」。
     这种回包**必须** prune=False 一起用 —— prune 按 boards["unique"] 判存活，
     拿没扫独有的快照去修会把用户写在独有行上的备注当成已删除清掉；
     prune_meta 里另有同一条防呆，两道闸任何一道生效都不会出事。
     """
     boards = skilllocker.list_boards(con, cfg, include_unique=include_unique)
+    if not include_unique:
+        boards["uniqueDeferred"] = True
+        boards["meta"]["uniquePending"] = bool(unique_pending)
     if prune:
         skilllocker.prune_meta(con, boards)
-    return {"ok": True, "data": boards, "meta": skilllocker.get_meta(con)}
+    # seq：这份快照描述的世界比上一份新。调用方全在 OPS_LOCK 里，快照算完即发号，
+    # 所以序号单调递增就等于快照的新旧次序。前端据此丢弃晚到的旧快照（见 ui/app.js
+    # 的 isStaleSnapshot）：连开多个智能体时每笔 set_agent 都回一份整套看板，
+    # 「谁后到谁生效」会把已经连上的刷回未连接 —— 用户看到的就是「只剩一个连上」。
+    with _SEQ_LOCK:
+        _SEQ[0] += 1
+        seq = _SEQ[0]
+    return {"ok": True, "data": boards, "meta": skilllocker.get_meta(con), "seq": seq}
 
 
 class Api:
@@ -1042,7 +1064,8 @@ class Api:
                              if n in before and before[n] != after[n])
             # 与 rescan() 同一条分发口径：只自动分「新增」，内容变更不静默重拷
             dist = skilllocker.auto_distribute(con, cfg, new)
-            payload = _boards_payload(con, cfg, prune=False, include_unique=False)
+            payload = _boards_payload(con, cfg, prune=False, include_unique=False,
+                                      unique_pending=True)
             payload["scanned"] = count
             payload["distributed"] = {
                 "skills": dist["skills"], "new": new, "updated": updated,
@@ -1125,7 +1148,19 @@ class Api:
     @_guard
     @_serialized
     def set_agent(self, key, on):
-        """智能体分发开关：开=按中央仓库补齐 junction，关=只撤链接不动实体。"""
+        """智能体分发开关：开=按中央仓库补齐 junction，关=只撤链接不动实体。
+
+        开的时候不看「上次是不是已经开着」就跳过 —— 连着拨多个开关时，界面可能把
+        还在排队的那几个刷回「已关闭」，用户会再拨一次；旧写法第二笔落在 no-op 分支，
+        什么都不补，用户看到的就是「剩下的还得重新打开」。改成每次都走同一条
+        do_sync：已就位的格口 state=ok-link 不动作，缺的才建（实测整仓库重跑
+        一次 0.15 秒，比让界面撒谎便宜得多），顺带把 agent 目录被外部清空的场景
+        自愈回来。撤链方向仍按原语义：只撤本工具建的链接，不碰实体。
+
+        回包不扫独有技能（本机 152 条独有要 1.05 秒，占一次开关的大头）：开关
+        不增删技能，独有看板沿用上一轮，下一次刷新自然重算。
+        """
+        started = time.monotonic()
         con = skilllocker.db()
         try:
             cfg = skilllocker.load_config()
@@ -1134,15 +1169,20 @@ class Api:
                 raise RuntimeError("未知 agent: %s" % key)
             if not row["detected"]:
                 raise RuntimeError("%s 未安装（没有检测到 %s）" % (row["label"], row["detect_dir"]))
-            if bool(on) and not row["enabled"]:
-                con.execute("update tools set enabled=1 where key=?", (key,))
+            t_probe = time.monotonic()
+            if bool(on):
+                was_enabled = bool(row["enabled"])
+                if not was_enabled:
+                    con.execute("update tools set enabled=1 where key=?", (key,))
                 try:
                     plan = skilllocker.do_sync(con, cfg, only_tools=[key], apply_changes=True)
                 except Exception:
                     # junction 建失败很常见（权限 / 路径被占用）。enabled=1 已写
                     # 未提交，但 do_sync 内部的 commit 会把它一起带上去 —— 失败时
                     # 必须显式回写 0，否则重启后「开关开着、链接没建」持续不一致。
-                    con.execute("update tools set enabled=0 where key=?", (key,))
+                    # 本来就读到 enabled=1 的不回写：那不是本次造成的。
+                    if not was_enabled:
+                        con.execute("update tools set enabled=0 where key=?", (key,))
                     con.commit()
                     raise
                 changed = sum(1 for p in plan if p.get("done"))
@@ -1151,11 +1191,17 @@ class Api:
                 skipped = [p["skill"] for p in plan
                            if p["action"] is None and p["state"] not in
                            ("ok-link", "ok-copy", "off", "conflict-dir", "conflict-file")]
-                skilllocker.log_event(con, "agent-on", "%s（建 %d 处）" % (key, changed))
+                if not was_enabled:
+                    skilllocker.log_event(con, "agent-on", "%s（建 %d 处）" % (key, changed))
+                elif changed:
+                    # 开关本来开着却又补上了链接 = agent 目录被外部清过，界面上
+                    # 这条留痕，用户报「链接莫名消失」时不用猜是谁动的
+                    skilllocker.log_event(con, "agent-repair",
+                                          "%s 补齐 %d 处（开关原本已开）" % (key, changed))
                 con.commit()
-                action = {"on": True, "changed": changed,
+                action = {"on": True, "changed": changed, "repaired": was_enabled,
                           "conflicts": conflicts, "skipped": skipped}
-            elif not bool(on) and row["enabled"]:
+            elif row["enabled"]:
                 removed = skilllocker.unlink_tool(con, cfg, key)
                 skilllocker.toggle(con, "tools", key, 0)
                 kept = [s["name"] for s in con.execute(
@@ -1167,9 +1213,18 @@ class Api:
                 action = {"on": False, "removed": len(removed), "kept": kept}
             else:
                 action = {"on": bool(on), "changed": 0, "removed": 0,
-                          "conflicts": [], "skipped": [], "kept": []}
-            payload = _boards_payload(con, cfg)
+                          "conflicts": [], "skipped": [], "kept": [], "repaired": False}
+            # 开关不改变独有技能的存在性 → prune=False + 不扫独有（见 _boards_payload）
+            t_work = time.monotonic()
+            payload = _boards_payload(con, cfg, prune=False, include_unique=False)
             payload["action"] = action
+            _LOG.info("set_agent %s %s %dms · 探测%d 同步%d 看板%d · 变更%d",
+                      key, "on" if on else "off",
+                      int((time.monotonic() - started) * 1000),
+                      int((t_probe - started) * 1000),
+                      int((t_work - t_probe) * 1000),
+                      int((time.monotonic() - t_work) * 1000),
+                      action.get("changed") or action.get("removed") or 0)
             return payload
         finally:
             con.close()

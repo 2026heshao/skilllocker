@@ -26,6 +26,13 @@ import tempfile
 import threading
 import time
 
+# 建 junction 的原生入口（CPython on Windows 自带，无需管理员权限）。
+# 非 CPython / 非 Windows 时为 None，make_junction 自动退到 spawn 那两条老路。
+try:
+    import _winapi
+except ImportError:  # pragma: no cover - 只在少数发行版上发生
+    _winapi = None
+
 KIT = os.path.dirname(os.path.abspath(__file__))
 FROZEN = bool(getattr(sys, "frozen", False))
 # 安装版：程序与中央仓库放在安装目录（用户看得见、带得走）；db / config /
@@ -453,9 +460,27 @@ def _decode(raw):
 
 
 def make_junction(link, target):
-    """建目录 junction（无需管理员权限）。先试 cmd mklink，再退到 PowerShell。"""
+    """建目录 junction（无需管理员权限）。
+
+    优先走进程内 `_winapi.CreateJunction`：本机实测每条 0.77ms，而 spawn
+    `cmd /c mklink` 每条 37.9ms —— 差 49 倍。一次「打开智能体开关」要给整个中央
+    仓库建链（本机 58 个 skill），2.2 秒和 0.05 秒的差别就在这儿；连开多个开关时
+    它们全部在 OPS_LOCK 上排队，后面那几笔要等多久就看这一条。产物完全同构
+    （is_reparse / link_target 判据一致，撤链一样用 os.rmdir）。
+
+    spawn cmd / PowerShell 保留作兜底：非 CPython 没有 _winapi、目标在特殊文件系统
+    上被原生调用拒了，都还能建成功，行为与改造前一致。
+    """
     link, target = os.path.normpath(link), os.path.normpath(target)
     attempts = []
+    if _winapi is not None:
+        try:
+            _winapi.CreateJunction(target, link)
+            if os.path.isdir(link):
+                return True
+            attempts.append("_winapi: 调用后目录不可见")
+        except Exception as exc:  # noqa: BLE001 - 原生入口失败就退到 spawn
+            attempts.append("_winapi: %s" % exc)
     cmds = [
         ["cmd", "/c", "mklink", "/J", link, target],
         ["powershell", "-NoProfile", "-NonInteractive", "-Command",

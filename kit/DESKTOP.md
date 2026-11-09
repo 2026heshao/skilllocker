@@ -170,7 +170,7 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 | `export_json(name, payload)` | 文件名 + 前端组装内容 | `{ok, path}`（取消则 `path=''`） | 设置 →「导出 JSON」 |
 | `copy_path(text)` | 文本（≤2000 字） | `{ok, text}` | 详情栏「复制路径」 |
 | `open_dir(scope, key)` | `scope`: `shared`/`unique`/`agent`，只接受 scope+key | `{ok, path}` | 详情栏「打开目录」（路径由后端现算，防任意路径） |
-| `set_agent(key, on)` | agent key + 开关目标值 | `{ok, data, meta, action}` | 智能体看板的开关；开=补链接，关=撤链接 |
+| `set_agent(key, on)` | agent key + 开关目标值 | `{ok, data, meta, seq, action}` | 智能体看板的开关；开=补链接，关=撤链接。回包**不扫独有技能**（`data.unique=null` + `data.uniqueDeferred=true`，前端沿用上一轮独有行），因为切换开关不增删技能，而独有扫描本机要 1 秒；也没有第二段补扫，所以 `meta.uniquePending` 保持 false，界面上不会挂着一个不消失的「独有扫描中…」。开的时候不看「上次是否已开着」跳过，每次都重跑同一条 `do_sync`（已就位的格口不动作），所以外部清空 agent 目录后再拨一次开关会把链接补回来 |
 | `promote_unique(key)` | `tool/name` | `{ok, data, meta, action}` | 独有行详情栏「转为共有」（单个实体拷进中央仓库 + 迁移改名备注） |
 | `adopt_store(path)` | 候选仓库绝对路径 | `{ok, data, meta, action:{store, previous, skills}}` | 首启引导「接管该仓库」；守卫见 §1.3，只写 config.json + 重扫 |
 | `adopt_local_skills()` | — | `{ok, data, meta, action:{adopted, skipped, relinked, linked, files, bytes, metaMoved}}` | 首启引导「一键收编」（只收 `src=main` 实体行） |
@@ -180,7 +180,40 @@ D:\develop\python\3.12\python.exe desktop.py --selftest # 离屏自检，跑完�
 | `win_restore()` | — | `{ok, bounds, maximized:false}` | 最大化态拖标题栏越过阈值（>6px）后调用：先还原，再按还原后的外框继续拖；单击标题栏不还原（缩小只认双击与真实拖动） |
 | `log_ui(kind, detail)` | 事件名 + JSON 字符串 | `{ok}` | 前端拖动诊断落盘 `kit/ui-drag.log`（加锁追加，超 48KB 只留最近 200 行） |
 
-`set_agent` 的 `action` 字段：开 → `{on:true, changed, conflicts, skipped}`；关 → `{on:false, removed, kept}`。`kept` 是撤链接后仍留在 agent 目录里的冲突副本，界面会如实提示。
+`set_agent` 的 `action` 字段：开 → `{on:true, changed, conflicts, skipped, repaired}`；关 → `{on:false, removed, kept}`。`kept` 是撤链接后仍留在 agent 目录里的冲突副本，界面会如实提示。`repaired=true` 表示这笔请求进来时开关本来就是开的（用户「再拨一次」，或界面把在途的开关刷回去了），此时 `changed>0` 就是「补齐了被外部清掉的链接」，events 表记 `agent-repair`。
+
+### 5.1 连开多个开关的并发口径
+
+pywebview 每个桥调用一个线程，`_serialized` 用 `OPS_LOCK` 把它们排成队。用户连着拨
+几个开关时，**每笔请求各自回一份整套看板**，而那份快照只描述它自己那一刻的状态：
+第一笔落地时，后面几笔的 `enabled` 还没写进库。由此定下三条规矩（缺一条就是
+「过几秒只连上一个，剩下的还得重新打开」）：
+
+1. **快照发号**：`_boards_payload` 在锁内、快照算完之后取单调递增的 `seq`。号大 =
+   描述的世界新。前端 `isStaleSnapshot` 据此丢弃晚到的旧快照（原型快照无 `seq`，
+   不参与判断）。
+2. **在途开关自证**：请求发出即把 `key → 目标值` 记进 `AGENT_PENDING`，该行按用户
+   的目标渲染并标「连接中 / 关闭中」、`input disabled` 挡住重复提交；回包（成功或
+   失败）先收掉在途标记再由数据落定。失败时后端已把 `enabled` 回写，界面照实回落。
+   汇总文案（页面副标题、智能体卡片）另带「N 连接中」，不把在途说成已连好。
+3. **开关回包只带必需的东西**：`prune=False` + `include_unique=False`（独有扫描本机
+   1.05 秒 / 回包 165KB→46KB），标 `data.uniqueDeferred=true` 让前端沿用上一轮独有行，
+   `meta.uniquePending` 留 false（没有第二段补扫会在路上）。
+
+「开」这一侧不再因为「上次已经开着」而跳过，每次都重跑同一条 `do_sync`：已就位的
+格口 `state=ok-link` 不动作，缺的才补，所以 agent 目录被外部清空后再拨一次开关会把
+链接补回来（旧实现落 no-op 分支，正是「剩下的还得重新打开」也修不好的那一段）。
+副作用要如实说明：copy 模式的 agent 上，重跑 `do_sync` 会按仓库覆盖 `stale-copy`
+——这与既有口径一致（「需要刷新副本时到智能体页重新打开开关，那是一次明确的同步
+动作」，见 `rescan` 的分发注释），自动扫描分发仍然只碰新增技能、绝不静默重拷。
+
+建链本身另有一处提速：`make_junction` 优先走进程内 `_winapi.CreateJunction`
+（实测每条 0.77ms），不再按条 spawn `cmd mklink`（每条 37.9ms）——58 个技能的仓库
+一次「打开开关」从 2.2 秒降到 0.05 秒；`cmd` / PowerShell 仍作兜底。
+
+回归：`kit/test_agent_toggle_ui.py`（假桥控制回包到达顺序，DOM 断言在途不弹回、
+乱序旧快照被忽略）+ `kit/test_first_run.py` 的「开关并发 / 开关回包 / 开关重开 /
+make_junction」四例。
 
 约束：`display_name ≤ 48`、`note ≤ 400`、`categories ≤ 12` 项，超长由 `set_meta` 截断。
 

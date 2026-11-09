@@ -1732,6 +1732,20 @@ body.reduce-motion .row.row-out { animation: none; opacity: 0; }
 .switch.is-disabled { opacity: 0.42; cursor: not-allowed; }
 .switch.is-disabled input { cursor: not-allowed; }
 
+/* 在途（连接中 / 关闭中）：滑块保持在用户拨到的那一头，轨道做呼吸，input 禁用
+   挡住重复提交。与 .is-disabled（未安装 → 整枚哑掉、点不动）刻意分开：在途是
+   「正在为你干活」，视觉上必须看得见，否则用户以为开关失败又去拨一次。
+   动效由全局 prefers-reduced-motion 兜底自动停。 */
+.switch.is-pending { cursor: progress; }
+.switch.is-pending input { cursor: progress; }
+.switch.is-pending i { animation: switch-pulse 1.15s ease-in-out infinite; }
+@keyframes switch-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.agent-state.is-pending { background: var(--warning-soft); color: var(--warning); }
+.agent-state.is-pending i { animation: switch-pulse 1.15s ease-in-out infinite; }
+
 /* ---------------------------------------------------------- agent inspector */
 .agent-hero {
   display: flex;

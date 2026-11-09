@@ -14,6 +14,8 @@ import logging
 import os
 import sys
 import tempfile
+import threading
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -1234,6 +1236,9 @@ def _snapshot(payload):
         if f in p["data"]["meta"]:
             p["data"]["meta"][f] = "<v>"
     p["data"]["events"] = []
+    # uniqueDeferred 是回包结构（「本轮没扫独有，前端沿用上一轮」），不是数据本身：
+    # 两段式的第一段带、一次性 rescan 不带，比它同样是判等过严。
+    p["data"].pop("uniqueDeferred", None)
     p.pop("seq", None)
     p.pop("distributed", None)
     p.pop("scanned", None)
@@ -1449,6 +1454,165 @@ def _():
                 con.close()
             assert os.path.isdir(os.path.join(store, "demo-skill")), "仓库实体被删了"
             assert os.path.isdir(agent_only), "agent 目录副本被动过"
+
+
+# ---------------------------------------------------------------- 分发开关
+# 用户反馈：连着打开多个智能体，过几秒界面自动刷新只剩一个「已连接」，剩下的
+# 还得重新打开。下面四例分别钉住后端要兑现的四件事：并发时每笔都真建链、回包
+# 之间可比新旧、开关回包不扫独有、再拨一次能补齐被外部清掉的链接。
+BURST = ["ag%d" % i for i in range(5)]
+BURST_ADAPTERS = [{"key": k, "label": "A" + k[-1],
+                  "skills_dir": ".%s/skills" % k, "detect_dir": ".%s" % k}
+                 for k in BURST]
+
+
+def burst_fixtures(td, n_skills=20):
+    """5 个假 agent + 一个有点规模的仓库（1 个技能看不出并发问题）。"""
+    store = os.path.normpath(os.path.join(td, "store")).replace(os.sep, "/")
+    for n in range(n_skills):
+        skill_dir(store, "skill-%02d" % n)
+    home = os.path.join(td, "home")
+    for k in BURST:
+        os.makedirs(os.path.join(home, "." + k, "skills"), exist_ok=True)
+    return home, store
+
+
+@case("开关并发：连开 5 个智能体全部真建链，且 seq 最大的那份回包认为全部已连接")
+def _():
+    if sys.platform != "win32":
+        raise AssertionError("仅 Windows（需要 junction）")
+    with tempfile.TemporaryDirectory() as td:
+        home, store = burst_fixtures(td)
+        with sandbox(td, home=home, store=store, adapters=BURST_ADAPTERS):
+            import desktop
+            api = desktop.Api()
+            assert api.bootstrap()["ok"]
+            got = []
+
+            def one(key):
+                r = api.set_agent(key, True)
+                assert r.get("ok"), r
+                conn = sorted(a["key"] for a in r["data"]["agents"]
+                              if a["status"] == "connected")
+                got.append((r["seq"], conn))
+
+            # pywebview 每个桥调用一个线程，这里照这个形状并发（OPS_LOCK 排队）
+            threads = [threading.Thread(target=one, args=(k,)) for k in BURST]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            seqs = [s for s, _ in got]
+            assert len(set(seqs)) == len(BURST), "并发请求拿到了重复序号：%s" % seqs
+            # 前端 isStaleSnapshot 的判据：号大的一份必须不比号小的那份旧
+            prev = set()
+            for _seq, conn in sorted(got):
+                assert prev <= set(conn), (
+                    "按 seq 排序后「已连接」反而变小，旧快照被当成了新的："
+                    "%s → %s" % (sorted(prev), conn))
+                prev = set(conn)
+            assert sorted(max(got)[1]) == sorted(BURST), (
+                "最大号的回包漏报了已连接的 agent：%s" % sorted(max(got)[1]))
+            names = sorted(r["name"] for r in _query("select name from skills"))
+            enabled = {r["key"]: r["enabled"] for r in _query("select key,enabled from tools")}
+            assert all(enabled.values()), "数据库里还有开关没打开：%s" % enabled
+            for k in BURST:
+                present = set(os.listdir(os.path.join(home, "." + k, "skills")))
+                assert set(names) <= present, "%s 目录少链接：%s" % (
+                    k, sorted(set(names) - present))
+
+
+@case("开关回包：不扫独有（uniqueDeferred、不挂「独有扫描中」），且不动独有 meta")
+def _():
+    if sys.platform != "win32":
+        raise AssertionError("仅 Windows（需要 junction）")
+    with tempfile.TemporaryDirectory() as td:
+        home, store = burst_fixtures(td, n_skills=3)
+        with sandbox(td, home=home, store=store, adapters=BURST_ADAPTERS) as (_h, _s):
+            import desktop
+            api = desktop.Api()
+            assert api.bootstrap()["ok"]
+            # 独有行 + 用户写在上面的备注：开关回包没扫独有时，prune 绝不能把它
+            # 当成「已删除」清掉（与刷新第一段同一条防呆）
+            skill_dir(os.path.join(home, ".ag0", "skills"), "local-only")
+            con = skilllocker.db()
+            try:
+                con.execute("insert or replace into skill_meta(scope,key,note,updated_at) "
+                            "values('unique','ag0/local-only','别丢',1)")
+                con.commit()
+            finally:
+                con.close()
+            r = api.set_agent("ag1", True)
+            assert r.get("ok"), r
+            assert r["data"]["unique"] is None, "开关回包还在扫独有（本机要多等 1 秒）"
+            assert r["data"]["uniqueDeferred"] is True, "回包没标「独有沿用上一轮」"
+            assert r["data"]["meta"]["uniquePending"] is False, (
+                "开关后面没有第二段补扫，uniquePending=True 会让「独有扫描中…」永挂")
+            assert r["data"]["skills"], "共有看板仍要照常给出"
+            con = skilllocker.db()
+            try:
+                row = con.execute("select note from skill_meta where scope='unique' "
+                                  "and key='ag0/local-only'").fetchone()
+                assert row and row["note"] == "别丢", "独有行备注被开关那一笔剪掉：%r" % row
+            finally:
+                con.close()
+
+
+@case("开关重开：agent 目录被外部清空后再拨一次会补齐链接（不再是 no-op 死区）")
+def _():
+    if sys.platform != "win32":
+        raise AssertionError("仅 Windows（需要 junction）")
+    with tempfile.TemporaryDirectory() as td:
+        home, store = burst_fixtures(td, n_skills=6)
+        with sandbox(td, home=home, store=store, adapters=BURST_ADAPTERS):
+            import desktop
+            api = desktop.Api()
+            assert api.bootstrap()["ok"]
+            first = api.set_agent("ag2", True)
+            assert first["action"]["changed"] == 6, first["action"]
+            d = os.path.join(home, ".ag2", "skills")
+            names = os.listdir(d)
+            for n in names:
+                os.rmdir(os.path.join(d, n))          # 模拟 agent 自己/人工清过目录
+            assert os.listdir(d) == []
+            again = api.set_agent("ag2", True)        # 用户「重新打开」同一个开关
+            assert again.get("ok"), again
+            assert again["action"]["changed"] == 6, again["action"]
+            assert again["action"]["repaired"] is True, again["action"]
+            assert len(os.listdir(d)) == 6, os.listdir(d)
+            idle = api.set_agent("ag2", True)         # 链接都在位：不报错、也不白建
+            assert idle.get("ok"), idle
+            assert idle["action"]["changed"] == 0, idle["action"]
+            assert len(os.listdir(d)) == 6
+
+
+@case("make_junction：走进程内原生调用，40 条链接 < 500ms（旧实现按条 spawn cmd）")
+def _():
+    if sys.platform != "win32":
+        raise AssertionError("仅 Windows（需要 junction）")
+    with tempfile.TemporaryDirectory() as td:
+        target = os.path.join(td, "target")
+        os.makedirs(target)
+        t0 = time.monotonic()
+        for i in range(40):
+            skilllocker.make_junction(os.path.join(td, "l%02d" % i), target)
+        ms = (time.monotonic() - t0) * 1000
+        # 实测：cmd mklink 每条 37.9ms（40 条 1516ms），_winapi 每条 0.77ms（40 条 31ms）。
+        # 500ms 这条线只有「还在按条 spawn」才会踩到，快路径下余量 16 倍。
+        assert ms < 500, "40 条 junction 用了 %.0fms：退回了逐条 spawn（每条 ~38ms）" % ms
+        for i in range(40):
+            p = os.path.join(td, "l%02d" % i)
+            assert skilllocker.is_reparse(p) and os.path.isdir(p), p
+            assert skilllocker.norm_path(skilllocker.link_target(p)) == \
+                skilllocker.norm_path(target), "%s 指向不对" % p
+
+
+def _query(sql):
+    con = skilllocker.db()
+    try:
+        return list(con.execute(sql))
+    finally:
+        con.close()
 
 
 def main():

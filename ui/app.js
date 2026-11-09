@@ -31,10 +31,13 @@
   var SCAN = '22:16';
 
   function hydrate(data) {
-    // 两段式刷新的第一段不带独有数据（扫描要 1~2 秒，见后端 rescan_shared）：
-    // meta.uniquePending=true 时沿用上一轮的独有行，界面不闪空、计数不跳水，
-    // 第二段 rescan_unique 回来后带完整快照正常覆盖。
-    var pending = !!(data && data.meta && data.meta.uniquePending);
+    // 这一轮快照没带独有技能数据时，界面沿用上一轮的行 —— 不是「没有独有」，
+    // 是「还没扫」。两个来源：两段式刷新的第一段（uniqueDeferred + uniquePending，
+    // 第二段 rescan_unique 回来后带完整快照覆盖），以及开关切换的回包
+    // （只带 uniqueDeferred：切换不增删技能，也没有第二段会来补扫，
+    //  所以「独有扫描中…」的标记必须是 false，否则它在界面上永远不走）。
+    var pending = !!(data && (data.uniqueDeferred ||
+                              (data.meta && data.meta.uniquePending)));
     var prevU = pending ? UNIQUE : null;
     var prevG = pending ? UNIQUE_GROUPS : null;
     var prevC = pending ? CONFLICT : null;
@@ -604,6 +607,33 @@
   };
   var AGENT_STATUS_ORDER = ['connected', 'off', 'missing'];
 
+  /* 在途开关：key -> 目标状态（true=正在连，false=正在撤）。
+     连着拨多个开关时，每笔 set_agent 都会回一份「它自己那一刻」的整套看板；
+     后端 OPS_LOCK 让后面的请求还在排队，它们的 enabled 此刻仍是旧值 —— 前端
+     要是照单全收，用户刚拨开的开关就会被界面自己弹回「已关闭」，看起来像
+     「只连上一个，剩下的还得重新打开」（用户反馈）。
+     所以在途的行一律按用户的目标渲染，并标「连接中 / 关闭中」+ 禁用挡重复工；
+     该笔回包落地（成功或失败）才由数据说话。序号防线见 applyBootstrap。 */
+  var AGENT_PENDING = {};
+
+  function setAgentPending(key, on) {
+    AGENT_PENDING[key] = !!on;
+    renderAgentBoard();
+  }
+
+  function clearAgentPending(key) {
+    if (!Object.prototype.hasOwnProperty.call(AGENT_PENDING, key)) return;
+    delete AGENT_PENDING[key];
+  }
+
+  // 开关只改智能体看板与计数：重绘这一整块（保住列表滚动位置），不碰别的看板
+  function renderAgentBoard() {
+    var listBody = document.getElementById('list-body');
+    var scrollTop = listBody ? listBody.scrollTop : 0;
+    renderAll(false);
+    if (listBody) listBody.scrollTop = scrollTop;
+  }
+
   // 桌面端由 list_boards 输出 agents；原型快照没有时退回 tools 推导（只读）。
   function agentRows() {
     var source = AGENTS.length ? AGENTS : TOOLS.map(function (t) {
@@ -618,8 +648,7 @@
     });
     return source.map(function (a) {
       var st = AGENT_STATUS[a.status] ? a.status : 'missing';
-      var def = AGENT_STATUS[st];
-      return {
+      var row = {
         key: a.key,
         board: 'agents',
         label: a.label || a.key,
@@ -631,21 +660,44 @@
         enabled: !!a.enabled,
         mode: a.mode || 'junction',
         status: st,
-        statusText: def.label,
-        rank: def.rank,
-        dot: def.dot,
+        statusText: AGENT_STATUS[st].label,
+        rank: AGENT_STATUS[st].rank,
+        dot: AGENT_STATUS[st].dot,
         linked: a.linked || 0,
         conflicts: a.conflicts || 0,
         skillsTotal: a.skillsTotal == null ? SKILLS.length : a.skillsTotal,
         // agent 自己安装/读取的外部目录（如 ~/.agents/skills），本工具只展示不管理
-        external: a.external || []
+        external: a.external || [],
+        pending: false
       };
+      // 在途的那一行按用户目标渲染：状态取目标值（这样筛选 / 排序 / 计数都不
+      // 会在请求飞行中把行抖走），文案改「连接中 / 关闭中」，链接数还是磁盘
+      // 上的真数 —— 不猜。未安装的开关本来点不动，不参与在途。
+      var p = AGENT_PENDING[row.key];
+      if (p !== undefined && row.detected) {
+        row.pending = true;
+        row.enabled = p;
+        row.status = p ? 'connected' : 'off';
+        row.rank = AGENT_STATUS[row.status].rank;
+        row.dot = AGENT_STATUS[row.status].dot;
+        row.statusText = p ? '连接中…' : '关闭中…';
+      }
+      return row;
     });
   }
 
   function agentCounts(rows) {
-    var c = { all: rows.length, connected: 0, off: 0, missing: 0 };
-    rows.forEach(function (r) { c[r.status] = (c[r.status] || 0) + 1; });
+    var c = { all: rows.length, connected: 0, off: 0, missing: 0,
+              connecting: 0, disconnecting: 0 };
+    rows.forEach(function (r) {
+      c[r.status] = (c[r.status] || 0) + 1;
+      // 在途的行按目标状态计入（这样状态筛选的计数与点进去的结果一致），
+      // 另外单独给「连接中 / 关闭中」留两个数：汇总文案要说得出它们在途
+      if (r.pending) {
+        if (r.status === 'connected') c.connecting++;
+        else if (r.status === 'off') c.disconnecting++;
+      }
+    });
     return c;
   }
 
@@ -870,7 +922,8 @@
     document.getElementById('tab-unique-num').textContent = uniqueLogical;
     document.getElementById('tab-agents-num').textContent = agentStats.all;
     document.getElementById('tab-shared-em').textContent = FOLDERS.length + ' 个分类文件夹';
-    document.getElementById('tab-agents-em').textContent = agentStats.connected + ' 已连接';
+    document.getElementById('tab-agents-em').textContent = agentStats.connected + ' 已连接' +
+      (agentStats.connecting ? ' · ' + agentStats.connecting + ' 连接中' : '');
     var overridden = UNIQUE.filter(function (u) { return u.sameName; }).length;
     // 与共有 tab 的「N 个分类文件夹」同款口径：独有 tab 报 agent 文件夹数 + 实例数
     document.getElementById('tab-unique-em').textContent =
@@ -990,8 +1043,11 @@
       document.getElementById('page-title').textContent = '智能体';
       document.getElementById('page-sub').textContent =
         '本机检测到 ' + (agentStats.connected + agentStats.off) + ' 个 agent · ' +
-        agentStats.connected + ' 已连接、' + agentStats.off + ' 已关闭 · 另有 ' +
-        agentStats.missing + ' 个未安装';
+        agentStats.connected + ' 已连接' +
+        (agentStats.connecting ? '（' + agentStats.connecting + ' 连接中）' : '') + '、' +
+        agentStats.off + ' 已关闭' +
+        (agentStats.disconnecting ? '（' + agentStats.disconnecting + ' 关闭中）' : '') +
+        ' · 另有 ' + agentStats.missing + ' 个未安装';
     }
 
     // 侧栏导航区标题：文案与新建按钮随看板切换（独有=Agent 文件夹，不可新建）
@@ -1853,6 +1909,14 @@
       return '<label class="switch is-disabled" title="未安装，无法开启">' +
         '<input type="checkbox" disabled aria-label="分发开关"><i></i></label>';
     }
+    // 在途：保持用户拨到的那一头，禁用挡住重复提交，视觉给「进行中」的呼吸态。
+    // data-agent-pending 是界面自己的状态标记（回归用例按它断言），不参与数据。
+    if (a.pending) {
+      return '<label class="switch is-pending" data-agent-switch="' + esc(a.key) + '"' +
+        ' data-agent-pending="1" title="' +
+        (a.enabled ? '正在按中央仓库建立链接…' : '正在撤下本工具建立的链接…') + '">' +
+        '<input type="checkbox"' + (a.enabled ? ' checked' : '') + ' disabled aria-label="分发开关"><i></i></label>';
+    }
     return '<label class="switch" data-agent-switch="' + esc(a.key) + '" title="' +
       (a.enabled ? '关闭后移除本工具建立的链接' : '开启后按中央仓库建立链接') + '">' +
       '<input type="checkbox"' + (a.enabled ? ' checked' : '') + ' aria-label="分发开关"><i></i></label>';
@@ -1884,8 +1948,9 @@
         '<div class="row-main"><div class="row-title"><span class="row-name">' +
         esc(r.label) + '</span>' + extHtml + '</div>' +
         '<span class="row-label">' + esc(r.key) + '</span></div>' +
-        '<div><span class="agent-state ' + r.status + '"><i></i>' + r.statusText +
-        (r.status === 'connected' ? ' ' + r.linked : '') + '</span></div>' +
+        '<div><span class="agent-state ' + r.status + (r.pending ? ' is-pending' : '') +
+        '"><i></i>' + r.statusText +
+        (r.status === 'connected' && !r.pending ? ' ' + r.linked : '') + '</span></div>' +
         '<div class="row-links" title="' + esc(r.dir) + '">' + esc(dirText) + '</div>' +
         '<div class="row-switch">' + agentSwitchHtml(r) + '</div>' +
         '<span class="row-go">' + icon('chevron-right') + '</span>' +
@@ -2248,10 +2313,11 @@
     }).join('');
 
     body.innerHTML =
-      '<div class="agent-hero ' + a.status + '">' +
+      '<div class="agent-hero ' + a.status + (a.pending ? ' is-pending' : '') + '">' +
         '<span class="agent-hero-mark">' + esc(a.mark) + '</span>' +
         '<div class="agent-hero-main"><b>' + esc(a.label) + '</b>' +
-          '<span class="agent-state ' + a.status + '"><i></i>' + a.statusText + '</span></div>' +
+          '<span class="agent-state ' + a.status + (a.pending ? ' is-pending' : '') +
+          '"><i></i>' + a.statusText + '</span></div>' +
         agentSwitchHtml(a) +
       '</div>' +
       '<div class="agent-hint">' + esc(hint) + '</div>' +
@@ -2941,6 +3007,7 @@
     }
 
     var showResult = function (res) {
+      clearAgentPending(key);
       // 水合前的选中意向：applyBootstrap 会校验该行是否仍存在，失效才回落
       state.selected = key;
       applyBootstrap(res);
@@ -2950,15 +3017,30 @@
           '撤下 ' + (act.removed || 0) + ' 处链接' +
           (act.kept && act.kept.length ? '，保留 ' + act.kept.length + ' 个冲突副本' : ''));
       } else {
-        toast('ok', '已连接 ' + a.label,
-          '建立/刷新 ' + (act.changed || 0) + ' 处链接' +
+        // 后端每次都重跑同一条 do_sync：本来已连着的是「补齐 / 已在位」，不是没干活
+        var n = act.changed || 0;
+        var detail = act.repaired
+          ? (n ? '补齐 ' + n + ' 处缺失链接' : '链接本来就在位，无需重建')
+          : '建立/刷新 ' + n + ' 处链接';
+        toast('ok', '已连接 ' + a.label, detail +
           (act.conflicts && act.conflicts.length ? '，' + act.conflicts.length + ' 处冲突未动' : ''));
       }
       renderInspector();
     };
     var fail = function (err) {
+      // 先让界面落回后端真值（该行不再挂在「连接中」），再报失败
+      clearAgentPending(key);
+      renderAgentBoard();
       toast('bad', (on ? '连接失败' : '关闭失败'), String(err && err.message || err));
       abort();
+    };
+    // 发请求：进入在途 → 立刻发（进度条与请求并行，不再把 650ms 动画压在前面），
+    // 回包先收掉在途标记再由数据落定。连着拨多个开关时每个请求各自在途、互不覆盖。
+    var send = function () {
+      setAgentPending(key, on);
+      var stop = startProgress(500);
+      SKB.setAgent(key, on).then(function (res) { stop(); showResult(res); },
+                                  function (err) { stop(); fail(err); });
     };
 
     if (!on) {
@@ -2969,16 +3051,12 @@
         '关闭分发',
         function () {
           closeModal();
-          runProgress(500, function () {
-            SKB.setAgent(key, false).then(showResult).catch(fail);
-          });
+          send();
         },
         { onCancel: abort });
       return;
     }
-    runProgress(650, function () {
-      SKB.setAgent(key, true).then(showResult).catch(fail);
-    });
+    send();
   }
 
   function requestDelete() {
@@ -5071,11 +5149,11 @@
       var en = enabledTools(d && d.tools);
       tgt = {
         n: meta.sharedCount != null ? meta.sharedCount : skills.length,
-        // 两段式刷新的第一段没扫独有：这时独有计数是「还不知道」，不是 0。
-        // 启动动画还在跑时若按 0 收，动画里的独有数字会被一次刷新刷没；
+        // 两段式刷新的第一段 / 开关切换的回包都没扫独有：这时独有计数是「还不知道」，
+        // 不是 0。启动动画还在跑时若按 0 收，动画里的独有数字会被一次刷新刷没；
         // 保留上一轮目标值，第二段回来后自然更正。
         u: meta.uniqueCount != null ? meta.uniqueCount
-          : (meta.uniquePending ? tgt.u : 0),
+          : ((meta.uniquePending || d.uniqueDeferred) ? tgt.u : 0),
         m: meta.agentCount != null ? meta.agentCount : en.length,
         f: ((d && d.folders) || []).length,
         py: meta.python || '',
@@ -5374,8 +5452,29 @@
     uiLog('boot', { mode: MODE, vw: window.innerWidth, vh: window.innerHeight });
   }
 
+  /* 快照序号防线。后端每份整套看板都在 OPS_LOCK 内、算完之后发号
+     （见 kit/desktop.py 的 _boards_payload），所以号大 = 描述的世界新。
+     「谁后到谁生效」是错的：连着打开多个智能体时，先出发那笔的回包完全可能最后
+     才落地，而它只认识自己那一刻已经 enabled 的那一个 —— 于是已经连上的其余几个
+     被一份旧快照整体刷回「已关闭」（用户报的「只剩一个连上，剩下的还得重新打开」）。
+     旧快照只丢数据、不丢这次操作的结果：action 照常用、在途标记照收，界面照常重画。
+     原型 / 内置快照没有 seq，不参与这套判断。 */
+  var LAST_SNAPSHOT_SEQ = 0;
+
+  function isStaleSnapshot(res) {
+    var seq = (res && typeof res.seq === 'number') ? res.seq : 0;
+    if (!seq) return false;
+    if (seq < LAST_SNAPSHOT_SEQ) return true;
+    LAST_SNAPSHOT_SEQ = seq;
+    return false;
+  }
+
   function applyBootstrap(res) {
     if (MODE === 'error') return; // 启动错误页：任何刷新入口都不再往空界面上渲染
+    if (isStaleSnapshot(res)) {   // 晚到的旧快照：数据保持最新那份，只重画一次
+      renderAll(false);
+      return;
+    }
     hydrate(res.data);
     setMetaMap(res.meta);
     // config.json 损坏退回默认配置：与 scanDegraded 同一套显性化口径，
